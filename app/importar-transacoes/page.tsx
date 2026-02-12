@@ -1,6 +1,8 @@
 "use client"
 
-import { useState, useRef, useCallback, type DragEvent, type ChangeEvent } from "react"
+import { useState, useRef, useCallback, useMemo, type DragEvent, type ChangeEvent } from "react"
+import useSWR from "swr"
+import { createClient } from "@/lib/supabase/client"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
 import { parseOFX, type OFXTransaction, type OFXData } from "@/lib/ofx-parser"
@@ -20,6 +22,7 @@ import {
   X,
   Landmark,
   RotateCcw,
+  Loader2,
 } from "lucide-react"
 import {
   Dialog,
@@ -32,19 +35,27 @@ import {
 
 // ---------- Types ----------
 
+interface CategoriaRow { id: number; nome: string; tipo: string }
+interface SubcategoriaRow { id: number; nome: string; categoria_id: number }
+interface SubcategoriaFilhoRow { id: number; nome: string; subcategoria_id: number }
+
 interface MappingRule {
   id: number
-  keyword: string // keyword to match in MEMO
-  categoria: string
-  subcategoria: string
-  subcategoriaFilho: string
-  clienteFornecedor: string
+  keyword: string
+  categoria_id: number | null
+  subcategoria_id: number | null
+  subcategoria_filho_id: number | null
+  cliente_fornecedor: string
+  // Joined names for display
+  categoria_nome?: string
+  subcategoria_nome?: string
+  filho_nome?: string
 }
 
 interface TransactionRow extends OFXTransaction {
-  categoria: string
-  subcategoria: string
-  subcategoriaFilho: string
+  categoria_id: number | null
+  subcategoria_id: number | null
+  subcategoria_filho_id: number | null
   clienteFornecedor: string
   selected: boolean
 }
@@ -59,89 +70,54 @@ interface ImportHistoryItem {
   banco: string
 }
 
-// ---------- Data ----------
+// ---------- Supabase ----------
 
-const categoriasData: Record<string, { tipo: "Receita" | "Despesa"; subcategorias: Record<string, string[]> }> = {
-  "Moradia": { tipo: "Despesa", subcategorias: {
-    "Aluguel": ["Residencial", "Comercial"],
-    "Condominio": ["Taxa Ordinaria", "Taxa Extra"],
-    "Conta de Energia": [],
-    "Conta de Agua": [],
-    "Internet": [],
-  }},
-  "Transporte": { tipo: "Despesa", subcategorias: {
-    "Combustivel": ["Gasolina", "Etanol"],
-    "Estacionamento": [],
-    "Manutencao Veiculo": ["Revisao", "Pneus", "Funilaria"],
-    "Transporte Publico": [],
-  }},
-  "Alimentacao": { tipo: "Despesa", subcategorias: {
-    "Supermercado": [],
-    "Restaurante": ["Almoco", "Jantar"],
-    "Delivery": [],
-    "Padaria": [],
-    "Cantina": [],
-    "Conveniencia": [],
-  }},
-  "Saude": { tipo: "Despesa", subcategorias: {
-    "Plano de Saude": [],
-    "Farmacia": [],
-    "Consultas": ["Clinico Geral", "Especialista"],
-  }},
-  "Lazer": { tipo: "Despesa", subcategorias: {
-    "Streaming": [],
-    "Cinema": [],
-    "Viagens": ["Nacional", "Internacional"],
-    "Esportes": [],
-  }},
-  "Servicos": { tipo: "Despesa", subcategorias: {
-    "Pagamentos Digitais": [],
-    "Assinaturas": [],
-    "Taxas": [],
-  }},
-  "Salario": { tipo: "Receita", subcategorias: {
-    "Salario Fixo": [],
-    "13o Salario": [],
-    "Ferias": [],
-    "Bonus": ["Bonus Anual", "PLR"],
-    "Horas Extras": [],
-  }},
-  "Freelancer": { tipo: "Receita", subcategorias: {
-    "Projetos Web": ["Frontend", "Backend"],
-    "Consultoria": [],
-    "Design": [],
-  }},
-  "Investimentos": { tipo: "Receita", subcategorias: {
-    "Dividendos": [],
-    "Renda Fixa": ["CDB", "Tesouro Direto"],
-    "Fundos Imobiliarios": [],
-  }},
-  "Transferencias": { tipo: "Receita", subcategorias: {
-    "PIX Recebido": [],
-    "TED Recebido": [],
-    "DOC Recebido": [],
-  }},
-  "Outros": { tipo: "Despesa", subcategorias: {
-    "Diversos": [],
-    "Sem Categoria": [],
-  }},
+const supabase = createClient()
+
+interface CategoriaHierarchy {
+  categorias: CategoriaRow[]
+  subcategorias: SubcategoriaRow[]
+  filhos: SubcategoriaFilhoRow[]
 }
 
-const allCategorias = Object.keys(categoriasData)
+async function fetchHierarchy(): Promise<CategoriaHierarchy> {
+  const [catRes, subRes, filhoRes] = await Promise.all([
+    supabase.from("categorias").select("id, nome, tipo").order("nome"),
+    supabase.from("subcategorias").select("id, nome, categoria_id").order("nome"),
+    supabase.from("subcategorias_filhos").select("id, nome, subcategoria_id").order("nome"),
+  ])
+  return {
+    categorias: catRes.data || [],
+    subcategorias: subRes.data || [],
+    filhos: filhoRes.data || [],
+  }
+}
 
-const initialRules: MappingRule[] = [
-  { id: 1, keyword: "CANTINA", categoria: "Alimentacao", subcategoria: "Cantina", subcategoriaFilho: "", clienteFornecedor: "Cantina" },
-  { id: 2, keyword: "SUPERMERCADO", categoria: "Alimentacao", subcategoria: "Supermercado", subcategoriaFilho: "", clienteFornecedor: "" },
-  { id: 3, keyword: "CONVENIENCIA", categoria: "Alimentacao", subcategoria: "Conveniencia", subcategoriaFilho: "", clienteFornecedor: "" },
-  { id: 4, keyword: "SYNC PAY", categoria: "Servicos", subcategoria: "Pagamentos Digitais", subcategoriaFilho: "", clienteFornecedor: "Sync Pay" },
-  { id: 5, keyword: "PIX", categoria: "Transferencias", subcategoria: "PIX Recebido", subcategoriaFilho: "", clienteFornecedor: "" },
-]
+async function fetchRules(): Promise<MappingRule[]> {
+  const { data, error } = await supabase
+    .from("mapping_rules")
+    .select(`
+      *,
+      categorias(nome),
+      subcategorias(nome),
+      subcategorias_filhos(nome)
+    `)
+    .order("keyword")
 
-const initialHistory: ImportHistoryItem[] = [
-  { id: 1, arquivo: "extrato_nubank_fev2026.csv", data: "09/02/2026", registros: 23, status: "concluido", conta: "98765-4", banco: "Nubank" },
-  { id: 2, arquivo: "extrato_bb_jan2026.csv", data: "01/02/2026", registros: 45, status: "concluido", conta: "56789-0", banco: "Banco do Brasil" },
-  { id: 3, arquivo: "extrato_itau_jan2026.ofx", data: "01/02/2026", registros: 32, status: "concluido", conta: "12345-6", banco: "Itau" },
-]
+  if (error) throw error
+
+  return (data || []).map((row: Record<string, unknown>) => ({
+    id: row.id as number,
+    keyword: row.keyword as string,
+    categoria_id: row.categoria_id as number | null,
+    subcategoria_id: row.subcategoria_id as number | null,
+    subcategoria_filho_id: row.subcategoria_filho_id as number | null,
+    cliente_fornecedor: row.cliente_fornecedor as string,
+    categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
+    subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
+    filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
+  }))
+}
 
 // ---------- Helpers ----------
 
@@ -150,15 +126,28 @@ function formatCurrency(value: number) {
 }
 
 function extractClienteFornecedor(memo: string): string {
-  // Try to extract name from PIX: "REM: Name Date" or "DES: Name Date"
   const remMatch = memo.match(/REM:\s*([A-Za-zÀ-ú\s]+?)(?:\s+\d{2}\/\d{2}|$)/i)
   if (remMatch) return remMatch[1].trim()
   const desMatch = memo.match(/DES:\s*([A-Za-zÀ-ú\s]+?)(?:\s+\d{2}\/\d{2}|$)/i)
   if (desMatch) return desMatch[1].trim()
-  // For "COMPRA" type, extract store name
   const compraMatch = memo.match(/(?:COMPRA\s+\w+\s+\w+\s+\w+\s+)(.*)/i)
   if (compraMatch) return compraMatch[1].trim()
   return ""
+}
+
+function extractKeywordsFromMemo(memo: string): string[] {
+  const keywords: string[] = []
+  const compraMatch = memo.match(/(?:COMPRA\s+\w+\s+\w+\s+\w+\s+)([\w*\s]+)/i)
+  if (compraMatch) {
+    const store = compraMatch[1].trim()
+    if (store.length >= 3) keywords.push(store.split(/\s/)[0])
+  }
+  const desMatch = memo.match(/DES:\s*([\w\s*]+?)(?:\s+\d{2}\/\d{2}|$)/i)
+  if (desMatch) {
+    const name = desMatch[1].trim().split(/\s/)[0]
+    if (name.length >= 3) keywords.push(name)
+  }
+  return keywords
 }
 
 // ---------- Dropdown Component ----------
@@ -171,7 +160,7 @@ function InlineDropdown({
   width = "w-40",
 }: {
   value: string
-  options: string[]
+  options: { label: string; value: string }[]
   onChange: (val: string) => void
   placeholder: string
   width?: string
@@ -180,7 +169,8 @@ function InlineDropdown({
   const [search, setSearch] = useState("")
   const ref = useRef<HTMLDivElement>(null)
 
-  const filtered = options.filter((o) => o.toLowerCase().includes(search.toLowerCase()))
+  const filtered = options.filter((o) => o.label.toLowerCase().includes(search.toLowerCase()))
+  const displayLabel = options.find((o) => o.value === value)?.label || ""
 
   return (
     <div className={`relative ${width}`} ref={ref}>
@@ -191,7 +181,7 @@ function InlineDropdown({
           value ? "border-border text-card-foreground" : "border-dashed border-muted-foreground/40 text-muted-foreground"
         } hover:border-primary/50 bg-card`}
       >
-        <span className="truncate">{value || placeholder}</span>
+        <span className="truncate">{displayLabel || placeholder}</span>
         <ChevronDown className="ml-1 h-3 w-3 shrink-0" />
       </button>
       {open && (
@@ -221,15 +211,15 @@ function InlineDropdown({
               )}
               {filtered.map((opt) => (
                 <button
-                  key={opt}
+                  key={opt.value}
                   type="button"
-                  onClick={() => { onChange(opt); setOpen(false) }}
+                  onClick={() => { onChange(opt.value); setOpen(false) }}
                   className={`flex w-full items-center gap-2 px-3 py-1.5 text-xs transition-colors hover:bg-muted ${
-                    value === opt ? "font-medium text-primary" : "text-card-foreground"
+                    value === opt.value ? "font-medium text-primary" : "text-card-foreground"
                   }`}
                 >
-                  {value === opt && <Check className="h-3 w-3 text-primary" />}
-                  {opt}
+                  {value === opt.value && <Check className="h-3 w-3 text-primary" />}
+                  {opt.label}
                 </button>
               ))}
               {filtered.length === 0 && (
@@ -246,17 +236,57 @@ function InlineDropdown({
 // ---------- Main Page ----------
 
 export default function ImportarTransacoesPage() {
+  const { data: hierarchy } = useSWR("hierarchy_importar", fetchHierarchy)
+  const { data: rules, mutate: mutateRules } = useSWR("mapping_rules", fetchRules)
+
   // State
   const [step, setStep] = useState<"upload" | "review" | "done">("upload")
   const [ofxData, setOfxData] = useState<OFXData | null>(null)
   const [transactions, setTransactions] = useState<TransactionRow[]>([])
-  const [rules, setRules] = useState<MappingRule[]>(initialRules)
-  const [history, setHistory] = useState<ImportHistoryItem[]>(initialHistory)
+  const [history, setHistory] = useState<ImportHistoryItem[]>([])
   const [isDragging, setIsDragging] = useState(false)
   const [fileName, setFileName] = useState("")
   const [rulesDialogOpen, setRulesDialogOpen] = useState(false)
   const [selectAll, setSelectAll] = useState(true)
+  const [saving, setSaving] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const allRules = rules || []
+
+  // Category options for dropdowns
+  const catOptions = useMemo(
+    () => (hierarchy?.categorias || []).map((c) => ({ label: c.nome, value: c.id.toString() })),
+    [hierarchy]
+  )
+
+  const getSubcatOptions = useCallback(
+    (catId: string) => (hierarchy?.subcategorias || []).filter((s) => s.categoria_id === Number(catId)).map((s) => ({ label: s.nome, value: s.id.toString() })),
+    [hierarchy]
+  )
+
+  const getFilhoOptions = useCallback(
+    (subId: string) => (hierarchy?.filhos || []).filter((f) => f.subcategoria_id === Number(subId)).map((f) => ({ label: f.nome, value: f.id.toString() })),
+    [hierarchy]
+  )
+
+  // Lookup maps
+  const catNameMap = useMemo(() => {
+    const m: Record<number, string> = {}
+    for (const c of hierarchy?.categorias || []) m[c.id] = c.nome
+    return m
+  }, [hierarchy])
+
+  const subNameMap = useMemo(() => {
+    const m: Record<number, string> = {}
+    for (const s of hierarchy?.subcategorias || []) m[s.id] = s.nome
+    return m
+  }, [hierarchy])
+
+  const filhoNameMap = useMemo(() => {
+    const m: Record<number, string> = {}
+    for (const f of hierarchy?.filhos || []) m[f.id] = f.nome
+    return m
+  }, [hierarchy])
 
   // Computed
   const totalImportados = history.filter((h) => h.status === "concluido").reduce((a, h) => a + h.registros, 0)
@@ -266,21 +296,21 @@ export default function ImportarTransacoesPage() {
 
   // Auto-match a transaction against saved rules
   const applyRules = useCallback(
-    (tx: OFXTransaction): { categoria: string; subcategoria: string; subcategoriaFilho: string; clienteFornecedor: string } => {
+    (tx: OFXTransaction): { categoria_id: number | null; subcategoria_id: number | null; subcategoria_filho_id: number | null; clienteFornecedor: string } => {
       const memoUpper = tx.memo.toUpperCase()
-      for (const rule of rules) {
+      for (const rule of allRules) {
         if (memoUpper.includes(rule.keyword.toUpperCase())) {
           return {
-            categoria: rule.categoria,
-            subcategoria: rule.subcategoria,
-            subcategoriaFilho: rule.subcategoriaFilho,
-            clienteFornecedor: rule.clienteFornecedor || extractClienteFornecedor(tx.memo),
+            categoria_id: rule.categoria_id,
+            subcategoria_id: rule.subcategoria_id,
+            subcategoria_filho_id: rule.subcategoria_filho_id,
+            clienteFornecedor: rule.cliente_fornecedor || extractClienteFornecedor(tx.memo),
           }
         }
       }
-      return { categoria: "", subcategoria: "", subcategoriaFilho: "", clienteFornecedor: extractClienteFornecedor(tx.memo) }
+      return { categoria_id: null, subcategoria_id: null, subcategoria_filho_id: null, clienteFornecedor: extractClienteFornecedor(tx.memo) }
     },
-    [rules]
+    [allRules]
   )
 
   // Process file
@@ -296,16 +326,15 @@ export default function ImportarTransacoesPage() {
       const parsed = parseOFX(content)
       setOfxData(parsed)
 
-      // Map transactions with auto-matching
       const rows: TransactionRow[] = parsed.transactions
-        .filter((tx) => tx.amount !== 0) // ignore zero-value
+        .filter((tx) => tx.amount !== 0)
         .map((tx) => {
           const matched = applyRules(tx)
           return {
             ...tx,
-            categoria: matched.categoria,
-            subcategoria: matched.subcategoria,
-            subcategoriaFilho: matched.subcategoriaFilho,
+            categoria_id: matched.categoria_id,
+            subcategoria_id: matched.subcategoria_id,
+            subcategoria_filho_id: matched.subcategoria_filho_id,
             clienteFornecedor: matched.clienteFornecedor,
             selected: true,
           }
@@ -318,42 +347,28 @@ export default function ImportarTransacoesPage() {
   }
 
   // Drag events
-  function handleDragOver(e: DragEvent) {
-    e.preventDefault()
-    setIsDragging(true)
-  }
-  function handleDragLeave() {
-    setIsDragging(false)
-  }
-  function handleDrop(e: DragEvent) {
-    e.preventDefault()
-    setIsDragging(false)
-    const file = e.dataTransfer.files?.[0]
-    if (file) processFile(file)
-  }
-  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0]
-    if (file) processFile(file)
-  }
+  function handleDragOver(e: DragEvent) { e.preventDefault(); setIsDragging(true) }
+  function handleDragLeave() { setIsDragging(false) }
+  function handleDrop(e: DragEvent) { e.preventDefault(); setIsDragging(false); const file = e.dataTransfer.files?.[0]; if (file) processFile(file) }
+  function handleFileChange(e: ChangeEvent<HTMLInputElement>) { const file = e.target.files?.[0]; if (file) processFile(file) }
 
   // Update transaction fields
-  function updateTx(idx: number, field: keyof TransactionRow, value: string | boolean) {
+  function updateTx(idx: number, field: keyof TransactionRow, value: string | boolean | number | null) {
     setTransactions((prev) => {
       const next = [...prev]
       const updated = { ...next[idx], [field]: value }
-      // When changing categoria, reset subcategoria and filho
-      if (field === "categoria") {
-        const subs = Object.keys(categoriasData[value as string]?.subcategorias || {})
-        if (!subs.includes(updated.subcategoria)) {
-          updated.subcategoria = ""
-          updated.subcategoriaFilho = ""
+      if (field === "categoria_id") {
+        // Reset children when parent changes
+        const subs = (hierarchy?.subcategorias || []).filter((s) => s.categoria_id === Number(value))
+        if (!subs.find((s) => s.id === updated.subcategoria_id)) {
+          updated.subcategoria_id = null
+          updated.subcategoria_filho_id = null
         }
       }
-      // When changing subcategoria, reset filho if it doesn't match
-      if (field === "subcategoria") {
-        const filhos = updated.categoria ? (categoriasData[updated.categoria]?.subcategorias?.[value as string] || []) : []
-        if (!filhos.includes(updated.subcategoriaFilho)) {
-          updated.subcategoriaFilho = ""
+      if (field === "subcategoria_id") {
+        const filhos = (hierarchy?.filhos || []).filter((f) => f.subcategoria_id === Number(value))
+        if (!filhos.find((f) => f.id === updated.subcategoria_filho_id)) {
+          updated.subcategoria_filho_id = null
         }
       }
       next[idx] = updated
@@ -367,69 +382,91 @@ export default function ImportarTransacoesPage() {
     setTransactions((prev) => prev.map((t) => ({ ...t, selected: newVal })))
   }
 
-  // Save rules from current mapping
-  function saveNewRules() {
-    const newRules: MappingRule[] = [...rules]
+  // Save rules from current mapping to Supabase
+  async function saveNewRules() {
+    const existingKeywords = new Set(allRules.map((r) => r.keyword.toUpperCase()))
+    const newRuleInserts: { keyword: string; categoria_id: number | null; subcategoria_id: number | null; subcategoria_filho_id: number | null; cliente_fornecedor: string }[] = []
+
     for (const tx of transactions) {
-      if (tx.categoria && tx.memo) {
-        // Extract a meaningful keyword from the memo
+      if (tx.categoria_id && tx.memo) {
         const keywords = extractKeywordsFromMemo(tx.memo)
         for (const kw of keywords) {
-          // Don't duplicate
-          const exists = newRules.some((r) => r.keyword.toUpperCase() === kw.toUpperCase())
-          if (!exists && kw.length >= 3) {
-            newRules.push({
-              id: Date.now() + Math.random(),
+          if (!existingKeywords.has(kw.toUpperCase()) && kw.length >= 3) {
+            existingKeywords.add(kw.toUpperCase())
+            newRuleInserts.push({
               keyword: kw,
-              categoria: tx.categoria,
-              subcategoria: tx.subcategoria,
-              subcategoriaFilho: tx.subcategoriaFilho,
-              clienteFornecedor: tx.clienteFornecedor,
+              categoria_id: tx.categoria_id,
+              subcategoria_id: tx.subcategoria_id,
+              subcategoria_filho_id: tx.subcategoria_filho_id,
+              cliente_fornecedor: tx.clienteFornecedor,
             })
           }
         }
       }
     }
-    setRules(newRules)
+
+    if (newRuleInserts.length > 0) {
+      await supabase.from("mapping_rules").insert(newRuleInserts)
+      await mutateRules()
+    }
   }
 
-  function extractKeywordsFromMemo(memo: string): string[] {
-    // Extract store name or significant identifier from MEMO
-    const keywords: string[] = []
-    // For COMPRA type: "COMPRA ELO DEBITO VISTA CANTINA" -> "CANTINA"
-    const compraMatch = memo.match(/(?:COMPRA\s+\w+\s+\w+\s+\w+\s+)([\w*\s]+)/i)
-    if (compraMatch) {
-      const store = compraMatch[1].trim()
-      if (store.length >= 3) keywords.push(store.split(/\s/)[0])
+  // Confirm import - save transactions to contas_pagar/contas_receber
+  async function confirmImport() {
+    setSaving(true)
+    try {
+      await saveNewRules()
+
+      const selected = transactions.filter((t) => t.selected)
+      const despesas = selected.filter((t) => t.amount < 0)
+      const receitas = selected.filter((t) => t.amount >= 0)
+
+      if (despesas.length > 0) {
+        await supabase.from("contas_pagar").insert(
+          despesas.map((tx) => ({
+            descricao: tx.memo,
+            valor: Math.abs(tx.amount),
+            vencimento: tx.date.split("/").reverse().join("-"),
+            status: "pago",
+            fornecedor: tx.clienteFornecedor,
+            categoria_id: tx.categoria_id,
+            subcategoria_id: tx.subcategoria_id,
+            subcategoria_filho_id: tx.subcategoria_filho_id,
+          }))
+        )
+      }
+
+      if (receitas.length > 0) {
+        await supabase.from("contas_receber").insert(
+          receitas.map((tx) => ({
+            descricao: tx.memo,
+            valor: tx.amount,
+            vencimento: tx.date.split("/").reverse().join("-"),
+            status: "recebido",
+            cliente: tx.clienteFornecedor,
+            categoria_id: tx.categoria_id,
+            subcategoria_id: tx.subcategoria_id,
+            subcategoria_filho_id: tx.subcategoria_filho_id,
+          }))
+        )
+      }
+
+      const newEntry: ImportHistoryItem = {
+        id: Date.now(),
+        arquivo: fileName,
+        data: new Date().toLocaleDateString("pt-BR"),
+        registros: selected.length,
+        status: "concluido",
+        conta: ofxData?.accountId || "",
+        banco: ofxData?.bankName || "",
+      }
+      setHistory((prev) => [newEntry, ...prev])
+      setStep("done")
+    } finally {
+      setSaving(false)
     }
-    // For PIX type: DES: NAME -> NAME
-    const desMatch = memo.match(/DES:\s*([\w\s*]+?)(?:\s+\d{2}\/\d{2}|$)/i)
-    if (desMatch) {
-      const name = desMatch[1].trim().split(/\s/)[0]
-      if (name.length >= 3) keywords.push(name)
-    }
-    return keywords
   }
 
-  // Confirm import
-  function confirmImport() {
-    saveNewRules()
-    const selected = transactions.filter((t) => t.selected)
-    // Add to history
-    const newEntry: ImportHistoryItem = {
-      id: Date.now(),
-      arquivo: fileName,
-      data: new Date().toLocaleDateString("pt-BR"),
-      registros: selected.length,
-      status: "concluido",
-      conta: ofxData?.accountId || "",
-      banco: ofxData?.bankName || "",
-    }
-    setHistory((prev) => [newEntry, ...prev])
-    setStep("done")
-  }
-
-  // Reset
   function resetImport() {
     setStep("upload")
     setOfxData(null)
@@ -438,21 +475,20 @@ export default function ImportarTransacoesPage() {
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
-  // Delete rule
-  function deleteRule(id: number) {
-    setRules((prev) => prev.filter((r) => r.id !== id))
+  async function deleteRule(id: number) {
+    await supabase.from("mapping_rules").delete().eq("id", id)
+    await mutateRules()
   }
 
-  // Apply all rules in bulk
   function reapplyRules() {
     setTransactions((prev) =>
       prev.map((tx) => {
         const matched = applyRules(tx)
         return {
           ...tx,
-          categoria: matched.categoria || tx.categoria,
-          subcategoria: matched.subcategoria || tx.subcategoria,
-          subcategoriaFilho: matched.subcategoriaFilho || tx.subcategoriaFilho,
+          categoria_id: matched.categoria_id || tx.categoria_id,
+          subcategoria_id: matched.subcategoria_id || tx.subcategoria_id,
+          subcategoria_filho_id: matched.subcategoria_filho_id || tx.subcategoria_filho_id,
           clienteFornecedor: matched.clienteFornecedor || tx.clienteFornecedor,
         }
       })
@@ -489,7 +525,7 @@ export default function ImportarTransacoesPage() {
               <div className="flex items-center gap-4 rounded-xl border border-border bg-card p-5 shadow-sm">
                 <div className="flex-1">
                   <p className="text-sm text-muted-foreground">Regras Salvas</p>
-                  <p className="mt-1 text-xl font-bold text-card-foreground">{rules.length}</p>
+                  <p className="mt-1 text-xl font-bold text-card-foreground">{allRules.length}</p>
                 </div>
                 <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[hsl(38,92%,50%)]">
                   <Zap className="h-6 w-6 text-white" />
@@ -564,29 +600,34 @@ export default function ImportarTransacoesPage() {
                     </button>
                   </div>
                   <div className="divide-y divide-border">
-                    {rules.slice(0, 5).map((rule) => (
+                    {allRules.slice(0, 5).map((rule) => (
                       <div key={rule.id} className="flex items-center gap-4 px-5 py-3">
                         <span className="rounded-md bg-muted px-2.5 py-1 text-xs font-mono font-medium text-foreground">{rule.keyword}</span>
                         <ArrowLeftRight className="h-3 w-3 text-muted-foreground shrink-0" />
                         <span className="text-sm text-card-foreground">
-                          {[rule.categoria, rule.subcategoria, rule.subcategoriaFilho].filter(Boolean).join(" > ")}
+                          {[rule.categoria_nome, rule.subcategoria_nome, rule.filho_nome].filter(Boolean).join(" > ")}
                         </span>
-                        {rule.clienteFornecedor && (
+                        {rule.cliente_fornecedor && (
                           <span className="ml-auto rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
-                            {rule.clienteFornecedor}
+                            {rule.cliente_fornecedor}
                           </span>
                         )}
                       </div>
                     ))}
-                    {rules.length > 5 && (
+                    {allRules.length > 5 && (
                       <div className="px-5 py-3">
                         <button
                           type="button"
                           onClick={() => setRulesDialogOpen(true)}
                           className="text-sm font-medium text-primary hover:underline"
                         >
-                          Ver todas as {rules.length} regras
+                          Ver todas as {allRules.length} regras
                         </button>
+                      </div>
+                    )}
+                    {allRules.length === 0 && (
+                      <div className="px-5 py-6 text-center text-sm text-muted-foreground">
+                        Nenhuma regra cadastrada. Importe um arquivo e classifique as transacoes para criar regras automaticamente.
                       </div>
                     )}
                   </div>
@@ -628,39 +669,26 @@ export default function ImportarTransacoesPage() {
                 {/* Actions bar */}
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={reapplyRules}
-                      className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-                    >
+                    <button type="button" onClick={reapplyRules}
+                      className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
                       <RotateCcw className="h-4 w-4" />
                       Reaplicar Regras
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setRulesDialogOpen(true)}
-                      className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-                    >
+                    <button type="button" onClick={() => setRulesDialogOpen(true)}
+                      className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
                       <Zap className="h-4 w-4 text-[hsl(38,92%,50%)]" />
-                      Regras ({rules.length})
+                      Regras ({allRules.length})
                     </button>
                   </div>
                   <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={resetImport}
-                      className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                    >
+                    <button type="button" onClick={resetImport}
+                      className="flex items-center gap-2 rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
                       <X className="h-4 w-4" />
                       Cancelar
                     </button>
-                    <button
-                      type="button"
-                      onClick={confirmImport}
-                      disabled={selectedTxs.length === 0}
-                      className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Save className="h-4 w-4" />
+                    <button type="button" onClick={confirmImport} disabled={selectedTxs.length === 0 || saving}
+                      className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed">
+                      {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                       Importar {selectedTxs.length} Transacoes
                     </button>
                   </div>
@@ -686,71 +714,52 @@ export default function ImportarTransacoesPage() {
                     <tbody className="divide-y divide-border">
                       {transactions.map((tx, idx) => {
                         const isCredit = tx.amount >= 0
-                        const subcats = tx.categoria ? Object.keys(categoriasData[tx.categoria]?.subcategorias || {}) : []
-                        const filhos = (tx.categoria && tx.subcategoria) ? (categoriasData[tx.categoria]?.subcategorias?.[tx.subcategoria] || []) : []
-                        const isAutoMatched = tx.categoria !== ""
+                        const subcats = getSubcatOptions(tx.categoria_id?.toString() || "")
+                        const filhos = getFilhoOptions(tx.subcategoria_id?.toString() || "")
+                        const isAutoMatched = tx.categoria_id !== null
                         return (
-                          <tr
-                            key={tx.fitId}
-                            className={`transition-colors hover:bg-muted/50 ${!tx.selected ? "opacity-40" : ""}`}
-                          >
+                          <tr key={tx.fitId} className={`transition-colors hover:bg-muted/50 ${!tx.selected ? "opacity-40" : ""}`}>
                             <td className="px-3 py-2.5">
-                              <input
-                                type="checkbox"
-                                checked={tx.selected}
-                                onChange={(e) => updateTx(idx, "selected", e.target.checked)}
-                                className="rounded border-border"
-                              />
+                              <input type="checkbox" checked={tx.selected} onChange={(e) => updateTx(idx, "selected", e.target.checked)} className="rounded border-border" />
                             </td>
-                            <td className="px-3 py-2.5 text-sm text-muted-foreground whitespace-nowrap">
-                              {tx.date}
-                            </td>
+                            <td className="px-3 py-2.5 text-sm text-muted-foreground whitespace-nowrap">{tx.date}</td>
                             <td className="px-3 py-2.5">
                               <div className="flex items-center gap-2">
                                 <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${isCredit ? "bg-[hsl(142,71%,40%)]/10" : "bg-[hsl(0,72%,51%)]/10"}`}>
-                                  {isCredit
-                                    ? <ArrowDownLeft className="h-3.5 w-3.5 text-[hsl(142,71%,40%)]" />
-                                    : <ArrowUpRight className="h-3.5 w-3.5 text-[hsl(0,72%,51%)]" />
-                                  }
+                                  {isCredit ? <ArrowDownLeft className="h-3.5 w-3.5 text-[hsl(142,71%,40%)]" /> : <ArrowUpRight className="h-3.5 w-3.5 text-[hsl(0,72%,51%)]" />}
                                 </div>
                                 <div className="min-w-0">
-                                  <p className="truncate text-sm text-card-foreground max-w-[240px]" title={tx.memo}>
-                                    {tx.memo}
-                                  </p>
-                                  {isAutoMatched && (
-                                    <span className="text-[10px] text-[hsl(142,71%,40%)]">auto-classificado</span>
-                                  )}
+                                  <p className="truncate text-sm text-card-foreground max-w-[240px]" title={tx.memo}>{tx.memo}</p>
+                                  {isAutoMatched && <span className="text-[10px] text-[hsl(142,71%,40%)]">auto-classificado</span>}
                                 </div>
                               </div>
                             </td>
-                            <td className={`px-3 py-2.5 text-right text-sm font-semibold whitespace-nowrap ${
-                              isCredit ? "text-[hsl(142,71%,45%)]" : "text-[hsl(0,72%,51%)]"
-                            }`}>
+                            <td className={`px-3 py-2.5 text-right text-sm font-semibold whitespace-nowrap ${isCredit ? "text-[hsl(142,71%,45%)]" : "text-[hsl(0,72%,51%)]"}`}>
                               {isCredit ? "+" : "-"} {formatCurrency(Math.abs(tx.amount))}
                             </td>
                             <td className="px-3 py-2.5">
                               <InlineDropdown
-                                value={tx.categoria}
-                                options={allCategorias}
-                                onChange={(val) => updateTx(idx, "categoria", val)}
+                                value={tx.categoria_id?.toString() || ""}
+                                options={catOptions}
+                                onChange={(val) => updateTx(idx, "categoria_id", val ? Number(val) : null)}
                                 placeholder="Selecionar"
                                 width="w-32"
                               />
                             </td>
                             <td className="px-3 py-2.5">
                               <InlineDropdown
-                                value={tx.subcategoria}
+                                value={tx.subcategoria_id?.toString() || ""}
                                 options={subcats}
-                                onChange={(val) => updateTx(idx, "subcategoria", val)}
-                                placeholder={tx.categoria ? "Selecionar" : "-"}
+                                onChange={(val) => updateTx(idx, "subcategoria_id", val ? Number(val) : null)}
+                                placeholder={tx.categoria_id ? "Selecionar" : "-"}
                                 width="w-36"
                               />
                             </td>
                             <td className="px-3 py-2.5">
                               <InlineDropdown
-                                value={tx.subcategoriaFilho}
+                                value={tx.subcategoria_filho_id?.toString() || ""}
                                 options={filhos}
-                                onChange={(val) => updateTx(idx, "subcategoriaFilho", val)}
+                                onChange={(val) => updateTx(idx, "subcategoria_filho_id", val ? Number(val) : null)}
                                 placeholder={filhos.length > 0 ? "Selecionar" : "-"}
                                 width="w-32"
                               />
@@ -807,13 +816,10 @@ export default function ImportarTransacoesPage() {
                   </div>
                 </div>
                 <p className="mt-4 text-xs text-muted-foreground">
-                  {rules.length} regras de classificacao salvas para futuras importacoes
+                  {allRules.length} regras de classificacao salvas para futuras importacoes
                 </p>
-                <button
-                  type="button"
-                  onClick={resetImport}
-                  className="mt-6 flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
-                >
+                <button type="button" onClick={resetImport}
+                  className="mt-6 flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
                   <Upload className="h-4 w-4" />
                   Importar Outro Arquivo
                 </button>
@@ -874,23 +880,23 @@ export default function ImportarTransacoesPage() {
             </DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto -mx-6 px-6">
-            {rules.length === 0 && (
+            {allRules.length === 0 && (
               <p className="py-8 text-center text-sm text-muted-foreground">
                 Nenhuma regra cadastrada. Importe um arquivo e classifique as transacoes para criar regras automaticamente.
               </p>
             )}
             <div className="divide-y divide-border">
-              {rules.map((rule) => (
+              {allRules.map((rule) => (
                 <div key={rule.id} className="flex items-center gap-3 py-3">
                   <span className="shrink-0 rounded-md bg-muted px-2.5 py-1 text-xs font-mono font-medium text-foreground min-w-[80px]">
                     {rule.keyword}
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-card-foreground">
-                      {[rule.categoria, rule.subcategoria, rule.subcategoriaFilho].filter(Boolean).join(" > ")}
+                      {[rule.categoria_nome, rule.subcategoria_nome, rule.filho_nome].filter(Boolean).join(" > ")}
                     </p>
-                    {rule.clienteFornecedor && (
-                      <p className="text-xs text-muted-foreground">{rule.clienteFornecedor}</p>
+                    {rule.cliente_fornecedor && (
+                      <p className="text-xs text-muted-foreground">{rule.cliente_fornecedor}</p>
                     )}
                   </div>
                   <button
