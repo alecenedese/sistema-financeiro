@@ -66,16 +66,42 @@ export function parseOFX(content: string): OFXData {
     let amount = parseFloat(amountStr.replace(",", "."))
 
     if (fitId && !isNaN(amount)) {
-      // Determine transaction type from TRNTYPE field or amount sign
+      // Determine transaction type
       let type: "CREDIT" | "DEBIT"
-      if (trnType === "DEBIT" || trnType === "PAYMENT" || trnType === "CHECK" || trnType === "FEE" || trnType === "XFER" && amount > 0) {
+      const memoUpper = memo.toUpperCase()
+      
+      // Keywords that indicate DEBIT (despesa/saída)
+      const debitKeywords = [
+        "COMPRA", "DEBITO", "PAGAMENTO", "PAG ", "TARIFA", "IOF", "SAQUE",
+        "TBI", "TRANSF ENVIADA", "TED ENVIADA", "DOC ENVIADO", "ANUIDADE",
+        "JUROS", "MULTA", "ENCARGO", "DEBITO AUTOMATICO", "COBRANCA"
+      ]
+      
+      // Keywords that indicate CREDIT (receita/entrada)
+      const creditKeywords = [
+        "TRANSFERENCIA PIX REM", "PIX RECEBIDO", "TED RECEBIDA", "DOC RECEBIDO",
+        "DEPOSITO", "CREDITO", "TRANSF RECEBIDA", "SALARIO", "RENDIMENTO",
+        "ESTORNO", "DEVOLUCAO", "REEMBOLSO"
+      ]
+      
+      // Check memo keywords first (most reliable for Brazilian banks)
+      const isDebit = debitKeywords.some(keyword => memoUpper.includes(keyword))
+      const isCredit = creditKeywords.some(keyword => memoUpper.includes(keyword))
+      
+      if (isDebit) {
         type = "DEBIT"
         amount = -Math.abs(amount) // Ensure negative for debits
-      } else if (trnType === "CREDIT" || trnType === "DEP" || trnType === "DEPOSIT") {
+      } else if (isCredit) {
         type = "CREDIT"
         amount = Math.abs(amount) // Ensure positive for credits
+      } else if (trnType === "DEBIT" || trnType === "PAYMENT" || trnType === "CHECK" || trnType === "FEE") {
+        type = "DEBIT"
+        amount = -Math.abs(amount)
+      } else if (trnType === "CREDIT" || trnType === "DEP" || trnType === "DEPOSIT") {
+        type = "CREDIT"
+        amount = Math.abs(amount)
       } else {
-        // Fallback to amount sign if TRNTYPE is unclear
+        // Final fallback to amount sign
         type = amount >= 0 ? "CREDIT" : "DEBIT"
       }
 
