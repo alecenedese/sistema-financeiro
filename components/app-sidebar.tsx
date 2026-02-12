@@ -14,6 +14,8 @@ import {
   BarChart3,
   Upload,
   Tags,
+  Users,
+  Building2,
   Plus,
   ChevronLeft,
   ChevronRight,
@@ -30,6 +32,8 @@ const menuItems = [
   { icon: BarChart3, label: "Relatorios", href: "/relatorios" },
   { icon: Upload, label: "Importar Transacoes", href: "/importar-transacoes" },
   { icon: Tags, label: "Categorias", href: "/categorias" },
+  { icon: Building2, label: "Fornecedores", href: "/fornecedores" },
+  { icon: Users, label: "Clientes", href: "/clientes" },
 ]
 
 const novoOptions = [
@@ -39,6 +43,8 @@ const novoOptions = [
   { icon: FileUp, label: "Nova Conta a Receber", href: "/contas-a-receber?novo=1" },
   { icon: Target, label: "Nova Meta", href: "/planejamento?novo=1" },
   { icon: Tags, label: "Nova Categoria", href: "/categorias?novo=1" },
+  { icon: Building2, label: "Novo Fornecedor", href: "/fornecedores?novo=1" },
+  { icon: Users, label: "Novo Cliente", href: "/clientes?novo=1" },
 ]
 
 export function AppSidebar() {

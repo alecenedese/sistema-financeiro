@@ -40,6 +40,8 @@ interface SubcategoriaRow { id: number; nome: string; categoria_id: number }
 interface SubcategoriaFilhoRow { id: number; nome: string; subcategoria_id: number }
 
 interface ContaBancariaRow { id: number; nome: string; tipo: string }
+interface FornecedorRow { id: number; nome: string }
+interface ClienteRow { id: number; nome: string }
 
 interface MappingRule {
   id: number
@@ -47,6 +49,8 @@ interface MappingRule {
   categoria_id: number | null
   subcategoria_id: number | null
   subcategoria_filho_id: number | null
+  fornecedor_id: number | null
+  cliente_id: number | null
   cliente_fornecedor: string
   // Joined names for display
   categoria_nome?: string
@@ -58,6 +62,8 @@ interface TransactionRow extends OFXTransaction {
   categoria_id: number | null
   subcategoria_id: number | null
   subcategoria_filho_id: number | null
+  fornecedor_id: number | null
+  cliente_id: number | null
   clienteFornecedor: string
   selected: boolean
 }
@@ -100,6 +106,16 @@ async function fetchContasBancarias(): Promise<ContaBancariaRow[]> {
   return data || []
 }
 
+async function fetchFornecedores(): Promise<FornecedorRow[]> {
+  const { data } = await supabase.from("fornecedores").select("id, nome").order("nome")
+  return data || []
+}
+
+async function fetchClientes(): Promise<ClienteRow[]> {
+  const { data } = await supabase.from("clientes").select("id, nome").order("nome")
+  return data || []
+}
+
 async function fetchRules(): Promise<MappingRule[]> {
   const { data, error } = await supabase
     .from("mapping_rules")
@@ -119,6 +135,8 @@ async function fetchRules(): Promise<MappingRule[]> {
     categoria_id: row.categoria_id as number | null,
     subcategoria_id: row.subcategoria_id as number | null,
     subcategoria_filho_id: row.subcategoria_filho_id as number | null,
+    fornecedor_id: row.fornecedor_id as number | null,
+    cliente_id: row.cliente_id as number | null,
     cliente_fornecedor: row.cliente_fornecedor as string,
     categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
     subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
@@ -246,6 +264,8 @@ export default function ImportarTransacoesPage() {
   const { data: hierarchy } = useSWR("hierarchy_importar", fetchHierarchy)
   const { data: rules, mutate: mutateRules } = useSWR("mapping_rules", fetchRules)
   const { data: contasBancarias = [] } = useSWR("contas_bancarias_importar", fetchContasBancarias)
+  const { data: fornecedoresLista = [] } = useSWR("fornecedores_importar", fetchFornecedores)
+  const { data: clientesLista = [] } = useSWR("clientes_importar", fetchClientes)
 
   // State
   const [selectedContaBancariaId, setSelectedContaBancariaId] = useState<string>("")
@@ -305,7 +325,7 @@ export default function ImportarTransacoesPage() {
 
   // Auto-match a transaction against saved rules
   const applyRules = useCallback(
-    (tx: OFXTransaction): { categoria_id: number | null; subcategoria_id: number | null; subcategoria_filho_id: number | null; clienteFornecedor: string } => {
+    (tx: OFXTransaction): { categoria_id: number | null; subcategoria_id: number | null; subcategoria_filho_id: number | null; fornecedor_id: number | null; cliente_id: number | null; clienteFornecedor: string } => {
       const memoUpper = tx.memo.toUpperCase()
       for (const rule of allRules) {
         if (memoUpper.includes(rule.keyword.toUpperCase())) {
@@ -313,11 +333,13 @@ export default function ImportarTransacoesPage() {
             categoria_id: rule.categoria_id,
             subcategoria_id: rule.subcategoria_id,
             subcategoria_filho_id: rule.subcategoria_filho_id,
+            fornecedor_id: rule.fornecedor_id,
+            cliente_id: rule.cliente_id,
             clienteFornecedor: rule.cliente_fornecedor || extractClienteFornecedor(tx.memo),
           }
         }
       }
-      return { categoria_id: null, subcategoria_id: null, subcategoria_filho_id: null, clienteFornecedor: extractClienteFornecedor(tx.memo) }
+      return { categoria_id: null, subcategoria_id: null, subcategoria_filho_id: null, fornecedor_id: null, cliente_id: null, clienteFornecedor: extractClienteFornecedor(tx.memo) }
     },
     [allRules]
   )
@@ -344,6 +366,8 @@ export default function ImportarTransacoesPage() {
             categoria_id: matched.categoria_id,
             subcategoria_id: matched.subcategoria_id,
             subcategoria_filho_id: matched.subcategoria_filho_id,
+            fornecedor_id: matched.fornecedor_id,
+            cliente_id: matched.cliente_id,
             clienteFornecedor: matched.clienteFornecedor,
             selected: true,
           }
@@ -394,7 +418,7 @@ export default function ImportarTransacoesPage() {
   // Save rules from current mapping to Supabase
   async function saveNewRules() {
     const existingKeywords = new Set(allRules.map((r) => r.keyword.toUpperCase()))
-    const newRuleInserts: { keyword: string; categoria_id: number | null; subcategoria_id: number | null; subcategoria_filho_id: number | null; cliente_fornecedor: string }[] = []
+    const newRuleInserts: { keyword: string; categoria_id: number | null; subcategoria_id: number | null; subcategoria_filho_id: number | null; fornecedor_id: number | null; cliente_id: number | null; cliente_fornecedor: string }[] = []
 
     for (const tx of transactions) {
       if (tx.categoria_id && tx.memo) {
@@ -407,6 +431,8 @@ export default function ImportarTransacoesPage() {
               categoria_id: tx.categoria_id,
               subcategoria_id: tx.subcategoria_id,
               subcategoria_filho_id: tx.subcategoria_filho_id,
+              fornecedor_id: tx.fornecedor_id,
+              cliente_id: tx.cliente_id,
               cliente_fornecedor: tx.clienteFornecedor,
             })
           }
@@ -434,33 +460,41 @@ export default function ImportarTransacoesPage() {
 
       if (despesas.length > 0) {
         await supabase.from("contas_pagar").insert(
-          despesas.map((tx) => ({
-            descricao: tx.memo,
-            valor: Math.abs(tx.amount),
-            vencimento: tx.date.split("/").reverse().join("-"),
-            status: "pago",
-            fornecedor: tx.clienteFornecedor,
-            categoria_id: tx.categoria_id,
-            subcategoria_id: tx.subcategoria_id,
-            subcategoria_filho_id: tx.subcategoria_filho_id,
-            conta_bancaria_id: contaBancariaId,
-          }))
+          despesas.map((tx) => {
+            const fornNome = tx.fornecedor_id ? fornecedoresLista.find((f) => f.id === tx.fornecedor_id)?.nome || tx.clienteFornecedor : tx.clienteFornecedor
+            return {
+              descricao: tx.memo,
+              valor: Math.abs(tx.amount),
+              vencimento: tx.date.split("/").reverse().join("-"),
+              status: "pago",
+              fornecedor: fornNome,
+              fornecedor_id: tx.fornecedor_id,
+              categoria_id: tx.categoria_id,
+              subcategoria_id: tx.subcategoria_id,
+              subcategoria_filho_id: tx.subcategoria_filho_id,
+              conta_bancaria_id: contaBancariaId,
+            }
+          })
         )
       }
 
       if (receitas.length > 0) {
         await supabase.from("contas_receber").insert(
-          receitas.map((tx) => ({
-            descricao: tx.memo,
-            valor: tx.amount,
-            vencimento: tx.date.split("/").reverse().join("-"),
-            status: "recebido",
-            cliente: tx.clienteFornecedor,
-            categoria_id: tx.categoria_id,
-            subcategoria_id: tx.subcategoria_id,
-            subcategoria_filho_id: tx.subcategoria_filho_id,
-            conta_bancaria_id: contaBancariaId,
-          }))
+          receitas.map((tx) => {
+            const cliNome = tx.cliente_id ? clientesLista.find((c) => c.id === tx.cliente_id)?.nome || tx.clienteFornecedor : tx.clienteFornecedor
+            return {
+              descricao: tx.memo,
+              valor: tx.amount,
+              vencimento: tx.date.split("/").reverse().join("-"),
+              status: "recebido",
+              cliente: cliNome,
+              cliente_id: tx.cliente_id,
+              categoria_id: tx.categoria_id,
+              subcategoria_id: tx.subcategoria_id,
+              subcategoria_filho_id: tx.subcategoria_filho_id,
+              conta_bancaria_id: contaBancariaId,
+            }
+          })
         )
       }
 
@@ -503,6 +537,8 @@ export default function ImportarTransacoesPage() {
           categoria_id: matched.categoria_id || tx.categoria_id,
           subcategoria_id: matched.subcategoria_id || tx.subcategoria_id,
           subcategoria_filho_id: matched.subcategoria_filho_id || tx.subcategoria_filho_id,
+          fornecedor_id: matched.fornecedor_id || tx.fornecedor_id,
+          cliente_id: matched.cliente_id || tx.cliente_id,
           clienteFornecedor: matched.clienteFornecedor || tx.clienteFornecedor,
         }
       })
@@ -805,13 +841,35 @@ export default function ImportarTransacoesPage() {
                               />
                             </td>
                             <td className="px-3 py-2.5">
-                              <input
-                                type="text"
-                                value={tx.clienteFornecedor}
-                                onChange={(e) => updateTx(idx, "clienteFornecedor", e.target.value)}
-                                placeholder="Nome..."
-                                className="w-full max-w-[160px] rounded-md border border-border bg-card px-2 py-1.5 text-xs text-card-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50"
-                              />
+                              {tx.amount < 0 ? (
+                                <select
+                                  value={tx.fornecedor_id?.toString() || ""}
+                                  onChange={(e) => {
+                                    const fId = e.target.value ? Number(e.target.value) : null
+                                    const fNome = fornecedoresLista.find((f) => f.id === fId)?.nome || ""
+                                    updateTx(idx, "fornecedor_id", fId)
+                                    updateTx(idx, "clienteFornecedor", fNome)
+                                  }}
+                                  className="w-full max-w-[160px] rounded-md border border-border bg-card px-2 py-1.5 text-xs text-card-foreground outline-none focus:border-primary/50"
+                                >
+                                  <option value="">Fornecedor...</option>
+                                  {fornecedoresLista.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                                </select>
+                              ) : (
+                                <select
+                                  value={tx.cliente_id?.toString() || ""}
+                                  onChange={(e) => {
+                                    const cId = e.target.value ? Number(e.target.value) : null
+                                    const cNome = clientesLista.find((c) => c.id === cId)?.nome || ""
+                                    updateTx(idx, "cliente_id", cId)
+                                    updateTx(idx, "clienteFornecedor", cNome)
+                                  }}
+                                  className="w-full max-w-[160px] rounded-md border border-border bg-card px-2 py-1.5 text-xs text-card-foreground outline-none focus:border-primary/50"
+                                >
+                                  <option value="">Cliente...</option>
+                                  {clientesLista.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                                </select>
+                              )}
                             </td>
                           </tr>
                         )

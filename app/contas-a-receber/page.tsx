@@ -33,6 +33,7 @@ interface SubcategoriaRow { id: number; nome: string; categoria_id: number }
 interface SubcategoriaFilhoRow { id: number; nome: string; subcategoria_id: number }
 
 interface ContaBancariaRow { id: number; nome: string; tipo: string }
+interface ClienteRow { id: number; nome: string }
 
 interface ContaReceber {
   id: number
@@ -41,6 +42,7 @@ interface ContaReceber {
   vencimento: string
   status: string
   cliente: string
+  cliente_id: number | null
   categoria_id: number | null
   subcategoria_id: number | null
   subcategoria_filho_id: number | null
@@ -49,6 +51,7 @@ interface ContaReceber {
   subcategoria_nome: string
   filho_nome: string
   conta_bancaria_nome: string
+  cliente_nome: string
 }
 
 const supabase = createClient()
@@ -61,7 +64,8 @@ async function fetchContas(): Promise<ContaReceber[]> {
       categorias(nome),
       subcategorias(nome),
       subcategorias_filhos(nome),
-      contas_bancarias(nome, tipo)
+      contas_bancarias(nome, tipo),
+      clientes(nome)
     `)
     .order("vencimento", { ascending: true })
 
@@ -74,6 +78,7 @@ async function fetchContas(): Promise<ContaReceber[]> {
     vencimento: row.vencimento as string,
     status: row.status as string,
     cliente: row.cliente as string,
+    cliente_id: row.cliente_id as number | null,
     categoria_id: row.categoria_id as number | null,
     subcategoria_id: row.subcategoria_id as number | null,
     subcategoria_filho_id: row.subcategoria_filho_id as number | null,
@@ -84,6 +89,7 @@ async function fetchContas(): Promise<ContaReceber[]> {
     conta_bancaria_nome: (row.contas_bancarias as Record<string, string> | null)?.nome
       ? `${(row.contas_bancarias as Record<string, string>).nome} (${(row.contas_bancarias as Record<string, string>).tipo})`
       : "",
+    cliente_nome: (row.clientes as Record<string, string> | null)?.nome || "",
   }))
 }
 
@@ -111,6 +117,11 @@ async function fetchContasBancarias(): Promise<ContaBancariaRow[]> {
   return data || []
 }
 
+async function fetchClientes(): Promise<ClienteRow[]> {
+  const { data } = await supabase.from("clientes").select("id, nome").order("nome")
+  return data || []
+}
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
 }
@@ -120,12 +131,13 @@ function formatDateDisplay(dateStr: string) {
   return `${d}/${m}/${y}`
 }
 
-const emptyForm = { descricao: "", valor: "", vencimento: "", cliente: "", categoria_id: "", subcategoria_id: "", subcategoria_filho_id: "", conta_bancaria_id: "", status: "pendente" }
+const emptyForm = { descricao: "", valor: "", vencimento: "", cliente_id: "", categoria_id: "", subcategoria_id: "", subcategoria_filho_id: "", conta_bancaria_id: "", status: "pendente" }
 
 export default function ContasAReceberPage() {
   const { data: contas, error, isLoading, mutate } = useSWR("contas_receber", fetchContas)
   const { data: hierarchy } = useSWR("hierarchy_receber", fetchHierarchy)
   const { data: contasBancarias = [] } = useSWR("contas_bancarias_receber", fetchContasBancarias)
+  const { data: clientesLista = [] } = useSWR("clientes_receber", fetchClientes)
 
   const [filterStatus, setFilterStatus] = useState<"Todos" | "Pendente" | "Recebido" | "Vencido">("Todos")
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -183,7 +195,7 @@ export default function ContasAReceberPage() {
       descricao: conta.descricao,
       valor: conta.valor.toString(),
       vencimento: conta.vencimento,
-      cliente: conta.cliente,
+      cliente_id: conta.cliente_id?.toString() || "",
       categoria_id: conta.categoria_id?.toString() || "",
       subcategoria_id: conta.subcategoria_id?.toString() || "",
       subcategoria_filho_id: conta.subcategoria_filho_id?.toString() || "",
@@ -197,11 +209,13 @@ export default function ContasAReceberPage() {
     if (!form.descricao.trim()) return
     setSaving(true)
     try {
+      const selectedCliente = clientesLista.find((c) => c.id === Number(form.cliente_id))
       const payload = {
         descricao: form.descricao,
         valor: parseFloat(form.valor) || 0,
         vencimento: form.vencimento || "2026-02-28",
-        cliente: form.cliente,
+        cliente: selectedCliente?.nome || "",
+        cliente_id: form.cliente_id ? Number(form.cliente_id) : null,
         categoria_id: form.categoria_id ? Number(form.categoria_id) : null,
         subcategoria_id: form.subcategoria_id ? Number(form.subcategoria_id) : null,
         subcategoria_filho_id: form.subcategoria_filho_id ? Number(form.subcategoria_filho_id) : null,
@@ -333,7 +347,7 @@ export default function ContasAReceberPage() {
                       </div>
                       <span className="text-sm font-medium text-card-foreground">{conta.descricao}</span>
                     </div>
-                    <span className="text-sm text-muted-foreground">{conta.cliente}</span>
+                    <span className="text-sm text-muted-foreground">{conta.cliente_nome || conta.cliente || "-"}</span>
                     <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
                       {[conta.categoria_nome, conta.subcategoria_nome, conta.filho_nome].filter(Boolean).join(" > ")}
                     </span>
@@ -392,7 +406,10 @@ export default function ContasAReceberPage() {
             </div>
             <div className="space-y-2">
               <Label htmlFor="cliente">Cliente</Label>
-              <Input id="cliente" placeholder="Nome do cliente" value={form.cliente} onChange={(e) => setForm({ ...form, cliente: e.target.value })} />
+              <select id="cliente" value={form.cliente_id} onChange={(e) => setForm({ ...form, cliente_id: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                <option value="">Selecione...</option>
+                {clientesLista.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="conta_bancaria">Conta Bancaria</Label>
