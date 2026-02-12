@@ -32,6 +32,8 @@ interface CategoriaRow { id: number; nome: string; tipo: string }
 interface SubcategoriaRow { id: number; nome: string; categoria_id: number }
 interface SubcategoriaFilhoRow { id: number; nome: string; subcategoria_id: number }
 
+interface ContaBancariaRow { id: number; nome: string; tipo: string }
+
 interface ContaPagar {
   id: number
   descricao: string
@@ -42,10 +44,12 @@ interface ContaPagar {
   categoria_id: number | null
   subcategoria_id: number | null
   subcategoria_filho_id: number | null
+  conta_bancaria_id: number | null
   // joined names
   categoria_nome: string
   subcategoria_nome: string
   filho_nome: string
+  conta_bancaria_nome: string
 }
 
 const supabase = createClient()
@@ -57,7 +61,8 @@ async function fetchContas(): Promise<ContaPagar[]> {
       *,
       categorias(nome),
       subcategorias(nome),
-      subcategorias_filhos(nome)
+      subcategorias_filhos(nome),
+      contas_bancarias(nome, tipo)
     `)
     .order("vencimento", { ascending: true })
 
@@ -73,9 +78,13 @@ async function fetchContas(): Promise<ContaPagar[]> {
     categoria_id: row.categoria_id as number | null,
     subcategoria_id: row.subcategoria_id as number | null,
     subcategoria_filho_id: row.subcategoria_filho_id as number | null,
+    conta_bancaria_id: row.conta_bancaria_id as number | null,
     categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
     subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
     filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
+    conta_bancaria_nome: (row.contas_bancarias as Record<string, string> | null)?.nome
+      ? `${(row.contas_bancarias as Record<string, string>).nome} (${(row.contas_bancarias as Record<string, string>).tipo})`
+      : "",
   }))
 }
 
@@ -98,6 +107,11 @@ async function fetchHierarchy(): Promise<CategoriaHierarchy> {
   }
 }
 
+async function fetchContasBancarias(): Promise<ContaBancariaRow[]> {
+  const { data } = await supabase.from("contas_bancarias").select("id, nome, tipo").order("nome")
+  return data || []
+}
+
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
 }
@@ -107,11 +121,12 @@ function formatDateDisplay(dateStr: string) {
   return `${d}/${m}/${y}`
 }
 
-const emptyForm = { descricao: "", valor: "", vencimento: "", fornecedor: "", categoria_id: "", subcategoria_id: "", subcategoria_filho_id: "", status: "pendente" }
+const emptyForm = { descricao: "", valor: "", vencimento: "", fornecedor: "", categoria_id: "", subcategoria_id: "", subcategoria_filho_id: "", conta_bancaria_id: "", status: "pendente" }
 
 export default function ContasAPagarPage() {
   const { data: contas, error, isLoading, mutate } = useSWR("contas_pagar", fetchContas)
   const { data: hierarchy } = useSWR("hierarchy_pagar", fetchHierarchy)
+  const { data: contasBancarias = [] } = useSWR("contas_bancarias_pagar", fetchContasBancarias)
 
   const [filterStatus, setFilterStatus] = useState<"Todos" | "Pendente" | "Pago" | "Vencido">("Todos")
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -174,6 +189,7 @@ export default function ContasAPagarPage() {
       categoria_id: conta.categoria_id?.toString() || "",
       subcategoria_id: conta.subcategoria_id?.toString() || "",
       subcategoria_filho_id: conta.subcategoria_filho_id?.toString() || "",
+      conta_bancaria_id: conta.conta_bancaria_id?.toString() || "",
       status: conta.status,
     })
     setDialogOpen(true)
@@ -191,6 +207,7 @@ export default function ContasAPagarPage() {
         categoria_id: form.categoria_id ? Number(form.categoria_id) : null,
         subcategoria_id: form.subcategoria_id ? Number(form.subcategoria_id) : null,
         subcategoria_filho_id: form.subcategoria_filho_id ? Number(form.subcategoria_filho_id) : null,
+        conta_bancaria_id: form.conta_bancaria_id ? Number(form.conta_bancaria_id) : null,
         status: form.status,
       }
       if (editingConta) {
@@ -296,17 +313,18 @@ export default function ContasAPagarPage() {
             {/* Table */}
             {!isLoading && !error && (
               <div className="rounded-xl border border-border bg-card shadow-sm">
-                <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto] gap-4 border-b border-border px-5 py-3 text-xs font-semibold uppercase text-muted-foreground">
+                <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto_auto] gap-4 border-b border-border px-5 py-3 text-xs font-semibold uppercase text-muted-foreground">
                   <span>Descricao</span>
                   <span>Fornecedor</span>
                   <span>Categoria</span>
+                  <span>Conta Bancaria</span>
                   <span>Vencimento</span>
                   <span>Status</span>
                   <span className="text-right">Valor</span>
                   <span className="text-right">Acoes</span>
                 </div>
                 {filtered.map((conta) => (
-                  <div key={conta.id} className="group grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto] items-center gap-4 border-b border-border px-5 py-3.5 last:border-b-0 transition-colors hover:bg-muted/50">
+                  <div key={conta.id} className="group grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto_auto] items-center gap-4 border-b border-border px-5 py-3.5 last:border-b-0 transition-colors hover:bg-muted/50">
                     <div className="flex items-center gap-3">
                       <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
                         conta.status === "vencido" ? "bg-[hsl(0,72%,51%)]/10" : conta.status === "pago" ? "bg-[hsl(142,71%,40%)]/10" : "bg-[hsl(38,92%,50%)]/10"
@@ -321,6 +339,7 @@ export default function ContasAPagarPage() {
                     <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
                       {[conta.categoria_nome, conta.subcategoria_nome, conta.filho_nome].filter(Boolean).join(" > ")}
                     </span>
+                    <span className="text-sm text-muted-foreground">{conta.conta_bancaria_nome || "-"}</span>
                     <span className="text-sm text-muted-foreground">{formatDateDisplay(conta.vencimento)}</span>
                     <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                       conta.status === "pago"
@@ -376,6 +395,13 @@ export default function ContasAPagarPage() {
             <div className="space-y-2">
               <Label htmlFor="fornecedor">Fornecedor</Label>
               <Input id="fornecedor" placeholder="Nome do fornecedor" value={form.fornecedor} onChange={(e) => setForm({ ...form, fornecedor: e.target.value })} />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="conta_bancaria">Conta Bancaria</Label>
+              <select id="conta_bancaria" value={form.conta_bancaria_id} onChange={(e) => setForm({ ...form, conta_bancaria_id: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                <option value="">Selecione...</option>
+                {contasBancarias.map((cb) => <option key={cb.id} value={cb.id}>{cb.nome} ({cb.tipo})</option>)}
+              </select>
             </div>
             <div className="space-y-2">
               <Label htmlFor="categoria">Categoria</Label>

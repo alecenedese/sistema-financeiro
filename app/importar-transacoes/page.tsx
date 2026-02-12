@@ -39,6 +39,8 @@ interface CategoriaRow { id: number; nome: string; tipo: string }
 interface SubcategoriaRow { id: number; nome: string; categoria_id: number }
 interface SubcategoriaFilhoRow { id: number; nome: string; subcategoria_id: number }
 
+interface ContaBancariaRow { id: number; nome: string; tipo: string }
+
 interface MappingRule {
   id: number
   keyword: string
@@ -91,6 +93,11 @@ async function fetchHierarchy(): Promise<CategoriaHierarchy> {
     subcategorias: subRes.data || [],
     filhos: filhoRes.data || [],
   }
+}
+
+async function fetchContasBancarias(): Promise<ContaBancariaRow[]> {
+  const { data } = await supabase.from("contas_bancarias").select("id, nome, tipo").order("nome")
+  return data || []
 }
 
 async function fetchRules(): Promise<MappingRule[]> {
@@ -238,8 +245,10 @@ function InlineDropdown({
 export default function ImportarTransacoesPage() {
   const { data: hierarchy } = useSWR("hierarchy_importar", fetchHierarchy)
   const { data: rules, mutate: mutateRules } = useSWR("mapping_rules", fetchRules)
+  const { data: contasBancarias = [] } = useSWR("contas_bancarias_importar", fetchContasBancarias)
 
   // State
+  const [selectedContaBancariaId, setSelectedContaBancariaId] = useState<string>("")
   const [step, setStep] = useState<"upload" | "review" | "done">("upload")
   const [ofxData, setOfxData] = useState<OFXData | null>(null)
   const [transactions, setTransactions] = useState<TransactionRow[]>([])
@@ -421,6 +430,8 @@ export default function ImportarTransacoesPage() {
       const despesas = selected.filter((t) => t.amount < 0)
       const receitas = selected.filter((t) => t.amount >= 0)
 
+      const contaBancariaId = selectedContaBancariaId ? Number(selectedContaBancariaId) : null
+
       if (despesas.length > 0) {
         await supabase.from("contas_pagar").insert(
           despesas.map((tx) => ({
@@ -432,6 +443,7 @@ export default function ImportarTransacoesPage() {
             categoria_id: tx.categoria_id,
             subcategoria_id: tx.subcategoria_id,
             subcategoria_filho_id: tx.subcategoria_filho_id,
+            conta_bancaria_id: contaBancariaId,
           }))
         )
       }
@@ -447,6 +459,7 @@ export default function ImportarTransacoesPage() {
             categoria_id: tx.categoria_id,
             subcategoria_id: tx.subcategoria_id,
             subcategoria_filho_id: tx.subcategoria_filho_id,
+            conta_bancaria_id: contaBancariaId,
           }))
         )
       }
@@ -472,6 +485,7 @@ export default function ImportarTransacoesPage() {
     setOfxData(null)
     setTransactions([])
     setFileName("")
+    setSelectedContaBancariaId("")
     if (fileInputRef.current) fileInputRef.current.value = ""
   }
 
@@ -541,6 +555,32 @@ export default function ImportarTransacoesPage() {
                 </div>
               </div>
             </div>
+
+            {/* Conta Bancaria Selector - show on upload and review */}
+            {(step === "upload" || step === "review") && (
+              <div className="rounded-xl border border-border bg-card p-5 shadow-sm">
+                <div className="flex items-center gap-4">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10">
+                    <Landmark className="h-5 w-5 text-primary" />
+                  </div>
+                  <div className="flex-1">
+                    <label htmlFor="conta_bancaria_import" className="text-sm font-semibold text-card-foreground">Conta Bancaria</label>
+                    <p className="text-xs text-muted-foreground">Selecione a conta bancaria associada a esta importacao</p>
+                  </div>
+                  <select
+                    id="conta_bancaria_import"
+                    value={selectedContaBancariaId}
+                    onChange={(e) => setSelectedContaBancariaId(e.target.value)}
+                    className="w-64 rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                  >
+                    <option value="">Selecione uma conta...</option>
+                    {contasBancarias.map((cb) => (
+                      <option key={cb.id} value={cb.id}>{cb.nome} ({cb.tipo})</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            )}
 
             {/* ==================== STEP: UPLOAD ==================== */}
             {step === "upload" && (

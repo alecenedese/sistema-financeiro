@@ -15,8 +15,9 @@ import {
   EyeOff,
   Pencil,
   Trash2,
+  Loader2,
 } from "lucide-react"
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import {
   Dialog,
@@ -38,14 +39,15 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { createClient } from "@/lib/supabase/client"
+import useSWR from "swr"
 
-interface Conta {
+interface ContaBancaria {
   id: number
   nome: string
   tipo: string
   saldo: number
-  icon: typeof Landmark
-  color: string
+  cor: string
   agencia: string
   conta: string
   entradas: number
@@ -58,28 +60,44 @@ const ICON_MAP: Record<string, typeof Landmark> = {
   "Cartao de Credito": CreditCard,
 }
 
-const contasIniciais: Conta[] = [
-  { id: 1, nome: "Nubank", tipo: "Conta Corrente", saldo: 3241.6, icon: Landmark, color: "#1B3A5C", agencia: "0001", conta: "98765-4", entradas: 4200.0, saidas: 958.4 },
-  { id: 2, nome: "Bradesco", tipo: "Conta Corrente", saldo: 2150.0, icon: Landmark, color: "#2C5F8A", agencia: "1234", conta: "56789-0", entradas: 3500.0, saidas: 1350.0 },
-  { id: 3, nome: "Caixa", tipo: "Poupanca", saldo: 1700.0, icon: Wallet, color: "#7A8FA6", agencia: "0567", conta: "12345-6", entradas: 500.0, saidas: 0 },
-  { id: 4, nome: "Nubank", tipo: "Cartao de Credito", saldo: -480.0, icon: CreditCard, color: "#A8B8C8", agencia: "-", conta: "****-1234", entradas: 0, saidas: 480.0 },
-]
-
 const COLORS = ["#1B3A5C", "#2C5F8A", "#3D7AB5", "#7A8FA6", "#A8B8C8", "#C4CFD9"]
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
 }
 
+function getIcon(tipo: string) {
+  return ICON_MAP[tipo] || Landmark
+}
+
+const supabase = createClient()
+
+async function fetchContas(): Promise<ContaBancaria[]> {
+  const { data, error } = await supabase.from("contas_bancarias").select("*").order("id")
+  if (error) throw error
+  return (data || []).map((r) => ({
+    id: r.id,
+    nome: r.nome,
+    tipo: r.tipo,
+    saldo: Number(r.saldo),
+    cor: r.cor,
+    agencia: r.agencia,
+    conta: r.conta,
+    entradas: Number(r.entradas),
+    saidas: Number(r.saidas),
+  }))
+}
+
 const emptyForm = { nome: "", tipo: "Conta Corrente", agencia: "", conta: "", saldo: "" }
 
 export default function ContasBancariasPage() {
+  const { data: contas = [], mutate, isLoading } = useSWR("contas_bancarias", fetchContas)
   const [showBalances, setShowBalances] = useState(true)
-  const [contas, setContas] = useState<Conta[]>(contasIniciais)
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingConta, setEditingConta] = useState<Conta | null>(null)
-  const [deleteConfirm, setDeleteConfirm] = useState<Conta | null>(null)
+  const [editingConta, setEditingConta] = useState<ContaBancaria | null>(null)
+  const [deleteConfirm, setDeleteConfirm] = useState<ContaBancaria | null>(null)
   const [form, setForm] = useState(emptyForm)
+  const [saving, setSaving] = useState(false)
 
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -103,7 +121,7 @@ export default function ContasBancariasPage() {
     setDialogOpen(true)
   }
 
-  function openEdit(conta: Conta) {
+  function openEdit(conta: ContaBancaria) {
     setEditingConta(conta)
     setForm({
       nome: conta.nome,
@@ -115,45 +133,53 @@ export default function ContasBancariasPage() {
     setDialogOpen(true)
   }
 
-  function handleSave() {
+  const handleSave = useCallback(async () => {
     if (!form.nome.trim()) return
-    if (editingConta) {
-      setContas((prev) =>
-        prev.map((c) =>
-          c.id === editingConta.id
-            ? {
-                ...c,
-                nome: form.nome,
-                tipo: form.tipo,
-                agencia: form.agencia,
-                conta: form.conta,
-                saldo: parseFloat(form.saldo) || 0,
-                icon: ICON_MAP[form.tipo] || Landmark,
-              }
-            : c
-        )
-      )
-    } else {
-      const newConta: Conta = {
-        id: Date.now(),
-        nome: form.nome,
-        tipo: form.tipo,
-        saldo: parseFloat(form.saldo) || 0,
-        icon: ICON_MAP[form.tipo] || Landmark,
-        color: COLORS[contas.length % COLORS.length],
-        agencia: form.agencia,
-        conta: form.conta,
-        entradas: 0,
-        saidas: 0,
+    setSaving(true)
+    try {
+      if (editingConta) {
+        await supabase.from("contas_bancarias").update({
+          nome: form.nome,
+          tipo: form.tipo,
+          agencia: form.agencia,
+          conta: form.conta,
+          saldo: parseFloat(form.saldo) || 0,
+        }).eq("id", editingConta.id)
+      } else {
+        await supabase.from("contas_bancarias").insert({
+          nome: form.nome,
+          tipo: form.tipo,
+          agencia: form.agencia,
+          conta: form.conta,
+          saldo: parseFloat(form.saldo) || 0,
+          cor: COLORS[contas.length % COLORS.length],
+        })
       }
-      setContas((prev) => [...prev, newConta])
+      await mutate()
+      setDialogOpen(false)
+    } finally {
+      setSaving(false)
     }
-    setDialogOpen(false)
-  }
+  }, [form, editingConta, contas.length, mutate])
 
-  function handleDelete(conta: Conta) {
-    setContas((prev) => prev.filter((c) => c.id !== conta.id))
+  const handleDelete = useCallback(async (conta: ContaBancaria) => {
+    await supabase.from("contas_bancarias").delete().eq("id", conta.id)
+    await mutate()
     setDeleteConfirm(null)
+  }, [mutate])
+
+  if (isLoading) {
+    return (
+      <div className="flex min-h-screen bg-background">
+        <AppSidebar />
+        <div className="ml-[72px] flex flex-1 flex-col">
+          <PageHeader title="Contas Bancarias" />
+          <main className="flex flex-1 items-center justify-center">
+            <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          </main>
+        </div>
+      </div>
+    )
   }
 
   return (
@@ -219,40 +245,43 @@ export default function ContasBancariasPage() {
               </button>
             </div>
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-              {contas.map((conta) => (
-                <div key={conta.id} className="group rounded-xl border border-border bg-card p-5 shadow-sm transition-shadow hover:shadow-md">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${conta.color}18` }}>
-                      <conta.icon className="h-5 w-5" style={{ color: conta.color }} />
+              {contas.map((conta) => {
+                const Icon = getIcon(conta.tipo)
+                return (
+                  <div key={conta.id} className="group rounded-xl border border-border bg-card p-5 shadow-sm transition-shadow hover:shadow-md">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${conta.cor}18` }}>
+                        <Icon className="h-5 w-5" style={{ color: conta.cor }} />
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <p className="font-semibold text-card-foreground">{conta.nome}</p>
+                        <p className="text-xs text-muted-foreground">{conta.tipo} &middot; Ag: {conta.agencia} | Cc: {conta.conta}</p>
+                      </div>
+                      <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                        <button type="button" onClick={() => openEdit(conta)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                          <Pencil className="h-3.5 w-3.5" />
+                        </button>
+                        <button type="button" onClick={() => setDeleteConfirm(conta)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive">
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                      <p className={`text-xl font-bold ${conta.saldo >= 0 ? "text-card-foreground" : "text-[hsl(0,72%,51%)]"}`}>
+                        {showBalances ? formatCurrency(conta.saldo) : "R$ ******"}
+                      </p>
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="font-semibold text-card-foreground">{conta.nome}</p>
-                      <p className="text-xs text-muted-foreground">{conta.tipo} &middot; Ag: {conta.agencia} | Cc: {conta.conta}</p>
+                    <div className="mt-4 flex items-center gap-4">
+                      <div className="flex items-center gap-1.5 rounded-lg bg-[hsl(142,71%,40%)]/10 px-3 py-1.5">
+                        <ArrowDownLeft className="h-3.5 w-3.5 text-[hsl(142,71%,40%)]" />
+                        <span className="text-xs font-medium text-[hsl(142,71%,40%)]">{formatCurrency(conta.entradas)}</span>
+                      </div>
+                      <div className="flex items-center gap-1.5 rounded-lg bg-[hsl(0,72%,51%)]/10 px-3 py-1.5">
+                        <ArrowUpRight className="h-3.5 w-3.5 text-[hsl(0,72%,51%)]" />
+                        <span className="text-xs font-medium text-[hsl(0,72%,51%)]">{formatCurrency(conta.saidas)}</span>
+                      </div>
                     </div>
-                    <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                      <button type="button" onClick={() => openEdit(conta)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button type="button" onClick={() => setDeleteConfirm(conta)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                    <p className={`text-xl font-bold ${conta.saldo >= 0 ? "text-card-foreground" : "text-[hsl(0,72%,51%)]"}`}>
-                      {showBalances ? formatCurrency(conta.saldo) : "R$ ******"}
-                    </p>
                   </div>
-                  <div className="mt-4 flex items-center gap-4">
-                    <div className="flex items-center gap-1.5 rounded-lg bg-[hsl(142,71%,40%)]/10 px-3 py-1.5">
-                      <ArrowDownLeft className="h-3.5 w-3.5 text-[hsl(142,71%,40%)]" />
-                      <span className="text-xs font-medium text-[hsl(142,71%,40%)]">{formatCurrency(conta.entradas)}</span>
-                    </div>
-                    <div className="flex items-center gap-1.5 rounded-lg bg-[hsl(0,72%,51%)]/10 px-3 py-1.5">
-                      <ArrowUpRight className="h-3.5 w-3.5 text-[hsl(0,72%,51%)]" />
-                      <span className="text-xs font-medium text-[hsl(0,72%,51%)]">{formatCurrency(conta.saidas)}</span>
-                    </div>
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         </main>
@@ -284,8 +313,8 @@ export default function ContasBancariasPage() {
                 <Input id="agencia" placeholder="0001" value={form.agencia} onChange={(e) => setForm({ ...form, agencia: e.target.value })} />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="conta">Conta</Label>
-                <Input id="conta" placeholder="12345-6" value={form.conta} onChange={(e) => setForm({ ...form, conta: e.target.value })} />
+                <Label htmlFor="conta_num">Conta</Label>
+                <Input id="conta_num" placeholder="12345-6" value={form.conta} onChange={(e) => setForm({ ...form, conta: e.target.value })} />
               </div>
             </div>
             <div className="space-y-2">
@@ -297,8 +326,8 @@ export default function ContasBancariasPage() {
             <button type="button" onClick={() => setDialogOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted">
               Cancelar
             </button>
-            <button type="button" onClick={handleSave} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
-              {editingConta ? "Salvar" : "Adicionar"}
+            <button type="button" onClick={handleSave} disabled={saving} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : editingConta ? "Salvar" : "Adicionar"}
             </button>
           </DialogFooter>
         </DialogContent>
