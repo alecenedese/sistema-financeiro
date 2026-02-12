@@ -545,6 +545,9 @@ export default function ImportarTransacoesPage() {
       const despesas = selected.filter((t) => t.amount < 0)
       const receitas = selected.filter((t) => t.amount >= 0)
 
+      console.log("[v0] DEBUG - Despesas encontradas:", despesas.map((d) => ({ memo: d.memo, amount: d.amount, isSplit: d.isSplit, splits: d.splits?.map((s) => ({ valor: s.valor })) })))
+      console.log("[v0] DEBUG - Receitas encontradas:", receitas.map((r) => ({ memo: r.memo, amount: r.amount, isSplit: r.isSplit, splits: r.splits?.map((s) => ({ valor: s.valor })) })))
+
       const contaBancariaId = selectedContaBancariaId ? Number(selectedContaBancariaId) : null
 
       if (despesas.length > 0) {
@@ -553,6 +556,7 @@ export default function ImportarTransacoesPage() {
           if (tx.isSplit && tx.splits && tx.splits.length > 0) {
             // Insert each split as separate record
             for (const split of tx.splits) {
+              console.log("[v0] DEBUG SPLIT DESPESA - valor bruto:", split.valor, "abs:", Math.abs(split.valor))
               despesasToInsert.push({
                 descricao: tx.memo,
                 valor: Math.abs(split.valor),
@@ -569,6 +573,7 @@ export default function ImportarTransacoesPage() {
           } else {
             // Single record
             const fornNome = tx.fornecedor_id ? fornecedoresLista.find((f) => f.id === tx.fornecedor_id)?.nome || tx.clienteFornecedor : tx.clienteFornecedor
+            console.log("[v0] DEBUG DESPESA SIMPLES - valor bruto:", tx.amount, "abs:", Math.abs(tx.amount))
             despesasToInsert.push({
               descricao: tx.memo,
               valor: Math.abs(tx.amount),
@@ -583,6 +588,7 @@ export default function ImportarTransacoesPage() {
             })
           }
         }
+        console.log("[v0] DEBUG - Despesas a inserir:", despesasToInsert)
         await supabase.from("contas_pagar").insert(despesasToInsert)
       }
 
