@@ -34,20 +34,79 @@ interface ContaPagar {
   status: "pendente" | "pago" | "vencido"
   fornecedor: string
   categoria: string
+  subcategoria: string
+  subcategoriaFilho: string
 }
 
-const contasIniciais: ContaPagar[] = [
-  { id: 1, descricao: "Aluguel Escritorio", valor: 2800.0, vencimento: "2026-02-10", status: "pendente", fornecedor: "Imobiliaria Central", categoria: "Moradia" },
-  { id: 2, descricao: "Energia Eletrica", valor: 680.0, vencimento: "2026-02-15", status: "pendente", fornecedor: "CEMIG", categoria: "Moradia" },
-  { id: 3, descricao: "Internet Corporativa", valor: 450.0, vencimento: "2026-02-20", status: "pendente", fornecedor: "Vivo Empresas", categoria: "Moradia" },
-  { id: 4, descricao: "Software Contabil", valor: 1200.0, vencimento: "2026-02-05", status: "pago", fornecedor: "ContaSoft", categoria: "Infraestrutura" },
-  { id: 5, descricao: "Seguro Empresarial", valor: 3500.0, vencimento: "2026-02-01", status: "pago", fornecedor: "Porto Seguro", categoria: "Infraestrutura" },
-  { id: 6, descricao: "Servico de Limpeza", valor: 950.0, vencimento: "2026-02-25", status: "pendente", fornecedor: "LimpMax", categoria: "Servicos" },
-  { id: 7, descricao: "Manutencao Veiculo", valor: 380.0, vencimento: "2026-02-03", status: "vencido", fornecedor: "AutoCenter", categoria: "Transporte" },
-  { id: 8, descricao: "Material de Escritorio", valor: 240.0, vencimento: "2026-02-28", status: "pendente", fornecedor: "Kalunga", categoria: "Suprimentos" },
-]
+// Hierarquia: Categoria > Subcategoria > Filho
+const CATEGORIAS_HIERARQUIA: Record<string, Record<string, string[]>> = {
+  "Moradia": {
+    "Aluguel": ["Residencial", "Comercial"],
+    "Condominio": ["Taxa Ordinaria", "Taxa Extra"],
+    "Conta de Energia": [],
+    "Conta de Agua": [],
+    "Internet": [],
+  },
+  "Transporte": {
+    "Combustivel": ["Gasolina", "Etanol"],
+    "Estacionamento": [],
+    "Manutencao Veiculo": ["Revisao", "Pneus", "Funilaria"],
+    "Transporte Publico": [],
+  },
+  "Alimentacao": {
+    "Supermercado": [],
+    "Restaurante": ["Almoco", "Jantar"],
+    "Delivery": [],
+    "Padaria": [],
+  },
+  "Saude": {
+    "Plano de Saude": [],
+    "Farmacia": [],
+    "Consultas": ["Clinico Geral", "Especialista"],
+  },
+  "Lazer": {
+    "Streaming": [],
+    "Cinema": [],
+    "Viagens": ["Nacional", "Internacional"],
+    "Esportes": [],
+  },
+  "Infraestrutura": {
+    "Software": [],
+    "Equipamentos": [],
+    "Seguros": [],
+  },
+  "Servicos": {
+    "Limpeza": [],
+    "Manutencao": [],
+    "Consultoria": [],
+  },
+  "Suprimentos": {
+    "Material Escritorio": [],
+    "Material Limpeza": [],
+  },
+  "Salarios": {
+    "Folha de Pagamento": [],
+    "Encargos": [],
+  },
+  "Impostos": {
+    "Federal": [],
+    "Estadual": [],
+    "Municipal": [],
+  },
+}
 
-const CATEGORIAS_PAGAR = ["Moradia", "Infraestrutura", "Servicos", "Transporte", "Suprimentos", "Salarios", "Impostos"]
+const CATEGORIAS_PAGAR = Object.keys(CATEGORIAS_HIERARQUIA)
+
+const contasIniciais: ContaPagar[] = [
+  { id: 1, descricao: "Aluguel Escritorio", valor: 2800.0, vencimento: "2026-02-10", status: "pendente", fornecedor: "Imobiliaria Central", categoria: "Moradia", subcategoria: "Aluguel", subcategoriaFilho: "Comercial" },
+  { id: 2, descricao: "Energia Eletrica", valor: 680.0, vencimento: "2026-02-15", status: "pendente", fornecedor: "CEMIG", categoria: "Moradia", subcategoria: "Conta de Energia", subcategoriaFilho: "" },
+  { id: 3, descricao: "Internet Corporativa", valor: 450.0, vencimento: "2026-02-20", status: "pendente", fornecedor: "Vivo Empresas", categoria: "Moradia", subcategoria: "Internet", subcategoriaFilho: "" },
+  { id: 4, descricao: "Software Contabil", valor: 1200.0, vencimento: "2026-02-05", status: "pago", fornecedor: "ContaSoft", categoria: "Infraestrutura", subcategoria: "Software", subcategoriaFilho: "" },
+  { id: 5, descricao: "Seguro Empresarial", valor: 3500.0, vencimento: "2026-02-01", status: "pago", fornecedor: "Porto Seguro", categoria: "Infraestrutura", subcategoria: "Seguros", subcategoriaFilho: "" },
+  { id: 6, descricao: "Servico de Limpeza", valor: 950.0, vencimento: "2026-02-25", status: "pendente", fornecedor: "LimpMax", categoria: "Servicos", subcategoria: "Limpeza", subcategoriaFilho: "" },
+  { id: 7, descricao: "Manutencao Veiculo", valor: 380.0, vencimento: "2026-02-03", status: "vencido", fornecedor: "AutoCenter", categoria: "Transporte", subcategoria: "Manutencao Veiculo", subcategoriaFilho: "Revisao" },
+  { id: 8, descricao: "Material de Escritorio", valor: 240.0, vencimento: "2026-02-28", status: "pendente", fornecedor: "Kalunga", categoria: "Suprimentos", subcategoria: "Material Escritorio", subcategoriaFilho: "" },
+]
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
@@ -58,7 +117,7 @@ function formatDateDisplay(dateStr: string) {
   return `${d}/${m}/${y}`
 }
 
-const emptyForm = { descricao: "", valor: "", vencimento: "", fornecedor: "", categoria: "Moradia", status: "pendente" as const }
+const emptyForm = { descricao: "", valor: "", vencimento: "", fornecedor: "", categoria: "Moradia", subcategoria: "", subcategoriaFilho: "", status: "pendente" as const }
 
 export default function ContasAPagarPage() {
   const [filterStatus, setFilterStatus] = useState<"Todos" | "Pendente" | "Pago" | "Vencido">("Todos")
@@ -103,10 +162,15 @@ export default function ContasAPagarPage() {
       vencimento: conta.vencimento,
       fornecedor: conta.fornecedor,
       categoria: conta.categoria,
+      subcategoria: conta.subcategoria,
+      subcategoriaFilho: conta.subcategoriaFilho,
       status: conta.status,
     })
     setDialogOpen(true)
   }
+
+  const subcategoriasDisponiveis = form.categoria ? Object.keys(CATEGORIAS_HIERARQUIA[form.categoria] || {}) : []
+  const filhosDisponiveis = form.categoria && form.subcategoria ? (CATEGORIAS_HIERARQUIA[form.categoria]?.[form.subcategoria] || []) : []
 
   function handleSave() {
     if (!form.descricao.trim()) return
@@ -114,7 +178,7 @@ export default function ContasAPagarPage() {
       setContas((prev) =>
         prev.map((c) =>
           c.id === editingConta.id
-            ? { ...c, descricao: form.descricao, valor: parseFloat(form.valor) || 0, vencimento: form.vencimento, fornecedor: form.fornecedor, categoria: form.categoria, status: form.status as ContaPagar["status"] }
+            ? { ...c, descricao: form.descricao, valor: parseFloat(form.valor) || 0, vencimento: form.vencimento, fornecedor: form.fornecedor, categoria: form.categoria, subcategoria: form.subcategoria, subcategoriaFilho: form.subcategoriaFilho, status: form.status as ContaPagar["status"] }
             : c
         )
       )
@@ -127,6 +191,8 @@ export default function ContasAPagarPage() {
         status: form.status as ContaPagar["status"],
         fornecedor: form.fornecedor,
         categoria: form.categoria,
+        subcategoria: form.subcategoria,
+        subcategoriaFilho: form.subcategoriaFilho,
       }
       setContas((prev) => [...prev, newConta])
     }
@@ -224,7 +290,9 @@ export default function ContasAPagarPage() {
                     <span className="text-sm font-medium text-card-foreground">{conta.descricao}</span>
                   </div>
                   <span className="text-sm text-muted-foreground">{conta.fornecedor}</span>
-                  <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">{conta.categoria}</span>
+                  <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                    {[conta.categoria, conta.subcategoria, conta.subcategoriaFilho].filter(Boolean).join(" > ")}
+                  </span>
                   <span className="text-sm text-muted-foreground">{formatDateDisplay(conta.vencimento)}</span>
                   <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                     conta.status === "pago"
@@ -277,21 +345,38 @@ export default function ContasAPagarPage() {
               <Label htmlFor="fornecedor">Fornecedor</Label>
               <Input id="fornecedor" placeholder="Nome do fornecedor" value={form.fornecedor} onChange={(e) => setForm({ ...form, fornecedor: e.target.value })} />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="categoria">Categoria</Label>
+              <select id="categoria" value={form.categoria} onChange={(e) => setForm({ ...form, categoria: e.target.value, subcategoria: "", subcategoriaFilho: "" })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                <option value="">Selecione...</option>
+                {CATEGORIAS_PAGAR.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            {subcategoriasDisponiveis.length > 0 && (
               <div className="space-y-2">
-                <Label htmlFor="categoria">Categoria</Label>
-                <select id="categoria" value={form.categoria} onChange={(e) => setForm({ ...form, categoria: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                  {CATEGORIAS_PAGAR.map((c) => <option key={c} value={c}>{c}</option>)}
+                <Label htmlFor="subcategoria">Subcategoria</Label>
+                <select id="subcategoria" value={form.subcategoria} onChange={(e) => setForm({ ...form, subcategoria: e.target.value, subcategoriaFilho: "" })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                  <option value="">Selecione...</option>
+                  {subcategoriasDisponiveis.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
+            )}
+            {filhosDisponiveis.length > 0 && (
               <div className="space-y-2">
-                <Label htmlFor="status">Status</Label>
-                <select id="status" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as ContaPagar["status"] })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                  <option value="pendente">Pendente</option>
-                  <option value="pago">Pago</option>
-                  <option value="vencido">Vencido</option>
+                <Label htmlFor="subcategoriaFilho">Subcategoria Filho</Label>
+                <select id="subcategoriaFilho" value={form.subcategoriaFilho} onChange={(e) => setForm({ ...form, subcategoriaFilho: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                  <option value="">Selecione...</option>
+                  {filhosDisponiveis.map((f) => <option key={f} value={f}>{f}</option>)}
                 </select>
               </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="status">Status</Label>
+              <select id="status" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as ContaPagar["status"] })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                <option value="pendente">Pendente</option>
+                <option value="pago">Pago</option>
+                <option value="vencido">Vencido</option>
+              </select>
             </div>
           </div>
           <DialogFooter>

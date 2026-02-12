@@ -34,19 +34,66 @@ interface ContaReceber {
   status: "pendente" | "recebido" | "vencido"
   cliente: string
   categoria: string
+  subcategoria: string
+  subcategoriaFilho: string
 }
 
-const contasIniciais: ContaReceber[] = [
-  { id: 1, descricao: "Servico de Consultoria", valor: 15000.0, vencimento: "2026-02-12", status: "pendente", cliente: "Empresa Alpha", categoria: "Servicos" },
-  { id: 2, descricao: "Projeto de BPO", valor: 8500.0, vencimento: "2026-02-18", status: "pendente", cliente: "Grupo Beta", categoria: "Projetos" },
-  { id: 3, descricao: "Terceirizacao Financeira", valor: 6200.0, vencimento: "2026-02-05", status: "recebido", cliente: "Corp Gamma", categoria: "Servicos" },
-  { id: 4, descricao: "Auditoria Mensal", valor: 4800.0, vencimento: "2026-02-01", status: "recebido", cliente: "Delta LTDA", categoria: "Servicos" },
-  { id: 5, descricao: "Gestao de Folha", valor: 9300.0, vencimento: "2026-02-22", status: "pendente", cliente: "Omega SA", categoria: "Projetos" },
-  { id: 6, descricao: "Assessoria Fiscal", valor: 3200.0, vencimento: "2026-01-28", status: "vencido", cliente: "Sigma Corp", categoria: "Servicos" },
-  { id: 7, descricao: "Treinamento Equipe", valor: 2800.0, vencimento: "2026-02-25", status: "pendente", cliente: "Phi Industries", categoria: "Treinamento" },
-]
+// Hierarquia: Categoria > Subcategoria > Filho
+const CATEGORIAS_HIERARQUIA: Record<string, Record<string, string[]>> = {
+  "Salario": {
+    "Salario Fixo": [],
+    "13o Salario": [],
+    "Ferias": [],
+    "Bonus": ["Bonus Anual", "PLR"],
+    "Horas Extras": [],
+  },
+  "Freelancer": {
+    "Projetos Web": ["Frontend", "Backend"],
+    "Consultoria": [],
+    "Design": [],
+  },
+  "Investimentos": {
+    "Dividendos": [],
+    "Renda Fixa": ["CDB", "Tesouro Direto"],
+    "Fundos Imobiliarios": [],
+  },
+  "Servicos": {
+    "Consultoria Financeira": [],
+    "Auditoria": [],
+    "Assessoria Fiscal": [],
+    "BPO": [],
+  },
+  "Projetos": {
+    "BPO Financeiro": [],
+    "Gestao de Folha": [],
+    "Implantacao": [],
+  },
+  "Treinamento": {
+    "Presencial": [],
+    "Online": [],
+  },
+  "Consultoria": {
+    "Financeira": [],
+    "Tributaria": [],
+    "Trabalhista": [],
+  },
+  "Produtos": {
+    "Software": [],
+    "Licencas": [],
+  },
+}
 
-const CATEGORIAS_RECEBER = ["Servicos", "Projetos", "Treinamento", "Consultoria", "Produtos"]
+const CATEGORIAS_RECEBER = Object.keys(CATEGORIAS_HIERARQUIA)
+
+const contasIniciais: ContaReceber[] = [
+  { id: 1, descricao: "Servico de Consultoria", valor: 15000.0, vencimento: "2026-02-12", status: "pendente", cliente: "Empresa Alpha", categoria: "Servicos", subcategoria: "Consultoria Financeira", subcategoriaFilho: "" },
+  { id: 2, descricao: "Projeto de BPO", valor: 8500.0, vencimento: "2026-02-18", status: "pendente", cliente: "Grupo Beta", categoria: "Projetos", subcategoria: "BPO Financeiro", subcategoriaFilho: "" },
+  { id: 3, descricao: "Terceirizacao Financeira", valor: 6200.0, vencimento: "2026-02-05", status: "recebido", cliente: "Corp Gamma", categoria: "Servicos", subcategoria: "BPO", subcategoriaFilho: "" },
+  { id: 4, descricao: "Auditoria Mensal", valor: 4800.0, vencimento: "2026-02-01", status: "recebido", cliente: "Delta LTDA", categoria: "Servicos", subcategoria: "Auditoria", subcategoriaFilho: "" },
+  { id: 5, descricao: "Gestao de Folha", valor: 9300.0, vencimento: "2026-02-22", status: "pendente", cliente: "Omega SA", categoria: "Projetos", subcategoria: "Gestao de Folha", subcategoriaFilho: "" },
+  { id: 6, descricao: "Assessoria Fiscal", valor: 3200.0, vencimento: "2026-01-28", status: "vencido", cliente: "Sigma Corp", categoria: "Servicos", subcategoria: "Assessoria Fiscal", subcategoriaFilho: "" },
+  { id: 7, descricao: "Treinamento Equipe", valor: 2800.0, vencimento: "2026-02-25", status: "pendente", cliente: "Phi Industries", categoria: "Treinamento", subcategoria: "Presencial", subcategoriaFilho: "" },
+]
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
@@ -57,7 +104,7 @@ function formatDateDisplay(dateStr: string) {
   return `${d}/${m}/${y}`
 }
 
-const emptyForm = { descricao: "", valor: "", vencimento: "", cliente: "", categoria: "Servicos", status: "pendente" as const }
+const emptyForm = { descricao: "", valor: "", vencimento: "", cliente: "", categoria: "Servicos", subcategoria: "", subcategoriaFilho: "", status: "pendente" as const }
 
 export default function ContasAReceberPage() {
   const [filterStatus, setFilterStatus] = useState<"Todos" | "Pendente" | "Recebido" | "Vencido">("Todos")
@@ -102,10 +149,15 @@ export default function ContasAReceberPage() {
       vencimento: conta.vencimento,
       cliente: conta.cliente,
       categoria: conta.categoria,
+      subcategoria: conta.subcategoria,
+      subcategoriaFilho: conta.subcategoriaFilho,
       status: conta.status,
     })
     setDialogOpen(true)
   }
+
+  const subcategoriasDisponiveis = form.categoria ? Object.keys(CATEGORIAS_HIERARQUIA[form.categoria] || {}) : []
+  const filhosDisponiveis = form.categoria && form.subcategoria ? (CATEGORIAS_HIERARQUIA[form.categoria]?.[form.subcategoria] || []) : []
 
   function handleSave() {
     if (!form.descricao.trim()) return
@@ -113,7 +165,7 @@ export default function ContasAReceberPage() {
       setContas((prev) =>
         prev.map((c) =>
           c.id === editingConta.id
-            ? { ...c, descricao: form.descricao, valor: parseFloat(form.valor) || 0, vencimento: form.vencimento, cliente: form.cliente, categoria: form.categoria, status: form.status as ContaReceber["status"] }
+            ? { ...c, descricao: form.descricao, valor: parseFloat(form.valor) || 0, vencimento: form.vencimento, cliente: form.cliente, categoria: form.categoria, subcategoria: form.subcategoria, subcategoriaFilho: form.subcategoriaFilho, status: form.status as ContaReceber["status"] }
             : c
         )
       )
@@ -126,6 +178,8 @@ export default function ContasAReceberPage() {
         status: form.status as ContaReceber["status"],
         cliente: form.cliente,
         categoria: form.categoria,
+        subcategoria: form.subcategoria,
+        subcategoriaFilho: form.subcategoriaFilho,
       }
       setContas((prev) => [...prev, newConta])
     }
@@ -223,7 +277,9 @@ export default function ContasAReceberPage() {
                     <span className="text-sm font-medium text-card-foreground">{conta.descricao}</span>
                   </div>
                   <span className="text-sm text-muted-foreground">{conta.cliente}</span>
-                  <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">{conta.categoria}</span>
+                  <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                    {[conta.categoria, conta.subcategoria, conta.subcategoriaFilho].filter(Boolean).join(" > ")}
+                  </span>
                   <span className="text-sm text-muted-foreground">{formatDateDisplay(conta.vencimento)}</span>
                   <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
                     conta.status === "recebido"
@@ -276,21 +332,38 @@ export default function ContasAReceberPage() {
               <Label htmlFor="cliente">Cliente</Label>
               <Input id="cliente" placeholder="Nome do cliente" value={form.cliente} onChange={(e) => setForm({ ...form, cliente: e.target.value })} />
             </div>
-            <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="categoria">Categoria</Label>
+              <select id="categoria" value={form.categoria} onChange={(e) => setForm({ ...form, categoria: e.target.value, subcategoria: "", subcategoriaFilho: "" })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                <option value="">Selecione...</option>
+                {CATEGORIAS_RECEBER.map((c) => <option key={c} value={c}>{c}</option>)}
+              </select>
+            </div>
+            {subcategoriasDisponiveis.length > 0 && (
               <div className="space-y-2">
-                <Label htmlFor="categoria">Categoria</Label>
-                <select id="categoria" value={form.categoria} onChange={(e) => setForm({ ...form, categoria: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                  {CATEGORIAS_RECEBER.map((c) => <option key={c} value={c}>{c}</option>)}
+                <Label htmlFor="subcategoria">Subcategoria</Label>
+                <select id="subcategoria" value={form.subcategoria} onChange={(e) => setForm({ ...form, subcategoria: e.target.value, subcategoriaFilho: "" })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                  <option value="">Selecione...</option>
+                  {subcategoriasDisponiveis.map((s) => <option key={s} value={s}>{s}</option>)}
                 </select>
               </div>
+            )}
+            {filhosDisponiveis.length > 0 && (
               <div className="space-y-2">
-                <Label htmlFor="status">Status</Label>
-                <select id="status" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as ContaReceber["status"] })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                  <option value="pendente">Pendente</option>
-                  <option value="recebido">Recebido</option>
-                  <option value="vencido">Vencido</option>
+                <Label htmlFor="subcategoriaFilho">Subcategoria Filho</Label>
+                <select id="subcategoriaFilho" value={form.subcategoriaFilho} onChange={(e) => setForm({ ...form, subcategoriaFilho: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                  <option value="">Selecione...</option>
+                  {filhosDisponiveis.map((f) => <option key={f} value={f}>{f}</option>)}
                 </select>
               </div>
+            )}
+            <div className="space-y-2">
+              <Label htmlFor="status">Status</Label>
+              <select id="status" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value as ContaReceber["status"] })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                <option value="pendente">Pendente</option>
+                <option value="recebido">Recebido</option>
+                <option value="vencido">Vencido</option>
+              </select>
             </div>
           </div>
           <DialogFooter>

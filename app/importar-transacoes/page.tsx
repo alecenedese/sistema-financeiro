@@ -37,12 +37,14 @@ interface MappingRule {
   keyword: string // keyword to match in MEMO
   categoria: string
   subcategoria: string
+  subcategoriaFilho: string
   clienteFornecedor: string
 }
 
 interface TransactionRow extends OFXTransaction {
   categoria: string
   subcategoria: string
+  subcategoriaFilho: string
   clienteFornecedor: string
   selected: boolean
 }
@@ -59,28 +61,80 @@ interface ImportHistoryItem {
 
 // ---------- Data ----------
 
-const categoriasData: Record<string, { tipo: "Receita" | "Despesa"; subcategorias: string[] }> = {
-  "Moradia": { tipo: "Despesa", subcategorias: ["Aluguel", "Condominio", "Conta de Energia", "Conta de Agua", "Internet"] },
-  "Transporte": { tipo: "Despesa", subcategorias: ["Combustivel", "Estacionamento", "Manutencao Veiculo", "Transporte Publico"] },
-  "Alimentacao": { tipo: "Despesa", subcategorias: ["Supermercado", "Restaurante", "Delivery", "Padaria", "Cantina", "Conveniencia"] },
-  "Saude": { tipo: "Despesa", subcategorias: ["Plano de Saude", "Farmacia", "Consultas"] },
-  "Lazer": { tipo: "Despesa", subcategorias: ["Streaming", "Cinema", "Viagens", "Esportes"] },
-  "Servicos": { tipo: "Despesa", subcategorias: ["Pagamentos Digitais", "Assinaturas", "Taxas"] },
-  "Salario": { tipo: "Receita", subcategorias: ["Salario Fixo", "13o Salario", "Ferias", "Bonus", "Horas Extras"] },
-  "Freelancer": { tipo: "Receita", subcategorias: ["Projetos Web", "Consultoria", "Design"] },
-  "Investimentos": { tipo: "Receita", subcategorias: ["Dividendos", "Renda Fixa", "Fundos Imobiliarios"] },
-  "Transferencias": { tipo: "Receita", subcategorias: ["PIX Recebido", "TED Recebido", "DOC Recebido"] },
-  "Outros": { tipo: "Despesa", subcategorias: ["Diversos", "Sem Categoria"] },
+const categoriasData: Record<string, { tipo: "Receita" | "Despesa"; subcategorias: Record<string, string[]> }> = {
+  "Moradia": { tipo: "Despesa", subcategorias: {
+    "Aluguel": ["Residencial", "Comercial"],
+    "Condominio": ["Taxa Ordinaria", "Taxa Extra"],
+    "Conta de Energia": [],
+    "Conta de Agua": [],
+    "Internet": [],
+  }},
+  "Transporte": { tipo: "Despesa", subcategorias: {
+    "Combustivel": ["Gasolina", "Etanol"],
+    "Estacionamento": [],
+    "Manutencao Veiculo": ["Revisao", "Pneus", "Funilaria"],
+    "Transporte Publico": [],
+  }},
+  "Alimentacao": { tipo: "Despesa", subcategorias: {
+    "Supermercado": [],
+    "Restaurante": ["Almoco", "Jantar"],
+    "Delivery": [],
+    "Padaria": [],
+    "Cantina": [],
+    "Conveniencia": [],
+  }},
+  "Saude": { tipo: "Despesa", subcategorias: {
+    "Plano de Saude": [],
+    "Farmacia": [],
+    "Consultas": ["Clinico Geral", "Especialista"],
+  }},
+  "Lazer": { tipo: "Despesa", subcategorias: {
+    "Streaming": [],
+    "Cinema": [],
+    "Viagens": ["Nacional", "Internacional"],
+    "Esportes": [],
+  }},
+  "Servicos": { tipo: "Despesa", subcategorias: {
+    "Pagamentos Digitais": [],
+    "Assinaturas": [],
+    "Taxas": [],
+  }},
+  "Salario": { tipo: "Receita", subcategorias: {
+    "Salario Fixo": [],
+    "13o Salario": [],
+    "Ferias": [],
+    "Bonus": ["Bonus Anual", "PLR"],
+    "Horas Extras": [],
+  }},
+  "Freelancer": { tipo: "Receita", subcategorias: {
+    "Projetos Web": ["Frontend", "Backend"],
+    "Consultoria": [],
+    "Design": [],
+  }},
+  "Investimentos": { tipo: "Receita", subcategorias: {
+    "Dividendos": [],
+    "Renda Fixa": ["CDB", "Tesouro Direto"],
+    "Fundos Imobiliarios": [],
+  }},
+  "Transferencias": { tipo: "Receita", subcategorias: {
+    "PIX Recebido": [],
+    "TED Recebido": [],
+    "DOC Recebido": [],
+  }},
+  "Outros": { tipo: "Despesa", subcategorias: {
+    "Diversos": [],
+    "Sem Categoria": [],
+  }},
 }
 
 const allCategorias = Object.keys(categoriasData)
 
 const initialRules: MappingRule[] = [
-  { id: 1, keyword: "CANTINA", categoria: "Alimentacao", subcategoria: "Cantina", clienteFornecedor: "Cantina" },
-  { id: 2, keyword: "SUPERMERCADO", categoria: "Alimentacao", subcategoria: "Supermercado", clienteFornecedor: "" },
-  { id: 3, keyword: "CONVENIENCIA", categoria: "Alimentacao", subcategoria: "Conveniencia", clienteFornecedor: "" },
-  { id: 4, keyword: "SYNC PAY", categoria: "Servicos", subcategoria: "Pagamentos Digitais", clienteFornecedor: "Sync Pay" },
-  { id: 5, keyword: "PIX", categoria: "Transferencias", subcategoria: "PIX Recebido", clienteFornecedor: "" },
+  { id: 1, keyword: "CANTINA", categoria: "Alimentacao", subcategoria: "Cantina", subcategoriaFilho: "", clienteFornecedor: "Cantina" },
+  { id: 2, keyword: "SUPERMERCADO", categoria: "Alimentacao", subcategoria: "Supermercado", subcategoriaFilho: "", clienteFornecedor: "" },
+  { id: 3, keyword: "CONVENIENCIA", categoria: "Alimentacao", subcategoria: "Conveniencia", subcategoriaFilho: "", clienteFornecedor: "" },
+  { id: 4, keyword: "SYNC PAY", categoria: "Servicos", subcategoria: "Pagamentos Digitais", subcategoriaFilho: "", clienteFornecedor: "Sync Pay" },
+  { id: 5, keyword: "PIX", categoria: "Transferencias", subcategoria: "PIX Recebido", subcategoriaFilho: "", clienteFornecedor: "" },
 ]
 
 const initialHistory: ImportHistoryItem[] = [
@@ -212,18 +266,19 @@ export default function ImportarTransacoesPage() {
 
   // Auto-match a transaction against saved rules
   const applyRules = useCallback(
-    (tx: OFXTransaction): { categoria: string; subcategoria: string; clienteFornecedor: string } => {
+    (tx: OFXTransaction): { categoria: string; subcategoria: string; subcategoriaFilho: string; clienteFornecedor: string } => {
       const memoUpper = tx.memo.toUpperCase()
       for (const rule of rules) {
         if (memoUpper.includes(rule.keyword.toUpperCase())) {
           return {
             categoria: rule.categoria,
             subcategoria: rule.subcategoria,
+            subcategoriaFilho: rule.subcategoriaFilho,
             clienteFornecedor: rule.clienteFornecedor || extractClienteFornecedor(tx.memo),
           }
         }
       }
-      return { categoria: "", subcategoria: "", clienteFornecedor: extractClienteFornecedor(tx.memo) }
+      return { categoria: "", subcategoria: "", subcategoriaFilho: "", clienteFornecedor: extractClienteFornecedor(tx.memo) }
     },
     [rules]
   )
@@ -250,6 +305,7 @@ export default function ImportarTransacoesPage() {
             ...tx,
             categoria: matched.categoria,
             subcategoria: matched.subcategoria,
+            subcategoriaFilho: matched.subcategoriaFilho,
             clienteFornecedor: matched.clienteFornecedor,
             selected: true,
           }
@@ -285,11 +341,19 @@ export default function ImportarTransacoesPage() {
     setTransactions((prev) => {
       const next = [...prev]
       const updated = { ...next[idx], [field]: value }
-      // When changing categoria, reset subcategoria if it doesn't match
+      // When changing categoria, reset subcategoria and filho
       if (field === "categoria") {
-        const subs = categoriasData[value as string]?.subcategorias || []
+        const subs = Object.keys(categoriasData[value as string]?.subcategorias || {})
         if (!subs.includes(updated.subcategoria)) {
           updated.subcategoria = ""
+          updated.subcategoriaFilho = ""
+        }
+      }
+      // When changing subcategoria, reset filho if it doesn't match
+      if (field === "subcategoria") {
+        const filhos = updated.categoria ? (categoriasData[updated.categoria]?.subcategorias?.[value as string] || []) : []
+        if (!filhos.includes(updated.subcategoriaFilho)) {
+          updated.subcategoriaFilho = ""
         }
       }
       next[idx] = updated
@@ -319,6 +383,7 @@ export default function ImportarTransacoesPage() {
               keyword: kw,
               categoria: tx.categoria,
               subcategoria: tx.subcategoria,
+              subcategoriaFilho: tx.subcategoriaFilho,
               clienteFornecedor: tx.clienteFornecedor,
             })
           }
@@ -387,6 +452,7 @@ export default function ImportarTransacoesPage() {
           ...tx,
           categoria: matched.categoria || tx.categoria,
           subcategoria: matched.subcategoria || tx.subcategoria,
+          subcategoriaFilho: matched.subcategoriaFilho || tx.subcategoriaFilho,
           clienteFornecedor: matched.clienteFornecedor || tx.clienteFornecedor,
         }
       })
@@ -502,13 +568,9 @@ export default function ImportarTransacoesPage() {
                       <div key={rule.id} className="flex items-center gap-4 px-5 py-3">
                         <span className="rounded-md bg-muted px-2.5 py-1 text-xs font-mono font-medium text-foreground">{rule.keyword}</span>
                         <ArrowLeftRight className="h-3 w-3 text-muted-foreground shrink-0" />
-                        <span className="text-sm text-card-foreground">{rule.categoria}</span>
-                        {rule.subcategoria && (
-                          <>
-                            <span className="text-muted-foreground">/</span>
-                            <span className="text-sm text-muted-foreground">{rule.subcategoria}</span>
-                          </>
-                        )}
+                        <span className="text-sm text-card-foreground">
+                          {[rule.categoria, rule.subcategoria, rule.subcategoriaFilho].filter(Boolean).join(" > ")}
+                        </span>
                         {rule.clienteFornecedor && (
                           <span className="ml-auto rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
                             {rule.clienteFornecedor}
@@ -606,7 +668,7 @@ export default function ImportarTransacoesPage() {
 
                 {/* Transactions review table */}
                 <div className="rounded-xl border border-border bg-card shadow-sm overflow-x-auto">
-                  <table className="w-full min-w-[900px]">
+                  <table className="w-full min-w-[1050px]">
                     <thead>
                       <tr className="border-b border-border text-xs font-semibold uppercase text-muted-foreground">
                         <th className="px-3 py-3 text-left w-10">
@@ -617,13 +679,15 @@ export default function ImportarTransacoesPage() {
                         <th className="px-3 py-3 text-right w-24">Valor</th>
                         <th className="px-3 py-3 text-left">Categoria</th>
                         <th className="px-3 py-3 text-left">Subcategoria</th>
+                        <th className="px-3 py-3 text-left">Sub-Filho</th>
                         <th className="px-3 py-3 text-left">Cliente / Fornecedor</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
                       {transactions.map((tx, idx) => {
                         const isCredit = tx.amount >= 0
-                        const subcats = tx.categoria ? (categoriasData[tx.categoria]?.subcategorias || []) : []
+                        const subcats = tx.categoria ? Object.keys(categoriasData[tx.categoria]?.subcategorias || {}) : []
+                        const filhos = (tx.categoria && tx.subcategoria) ? (categoriasData[tx.categoria]?.subcategorias?.[tx.subcategoria] || []) : []
                         const isAutoMatched = tx.categoria !== ""
                         return (
                           <tr
@@ -680,6 +744,15 @@ export default function ImportarTransacoesPage() {
                                 onChange={(val) => updateTx(idx, "subcategoria", val)}
                                 placeholder={tx.categoria ? "Selecionar" : "-"}
                                 width="w-36"
+                              />
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <InlineDropdown
+                                value={tx.subcategoriaFilho}
+                                options={filhos}
+                                onChange={(val) => updateTx(idx, "subcategoriaFilho", val)}
+                                placeholder={filhos.length > 0 ? "Selecionar" : "-"}
+                                width="w-32"
                               />
                             </td>
                             <td className="px-3 py-2.5">
@@ -814,8 +887,7 @@ export default function ImportarTransacoesPage() {
                   </span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm text-card-foreground">
-                      {rule.categoria}
-                      {rule.subcategoria && <span className="text-muted-foreground"> / {rule.subcategoria}</span>}
+                      {[rule.categoria, rule.subcategoria, rule.subcategoriaFilho].filter(Boolean).join(" > ")}
                     </p>
                     {rule.clienteFornecedor && (
                       <p className="text-xs text-muted-foreground">{rule.clienteFornecedor}</p>
