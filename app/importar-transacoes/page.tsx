@@ -493,8 +493,8 @@ export default function ImportarTransacoesPage() {
     if (splitTransactionIdx === null) return
     const tx = transactions[splitTransactionIdx]
     const totalSplit = splitEntries.reduce((sum, e) => sum + e.valor, 0)
-    if (Math.abs(totalSplit - tx.amount) > 0.01) {
-      alert(`Total das divisoes (R$ ${totalSplit.toFixed(2)}) nao bate com o valor original (R$ ${tx.amount.toFixed(2)})`)
+    if (Math.abs(totalSplit - Math.abs(tx.amount)) > 0.01) {
+      alert(`Total das divisoes (R$ ${totalSplit.toFixed(2)}) nao bate com o valor original (R$ ${Math.abs(tx.amount).toFixed(2)})`)
       return
     }
     const updated = { ...tx, isSplit: true, splits: [...splitEntries] }
@@ -1259,8 +1259,8 @@ export default function ImportarTransacoesPage() {
                     </p>
                   </div>
                   <div className="text-right">
-                    <p className={`text-xs font-medium ${Math.abs(splitEntries.reduce((sum, e) => sum + e.valor, 0) - transactions[splitTransactionIdx].amount) < 0.01 ? "text-[hsl(142,71%,40%)]" : "text-[hsl(0,72%,51%)]"}`}>
-                      {Math.abs(splitEntries.reduce((sum, e) => sum + e.valor, 0) - transactions[splitTransactionIdx].amount) < 0.01 ? "CORRETO" : "DIFERENCA: " + formatCurrency(Math.abs(splitEntries.reduce((sum, e) => sum + e.valor, 0) - transactions[splitTransactionIdx].amount))}
+                    <p className={`text-xs font-medium ${Math.abs(splitEntries.reduce((sum, e) => sum + e.valor, 0) - Math.abs(transactions[splitTransactionIdx].amount)) < 0.01 ? "text-[hsl(142,71%,40%)]" : "text-[hsl(0,72%,51%)]"}`}>
+                      {Math.abs(splitEntries.reduce((sum, e) => sum + e.valor, 0) - Math.abs(transactions[splitTransactionIdx].amount)) < 0.01 ? "CORRETO" : "DIFERENCA: " + formatCurrency(Math.abs(splitEntries.reduce((sum, e) => sum + e.valor, 0) - Math.abs(transactions[splitTransactionIdx].amount)))}
                     </p>
                   </div>
                 </div>
