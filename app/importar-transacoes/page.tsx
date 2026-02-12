@@ -375,6 +375,8 @@ export default function ImportarTransacoesPage() {
       const parsed = parseOFX(content)
       setOfxData(parsed)
 
+      console.log("[v0] PARSED TRANSACTIONS:", parsed.transactions.map((t) => ({ memo: t.memo, amount: t.amount, type: t.type })))
+
       const rows: TransactionRow[] = parsed.transactions
         .filter((tx) => tx.amount !== 0)
         .map((tx) => {
