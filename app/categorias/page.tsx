@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
+import { Suspense } from "react"
 import useSWR from "swr"
 import { createClient } from "@/lib/supabase/client"
 import { AppSidebar } from "@/components/app-sidebar"
@@ -99,7 +100,11 @@ async function fetchCategorias(): Promise<Categoria[]> {
 
 type DialogMode = "categoria" | "subcategoria" | "subcategoria-filho"
 
-export default function CategoriasPage() {
+export default function CategoriasPageWrapper() {
+  return <Suspense><CategoriasPage /></Suspense>
+}
+
+function CategoriasPage() {
   const { data: categorias, error, isLoading, mutate } = useSWR("categorias", fetchCategorias)
 
   const [expandedCats, setExpandedCats] = useState<Set<number>>(new Set())

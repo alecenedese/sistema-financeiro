@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
+import { Suspense } from "react"
 import useSWR from "swr"
 import { createClient } from "@/lib/supabase/client"
 import { AppSidebar } from "@/components/app-sidebar"
@@ -134,7 +135,11 @@ function formatDateDisplay(dateStr: string) {
 
 const emptyForm = { descricao: "", valor: "", vencimento: "", fornecedor_id: "", categoria_id: "", subcategoria_id: "", subcategoria_filho_id: "", conta_bancaria_id: "", status: "pendente" }
 
-export default function ContasAPagarPage() {
+export default function ContasAPagarPageWrapper() {
+  return <Suspense><ContasAPagarPage /></Suspense>
+}
+
+function ContasAPagarPage() {
   const { data: contas, error, isLoading, mutate } = useSWR("contas_pagar", fetchContas)
   const { data: hierarchy } = useSWR("hierarchy_pagar", fetchHierarchy)
   const { data: contasBancarias = [] } = useSWR("contas_bancarias_pagar", fetchContasBancarias)

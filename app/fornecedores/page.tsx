@@ -15,6 +15,7 @@ import {
 } from "lucide-react"
 import { useState, useEffect, useCallback } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
+import { Suspense } from "react"
 import {
   Dialog,
   DialogContent,
@@ -62,7 +63,11 @@ async function fetchFornecedores(): Promise<Fornecedor[]> {
 
 const emptyForm = { nome: "", documento: "", email: "", telefone: "" }
 
-export default function FornecedoresPage() {
+export default function FornecedoresPageWrapper() {
+  return <Suspense><FornecedoresPage /></Suspense>
+}
+
+function FornecedoresPage() {
   const { data: fornecedores = [], mutate, isLoading } = useSWR("fornecedores", fetchFornecedores)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingItem, setEditingItem] = useState<Fornecedor | null>(null)

@@ -19,6 +19,7 @@ import {
 } from "lucide-react"
 import { useState, useEffect, useCallback } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
+import { Suspense } from "react"
 import {
   Dialog,
   DialogContent,
@@ -90,7 +91,11 @@ async function fetchContas(): Promise<ContaBancaria[]> {
 
 const emptyForm = { nome: "", tipo: "Conta Corrente", agencia: "", conta: "", saldo: "" }
 
-export default function ContasBancariasPage() {
+export default function ContasBancariasPageWrapper() {
+  return <Suspense><ContasBancariasPage /></Suspense>
+}
+
+function ContasBancariasPage() {
   const { data: contas = [], mutate, isLoading } = useSWR("contas_bancarias", fetchContas)
   const [showBalances, setShowBalances] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
