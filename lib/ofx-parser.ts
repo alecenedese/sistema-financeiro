@@ -58,17 +58,30 @@ export function parseOFX(content: string): OFXData {
 
   while ((match = trnPattern.exec(content)) !== null) {
     const block = match[1]
-    const type = getTagValue(block, "TRNTYPE") as "CREDIT" | "DEBIT"
+    const trnType = getTagValue(block, "TRNTYPE").toUpperCase()
     const dateRaw = getTagValue(block, "DTPOSTED")
     const amountStr = getTagValue(block, "TRNAMT")
     const fitId = getTagValue(block, "FITID")
     const memo = getTagValue(block, "MEMO")
-    const amount = parseFloat(amountStr.replace(",", "."))
+    let amount = parseFloat(amountStr.replace(",", "."))
 
     if (fitId && !isNaN(amount)) {
+      // Determine transaction type from TRNTYPE field or amount sign
+      let type: "CREDIT" | "DEBIT"
+      if (trnType === "DEBIT" || trnType === "PAYMENT" || trnType === "CHECK" || trnType === "FEE" || trnType === "XFER" && amount > 0) {
+        type = "DEBIT"
+        amount = -Math.abs(amount) // Ensure negative for debits
+      } else if (trnType === "CREDIT" || trnType === "DEP" || trnType === "DEPOSIT") {
+        type = "CREDIT"
+        amount = Math.abs(amount) // Ensure positive for credits
+      } else {
+        // Fallback to amount sign if TRNTYPE is unclear
+        type = amount >= 0 ? "CREDIT" : "DEBIT"
+      }
+
       transactions.push({
         id: fitId,
-        type: amount >= 0 ? "CREDIT" : "DEBIT",
+        type,
         date: formatDate(dateRaw),
         dateRaw,
         amount,
