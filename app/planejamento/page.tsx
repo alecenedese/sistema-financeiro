@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
+import { Suspense } from "react"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
 import { Target, TrendingUp, TrendingDown, Wallet, Plus, Pencil, Trash2 } from "lucide-react"
@@ -52,7 +53,11 @@ function formatCurrency(value: number) {
 
 const emptyForm = { categoria: "", meta: "", atual: "", descricao: "" }
 
-export default function PlanejamentoPage() {
+export default function PlanejamentoPageWrapper() {
+  return <Suspense><PlanejamentoPage /></Suspense>
+}
+
+function PlanejamentoPage() {
   const [metas, setMetas] = useState<Meta[]>(metasIniciais)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingMeta, setEditingMeta] = useState<Meta | null>(null)

@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
+import { Suspense } from "react"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
 import {
@@ -91,7 +92,11 @@ function formatDateDisplay(dateStr: string) {
 
 const emptyForm = { descricao: "", valor: "", data: "", categoria: "Moradia", conta: "Nubank", tipo: "saida" }
 
-export default function TransacoesPage() {
+export default function TransacoesPageWrapper() {
+  return <Suspense><TransacoesPage /></Suspense>
+}
+
+function TransacoesPage() {
   const [filterTipo, setFilterTipo] = useState<"Todos" | "Entradas" | "Saidas">("Todos")
   const [searchTerm, setSearchTerm] = useState("")
   const [transacoes, setTransacoes] = useState<Transacao[]>(transacoesIniciais)
