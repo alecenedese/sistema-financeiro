@@ -555,7 +555,7 @@ export default function ImportarTransacoesPage() {
             for (const split of tx.splits) {
               despesasToInsert.push({
                 descricao: tx.memo,
-                valor: split.valor,
+                valor: Math.abs(split.valor),
                 vencimento: tx.date.split("/").reverse().join("-"),
                 status: "pago",
                 fornecedor: split.fornecedor_id ? fornecedoresLista.find((f) => f.id === split.fornecedor_id)?.nome || tx.clienteFornecedor : tx.clienteFornecedor,
