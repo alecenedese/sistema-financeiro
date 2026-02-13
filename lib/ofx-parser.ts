@@ -58,17 +58,56 @@ export function parseOFX(content: string): OFXData {
 
   while ((match = trnPattern.exec(content)) !== null) {
     const block = match[1]
-    const type = getTagValue(block, "TRNTYPE") as "CREDIT" | "DEBIT"
+    const trnType = getTagValue(block, "TRNTYPE").toUpperCase()
     const dateRaw = getTagValue(block, "DTPOSTED")
     const amountStr = getTagValue(block, "TRNAMT")
     const fitId = getTagValue(block, "FITID")
     const memo = getTagValue(block, "MEMO")
-    const amount = parseFloat(amountStr.replace(",", "."))
+    let amount = parseFloat(amountStr.replace(",", "."))
 
     if (fitId && !isNaN(amount)) {
+      // Determine transaction type
+      let type: "CREDIT" | "DEBIT"
+      const memoUpper = memo.toUpperCase()
+      
+      // Keywords that indicate DEBIT (despesa/saída)
+      const debitKeywords = [
+        "COMPRA", "DEBITO", "PAGAMENTO", "PAG ", "TARIFA", "IOF", "SAQUE",
+        "TBI", "TRANSF ENVIADA", "TED ENVIADA", "DOC ENVIADO", "ANUIDADE",
+        "JUROS", "MULTA", "ENCARGO", "DEBITO AUTOMATICO", "COBRANCA"
+      ]
+      
+      // Keywords that indicate CREDIT (receita/entrada)
+      const creditKeywords = [
+        "TRANSFERENCIA PIX REM", "PIX RECEBIDO", "TED RECEBIDA", "DOC RECEBIDO",
+        "DEPOSITO", "CREDITO", "TRANSF RECEBIDA", "SALARIO", "RENDIMENTO",
+        "ESTORNO", "DEVOLUCAO", "REEMBOLSO"
+      ]
+      
+      // Check memo keywords first (most reliable for Brazilian banks)
+      const isDebit = debitKeywords.some(keyword => memoUpper.includes(keyword))
+      const isCredit = creditKeywords.some(keyword => memoUpper.includes(keyword))
+      
+      if (isDebit) {
+        type = "DEBIT"
+        amount = -Math.abs(amount) // Ensure negative for debits
+      } else if (isCredit) {
+        type = "CREDIT"
+        amount = Math.abs(amount) // Ensure positive for credits
+      } else if (trnType === "DEBIT" || trnType === "PAYMENT" || trnType === "CHECK" || trnType === "FEE") {
+        type = "DEBIT"
+        amount = -Math.abs(amount)
+      } else if (trnType === "CREDIT" || trnType === "DEP" || trnType === "DEPOSIT") {
+        type = "CREDIT"
+        amount = Math.abs(amount)
+      } else {
+        // Final fallback to amount sign
+        type = amount >= 0 ? "CREDIT" : "DEBIT"
+      }
+
       transactions.push({
         id: fitId,
-        type: amount >= 0 ? "CREDIT" : "DEBIT",
+        type,
         date: formatDate(dateRaw),
         dateRaw,
         amount,

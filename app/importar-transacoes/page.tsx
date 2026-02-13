@@ -23,6 +23,7 @@ import {
   Landmark,
   RotateCcw,
   Loader2,
+  Plus,
 } from "lucide-react"
 import {
   Dialog,
@@ -42,6 +43,16 @@ interface SubcategoriaFilhoRow { id: number; nome: string; subcategoria_id: numb
 interface ContaBancariaRow { id: number; nome: string; tipo: string }
 interface FornecedorRow { id: number; nome: string }
 interface ClienteRow { id: number; nome: string }
+
+interface TransactionSplit {
+  id: string // temporary UUID for UI
+  valor: number
+  categoria_id: number | null
+  subcategoria_id: number | null
+  subcategoria_filho_id: number | null
+  fornecedor_id?: number | null
+  cliente_id?: number | null
+}
 
 interface MappingRule {
   id: number
@@ -66,6 +77,8 @@ interface TransactionRow extends OFXTransaction {
   cliente_id: number | null
   clienteFornecedor: string
   selected: boolean
+  isSplit?: boolean
+  splits?: TransactionSplit[]
 }
 
 interface ImportHistoryItem {
@@ -280,6 +293,11 @@ export default function ImportarTransacoesPage() {
   const [saving, setSaving] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Split dialog state
+  const [splitDialogOpen, setSplitDialogOpen] = useState(false)
+  const [splitTransactionIdx, setSplitTransactionIdx] = useState<number | null>(null)
+  const [splitEntries, setSplitEntries] = useState<TransactionSplit[]>([])
+
   const allRules = rules || []
 
   // Category options for dropdowns
@@ -415,6 +433,77 @@ export default function ImportarTransacoesPage() {
     setTransactions((prev) => prev.map((t) => ({ ...t, selected: newVal })))
   }
 
+  // Split transaction handlers
+  function openSplitDialog(idx: number) {
+    setSplitTransactionIdx(idx)
+    const tx = transactions[idx]
+    if (tx.splits && tx.splits.length > 0) {
+      setSplitEntries([...tx.splits])
+    } else {
+      setSplitEntries([])
+    }
+    setSplitDialogOpen(true)
+  }
+
+  function closeSplitDialog() {
+    setSplitDialogOpen(false)
+    setSplitTransactionIdx(null)
+    setSplitEntries([])
+  }
+
+  function addSplitEntry() {
+    const newEntry: TransactionSplit = {
+      id: Math.random().toString(36).substr(2, 9),
+      valor: 0,
+      categoria_id: null,
+      subcategoria_id: null,
+      subcategoria_filho_id: null,
+    }
+    setSplitEntries([...splitEntries, newEntry])
+  }
+
+  function removeSplitEntry(entryId: string) {
+    setSplitEntries(splitEntries.filter((e) => e.id !== entryId))
+  }
+
+  function updateSplitEntry(entryId: string, field: keyof TransactionSplit, value: number | string | null) {
+    setSplitEntries((prev) =>
+      prev.map((e) => {
+        if (e.id !== entryId) return e
+        const updated = { ...e, [field]: value }
+        if (field === "categoria_id") {
+          const subs = (hierarchy?.subcategorias || []).filter((s) => s.categoria_id === Number(value))
+          if (!subs.find((s) => s.id === updated.subcategoria_id)) {
+            updated.subcategoria_id = null
+            updated.subcategoria_filho_id = null
+          }
+        }
+        if (field === "subcategoria_id") {
+          const filhos = (hierarchy?.filhos || []).filter((f) => f.subcategoria_id === Number(value))
+          if (!filhos.find((f) => f.id === updated.subcategoria_filho_id)) {
+            updated.subcategoria_filho_id = null
+          }
+        }
+        return updated
+      })
+    )
+  }
+
+  function saveSplit() {
+    if (splitTransactionIdx === null) return
+    const tx = transactions[splitTransactionIdx]
+    const totalSplit = splitEntries.reduce((sum, e) => sum + e.valor, 0)
+    if (Math.abs(totalSplit - Math.abs(tx.amount)) > 0.01) {
+      alert(`Total das divisoes (R$ ${totalSplit.toFixed(2)}) nao bate com o valor original (R$ ${Math.abs(tx.amount).toFixed(2)})`)
+      return
+    }
+    const updated = { ...tx, isSplit: true, splits: [...splitEntries] }
+    const newTransactions = [...transactions]
+    newTransactions[splitTransactionIdx] = updated
+    setTransactions(newTransactions)
+    closeSplitDialog()
+  }
+
   // Save rules from current mapping to Supabase
   async function saveNewRules() {
     const existingKeywords = new Set(allRules.map((r) => r.keyword.toUpperCase()))
@@ -459,10 +548,28 @@ export default function ImportarTransacoesPage() {
       const contaBancariaId = selectedContaBancariaId ? Number(selectedContaBancariaId) : null
 
       if (despesas.length > 0) {
-        await supabase.from("contas_pagar").insert(
-          despesas.map((tx) => {
+        const despesasToInsert = []
+        for (const tx of despesas) {
+          if (tx.isSplit && tx.splits && tx.splits.length > 0) {
+            // Insert each split as separate record
+            for (const split of tx.splits) {
+              despesasToInsert.push({
+                descricao: tx.memo,
+                valor: Math.abs(split.valor),
+                vencimento: tx.date.split("/").reverse().join("-"),
+                status: "pago",
+                fornecedor: split.fornecedor_id ? fornecedoresLista.find((f) => f.id === split.fornecedor_id)?.nome || tx.clienteFornecedor : tx.clienteFornecedor,
+                fornecedor_id: split.fornecedor_id,
+                categoria_id: split.categoria_id,
+                subcategoria_id: split.subcategoria_id,
+                subcategoria_filho_id: split.subcategoria_filho_id,
+                conta_bancaria_id: contaBancariaId,
+              })
+            }
+          } else {
+            // Single record
             const fornNome = tx.fornecedor_id ? fornecedoresLista.find((f) => f.id === tx.fornecedor_id)?.nome || tx.clienteFornecedor : tx.clienteFornecedor
-            return {
+            despesasToInsert.push({
               descricao: tx.memo,
               valor: Math.abs(tx.amount),
               vencimento: tx.date.split("/").reverse().join("-"),
@@ -473,16 +580,35 @@ export default function ImportarTransacoesPage() {
               subcategoria_id: tx.subcategoria_id,
               subcategoria_filho_id: tx.subcategoria_filho_id,
               conta_bancaria_id: contaBancariaId,
-            }
-          })
-        )
+            })
+          }
+        }
+        await supabase.from("contas_pagar").insert(despesasToInsert)
       }
 
       if (receitas.length > 0) {
-        await supabase.from("contas_receber").insert(
-          receitas.map((tx) => {
+        const receitasToInsert = []
+        for (const tx of receitas) {
+          if (tx.isSplit && tx.splits && tx.splits.length > 0) {
+            // Insert each split as separate record
+            for (const split of tx.splits) {
+              receitasToInsert.push({
+                descricao: tx.memo,
+                valor: split.valor,
+                vencimento: tx.date.split("/").reverse().join("-"),
+                status: "recebido",
+                cliente: split.cliente_id ? clientesLista.find((c) => c.id === split.cliente_id)?.nome || tx.clienteFornecedor : tx.clienteFornecedor,
+                cliente_id: split.cliente_id,
+                categoria_id: split.categoria_id,
+                subcategoria_id: split.subcategoria_id,
+                subcategoria_filho_id: split.subcategoria_filho_id,
+                conta_bancaria_id: contaBancariaId,
+              })
+            }
+          } else {
+            // Single record
             const cliNome = tx.cliente_id ? clientesLista.find((c) => c.id === tx.cliente_id)?.nome || tx.clienteFornecedor : tx.clienteFornecedor
-            return {
+            receitasToInsert.push({
               descricao: tx.memo,
               valor: tx.amount,
               vencimento: tx.date.split("/").reverse().join("-"),
@@ -493,9 +619,10 @@ export default function ImportarTransacoesPage() {
               subcategoria_id: tx.subcategoria_id,
               subcategoria_filho_id: tx.subcategoria_filho_id,
               conta_bancaria_id: contaBancariaId,
-            }
-          })
-        )
+            })
+          }
+        }
+        await supabase.from("contas_receber").insert(receitasToInsert)
       }
 
       const newEntry: ImportHistoryItem = {
@@ -785,6 +912,7 @@ export default function ImportarTransacoesPage() {
                         <th className="px-3 py-3 text-left">Subcategoria</th>
                         <th className="px-3 py-3 text-left">Sub-Filho</th>
                         <th className="px-3 py-3 text-left">Cliente / Fornecedor</th>
+                        <th className="px-3 py-3 text-right">Acoes</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
@@ -870,6 +998,13 @@ export default function ImportarTransacoesPage() {
                                   {clientesLista.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
                                 </select>
                               )}
+                            </td>
+                            <td className="px-3 py-2.5 text-right">
+                              <button type="button" onClick={() => openSplitDialog(idx)}
+                                className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors">
+                                <ArrowLeftRight className="h-3.5 w-3.5" />
+                                {tx.isSplit ? `${tx.splits?.length} divisoes` : "Dividir"}
+                              </button>
                             </td>
                           </tr>
                         )
@@ -1015,6 +1150,132 @@ export default function ImportarTransacoesPage() {
               className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
             >
               Fechar
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Split Transaction Dialog */}
+      <Dialog open={splitDialogOpen} onOpenChange={setSplitDialogOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Dividir Transacao</DialogTitle>
+            <DialogDescription>
+              Divida esta transacao em multiplas entradas com categorias e valores diferentes.
+            </DialogDescription>
+          </DialogHeader>
+
+          {splitTransactionIdx !== null && transactions[splitTransactionIdx] && (
+            <div className="space-y-6">
+              {/* Original Transaction Summary */}
+              <div className="rounded-lg border border-border bg-muted/50 p-4">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">TRANSACAO ORIGINAL</p>
+                    <p className="mt-1 text-sm text-card-foreground">{transactions[splitTransactionIdx].memo}</p>
+                  </div>
+                  <div className="text-right">
+                    <p className="text-xs font-medium text-muted-foreground">VALOR</p>
+                    <p className={`mt-1 text-lg font-bold ${transactions[splitTransactionIdx].amount < 0 ? "text-[hsl(0,72%,51%)]" : "text-[hsl(142,71%,40%)]"}`}>
+                      {transactions[splitTransactionIdx].amount < 0 ? "-" : "+"} {formatCurrency(Math.abs(transactions[splitTransactionIdx].amount))}
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Split Entries */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-semibold text-card-foreground">Divisoes</h4>
+                  <button type="button" onClick={addSplitEntry}
+                    className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium bg-primary text-primary-foreground hover:bg-primary/90 transition-colors">
+                    <Plus className="h-3.5 w-3.5" />
+                    Adicionar
+                  </button>
+                </div>
+
+                {splitEntries.length === 0 ? (
+                  <p className="py-4 text-center text-sm text-muted-foreground">Nenhuma divisao adicionada</p>
+                ) : (
+                  <div className="space-y-3">
+                    {splitEntries.map((entry, idx) => {
+                      const subcats = getSubcatOptions(entry.categoria_id?.toString() || "")
+                      const filhos = getFilhoOptions(entry.subcategoria_id?.toString() || "")
+                      return (
+                        <div key={entry.id} className="flex gap-2 rounded-lg border border-border bg-card p-3">
+                          <div className="flex-1 space-y-2">
+                            <div className="flex gap-2">
+                              <div className="flex-1">
+                                <label className="text-xs font-medium text-muted-foreground">Valor</label>
+                                <input type="number" step="0.01" value={entry.valor} onChange={(e) => updateSplitEntry(entry.id, "valor", parseFloat(e.target.value) || 0)}
+                                  className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-card-foreground outline-none focus:border-primary/50" />
+                              </div>
+                              <div className="flex-1">
+                                <label className="text-xs font-medium text-muted-foreground">Categoria</label>
+                                <select value={entry.categoria_id?.toString() || ""} onChange={(e) => updateSplitEntry(entry.id, "categoria_id", e.target.value ? Number(e.target.value) : null)}
+                                  className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-card-foreground outline-none focus:border-primary/50">
+                                  <option value="">Selecionar...</option>
+                                  {catOptions.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                                </select>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <div className="flex-1">
+                                <label className="text-xs font-medium text-muted-foreground">Subcategoria</label>
+                                <select value={entry.subcategoria_id?.toString() || ""} onChange={(e) => updateSplitEntry(entry.id, "subcategoria_id", e.target.value ? Number(e.target.value) : null)}
+                                  className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-card-foreground outline-none focus:border-primary/50">
+                                  <option value="">Selecionar...</option>
+                                  {subcats.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                                </select>
+                              </div>
+                              <div className="flex-1">
+                                <label className="text-xs font-medium text-muted-foreground">Sub-Filho</label>
+                                <select value={entry.subcategoria_filho_id?.toString() || ""} onChange={(e) => updateSplitEntry(entry.id, "subcategoria_filho_id", e.target.value ? Number(e.target.value) : null)}
+                                  className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-card-foreground outline-none focus:border-primary/50">
+                                  <option value="">Selecionar...</option>
+                                  {filhos.map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                                </select>
+                              </div>
+                            </div>
+                          </div>
+                          <button type="button" onClick={() => removeSplitEntry(entry.id)}
+                            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive transition-colors">
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Validation Summary */}
+              {splitEntries.length > 0 && (
+                <div className="flex items-center justify-between rounded-lg bg-muted/50 p-3">
+                  <div>
+                    <p className="text-xs font-medium text-muted-foreground">TOTAL DAS DIVISOES</p>
+                    <p className="mt-0.5 text-sm font-semibold text-card-foreground">
+                      {formatCurrency(splitEntries.reduce((sum, e) => sum + e.valor, 0))}
+                    </p>
+                  </div>
+                  <div className="text-right">
+                    <p className={`text-xs font-medium ${Math.abs(splitEntries.reduce((sum, e) => sum + e.valor, 0) - Math.abs(transactions[splitTransactionIdx].amount)) < 0.01 ? "text-[hsl(142,71%,40%)]" : "text-[hsl(0,72%,51%)]"}`}>
+                      {Math.abs(splitEntries.reduce((sum, e) => sum + e.valor, 0) - Math.abs(transactions[splitTransactionIdx].amount)) < 0.01 ? "CORRETO" : "DIFERENCA: " + formatCurrency(Math.abs(splitEntries.reduce((sum, e) => sum + e.valor, 0) - Math.abs(transactions[splitTransactionIdx].amount)))}
+                    </p>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          <DialogFooter>
+            <button type="button" onClick={closeSplitDialog}
+              className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-card-foreground hover:bg-muted transition-colors">
+              Cancelar
+            </button>
+            <button type="button" onClick={saveSplit} disabled={splitEntries.length === 0}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+              Salvar Divisao
             </button>
           </DialogFooter>
         </DialogContent>
