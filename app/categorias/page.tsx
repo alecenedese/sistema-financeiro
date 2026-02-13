@@ -52,9 +52,8 @@ interface Categoria {
 
 const COLORS = ["#1B3A5C", "#2C5F8A", "#7A8FA6", "#A8B8C8", "#3D7AB5", "#C4CFD9"]
 
-const supabase = createClient()
-
 async function fetchCategorias(): Promise<Categoria[]> {
+  const supabase = createClient()
   const { data: cats, error: catError } = await supabase
     .from("categorias")
     .select("*")
@@ -179,6 +178,7 @@ function CategoriasPage() {
     if (!formNome.trim()) return
     setSaving(true)
     try {
+      const supabase = createClient()
       if (editingCat) {
         await supabase.from("categorias").update({ nome: formNome, tipo: formTipo }).eq("id", editingCat.id)
       } else {
@@ -212,6 +212,7 @@ function CategoriasPage() {
     if (!formNome.trim() || !parentCatId) return
     setSaving(true)
     try {
+      const supabase = createClient()
       if (editingSub) {
         await supabase.from("subcategorias").update({ nome: formNome }).eq("id", editingSub.sub.id)
       } else {
@@ -247,6 +248,7 @@ function CategoriasPage() {
     if (!formNome.trim() || !parentSubId) return
     setSaving(true)
     try {
+      const supabase = createClient()
       if (editingFilho) {
         await supabase.from("subcategorias_filhos").update({ nome: formNome }).eq("id", editingFilho.filho.id)
       } else {
@@ -264,6 +266,7 @@ function CategoriasPage() {
     if (!deleteConfirm) return
     setSaving(true)
     try {
+      const supabase = createClient()
       if (deleteConfirm.type === "cat") {
         await supabase.from("categorias").delete().eq("id", deleteConfirm.catId)
       } else if (deleteConfirm.type === "sub") {
