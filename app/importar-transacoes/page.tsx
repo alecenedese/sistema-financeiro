@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
 import { parseOFX, type OFXTransaction, type OFXData } from "@/lib/ofx-parser"
+import { handleCurrencyInput, parseBRL, formatBRL } from "@/lib/currency-input"
 import {
   Upload,
   FileSpreadsheet,
@@ -297,6 +298,7 @@ export default function ImportarTransacoesPage() {
   const [splitDialogOpen, setSplitDialogOpen] = useState(false)
   const [splitTransactionIdx, setSplitTransactionIdx] = useState<number | null>(null)
   const [splitEntries, setSplitEntries] = useState<TransactionSplit[]>([])
+  const [splitDisplayValues, setSplitDisplayValues] = useState<Record<string, string>>({})
 
   const allRules = rules || []
 
@@ -439,8 +441,14 @@ export default function ImportarTransacoesPage() {
     const tx = transactions[idx]
     if (tx.splits && tx.splits.length > 0) {
       setSplitEntries([...tx.splits])
+      const displayVals: Record<string, string> = {}
+      for (const s of tx.splits) {
+        displayVals[s.id] = formatBRL(s.valor)
+      }
+      setSplitDisplayValues(displayVals)
     } else {
       setSplitEntries([])
+      setSplitDisplayValues({})
     }
     setSplitDialogOpen(true)
   }
@@ -449,6 +457,7 @@ export default function ImportarTransacoesPage() {
     setSplitDialogOpen(false)
     setSplitTransactionIdx(null)
     setSplitEntries([])
+    setSplitDisplayValues({})
   }
 
   function addSplitEntry() {
@@ -460,10 +469,25 @@ export default function ImportarTransacoesPage() {
       subcategoria_filho_id: null,
     }
     setSplitEntries([...splitEntries, newEntry])
+    setSplitDisplayValues((prev) => ({ ...prev, [newEntry.id]: "" }))
   }
 
   function removeSplitEntry(entryId: string) {
     setSplitEntries(splitEntries.filter((e) => e.id !== entryId))
+    setSplitDisplayValues((prev) => {
+      const next = { ...prev }
+      delete next[entryId]
+      return next
+    })
+  }
+
+  function updateSplitValor(entryId: string, inputValue: string) {
+    const formatted = handleCurrencyInput(inputValue)
+    setSplitDisplayValues((prev) => ({ ...prev, [entryId]: formatted }))
+    const numericValue = parseBRL(formatted)
+    setSplitEntries((prev) =>
+      prev.map((e) => (e.id === entryId ? { ...e, valor: numericValue } : e))
+    )
   }
 
   function updateSplitEntry(entryId: string, field: keyof TransactionSplit, value: number | string | null) {
@@ -494,7 +518,7 @@ export default function ImportarTransacoesPage() {
     const tx = transactions[splitTransactionIdx]
     const totalSplit = splitEntries.reduce((sum, e) => sum + e.valor, 0)
     if (Math.abs(totalSplit - Math.abs(tx.amount)) > 0.01) {
-      alert(`Total das divisoes (R$ ${totalSplit.toFixed(2)}) nao bate com o valor original (R$ ${Math.abs(tx.amount).toFixed(2)})`)
+      alert(`Total das divisoes (R$ ${formatBRL(totalSplit)}) nao bate com o valor original (R$ ${formatBRL(Math.abs(tx.amount))})`)
       return
     }
     const updated = { ...tx, isSplit: true, splits: [...splitEntries] }
@@ -1207,7 +1231,7 @@ export default function ImportarTransacoesPage() {
                             <div className="flex gap-2">
                               <div className="flex-1">
                                 <label className="text-xs font-medium text-muted-foreground">Valor</label>
-                                <input type="number" step="0.01" value={entry.valor} onChange={(e) => updateSplitEntry(entry.id, "valor", parseFloat(e.target.value) || 0)}
+                                <input type="text" placeholder="0,00" value={splitDisplayValues[entry.id] ?? ""} onChange={(e) => updateSplitValor(entry.id, e.target.value)}
                                   className="mt-1 w-full rounded-md border border-border bg-background px-2.5 py-1.5 text-sm text-card-foreground outline-none focus:border-primary/50" />
                               </div>
                               <div className="flex-1">

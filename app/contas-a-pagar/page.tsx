@@ -28,7 +28,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { handleCurrencyInput, parseBRL } from "@/lib/currency-input"
+import { handleCurrencyInput, parseBRL, formatBRL } from "@/lib/currency-input"
 
 interface CategoriaRow { id: number; nome: string; tipo: string }
 interface SubcategoriaRow { id: number; nome: string; categoria_id: number }
@@ -201,7 +201,7 @@ function ContasAPagarPage() {
     setEditingConta(conta)
     setForm({
       descricao: conta.descricao,
-      valor: conta.valor.toString(),
+      valor: formatBRL(conta.valor),
       vencimento: conta.vencimento,
       fornecedor_id: conta.fornecedor_id?.toString() || "",
       categoria_id: conta.categoria_id?.toString() || "",
