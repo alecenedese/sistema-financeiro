@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { handleCurrencyInput, parseBRL } from "@/lib/currency-input"
 
 interface CategoriaRow { id: number; nome: string; tipo: string }
 interface SubcategoriaRow { id: number; nome: string; categoria_id: number }
@@ -219,7 +220,7 @@ function ContasAPagarPage() {
       const selectedForn = fornecedoresLista.find((f) => f.id === Number(form.fornecedor_id))
       const payload = {
         descricao: form.descricao,
-        valor: parseFloat(form.valor) || 0,
+        valor: parseBRL(form.valor),
         vencimento: form.vencimento || "2026-02-28",
         fornecedor: selectedForn?.nome || "",
         fornecedor_id: form.fornecedor_id ? Number(form.fornecedor_id) : null,
@@ -402,10 +403,10 @@ function ContasAPagarPage() {
               <Input id="descricao" placeholder="Ex: Aluguel, Energia..." value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} />
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="valor">Valor</Label>
-                <Input id="valor" type="number" step="0.01" placeholder="0.00" value={form.valor} onChange={(e) => setForm({ ...form, valor: e.target.value })} />
-              </div>
+            <div className="space-y-2">
+              <Label htmlFor="valor">Valor</Label>
+              <Input id="valor" type="text" placeholder="0,00" value={form.valor} onChange={(e) => setForm({ ...form, valor: handleCurrencyInput(e.target.value) })} />
+            </div>
               <div className="space-y-2">
                 <Label htmlFor="vencimento">Vencimento</Label>
                 <Input id="vencimento" type="date" value={form.vencimento} onChange={(e) => setForm({ ...form, vencimento: e.target.value })} />
