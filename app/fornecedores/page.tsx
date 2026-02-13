@@ -47,9 +47,8 @@ interface Fornecedor {
   telefone: string
 }
 
-const supabase = createClient()
-
 async function fetchFornecedores(): Promise<Fornecedor[]> {
+  const supabase = createClient()
   const { data, error } = await supabase.from("fornecedores").select("*").order("nome")
   if (error) throw error
   return (data || []).map((r) => ({
@@ -110,6 +109,7 @@ function FornecedoresPage() {
     if (!form.nome.trim()) return
     setSaving(true)
     try {
+      const supabase = createClient()
       const payload = { nome: form.nome, documento: form.documento, email: form.email, telefone: form.telefone }
       if (editingItem) {
         await supabase.from("fornecedores").update(payload).eq("id", editingItem.id)
@@ -124,6 +124,7 @@ function FornecedoresPage() {
   }, [form, editingItem, mutate])
 
   const handleDelete = useCallback(async (item: Fornecedor) => {
+    const supabase = createClient()
     await supabase.from("fornecedores").delete().eq("id", item.id)
     await mutate()
     setDeleteConfirm(null)

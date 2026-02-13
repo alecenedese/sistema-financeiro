@@ -56,9 +56,8 @@ interface ContaReceber {
   cliente_nome: string
 }
 
-const supabase = createClient()
-
 async function fetchContas(): Promise<ContaReceber[]> {
+  const supabase = createClient()
   const { data, error } = await supabase
     .from("contas_receber")
     .select(`
@@ -102,6 +101,7 @@ interface CategoriaHierarchy {
 }
 
 async function fetchHierarchy(): Promise<CategoriaHierarchy> {
+  const supabase = createClient()
   const [catRes, subRes, filhoRes] = await Promise.all([
     supabase.from("categorias").select("id, nome, tipo").order("nome"),
     supabase.from("subcategorias").select("id, nome, categoria_id").order("nome"),
@@ -115,11 +115,13 @@ async function fetchHierarchy(): Promise<CategoriaHierarchy> {
 }
 
 async function fetchContasBancarias(): Promise<ContaBancariaRow[]> {
+  const supabase = createClient()
   const { data } = await supabase.from("contas_bancarias").select("id, nome, tipo").order("nome")
   return data || []
 }
 
 async function fetchClientes(): Promise<ClienteRow[]> {
+  const supabase = createClient()
   const { data } = await supabase.from("clientes").select("id, nome").order("nome")
   return data || []
 }
@@ -215,6 +217,7 @@ function ContasAReceberPage() {
     if (!form.descricao.trim()) return
     setSaving(true)
     try {
+      const supabase = createClient()
       const selectedCliente = clientesLista.find((c) => c.id === Number(form.cliente_id))
       const payload = {
         descricao: form.descricao,
@@ -243,6 +246,7 @@ function ContasAReceberPage() {
   async function handleDelete(conta: ContaReceber) {
     setSaving(true)
     try {
+      const supabase = createClient()
       await supabase.from("contas_receber").delete().eq("id", conta.id)
       await mutate()
       setDeleteConfirm(null)

@@ -94,8 +94,6 @@ interface ImportHistoryItem {
 
 // ---------- Supabase ----------
 
-const supabase = createClient()
-
 interface CategoriaHierarchy {
   categorias: CategoriaRow[]
   subcategorias: SubcategoriaRow[]
@@ -103,6 +101,7 @@ interface CategoriaHierarchy {
 }
 
 async function fetchHierarchy(): Promise<CategoriaHierarchy> {
+  const supabase = createClient()
   const [catRes, subRes, filhoRes] = await Promise.all([
     supabase.from("categorias").select("id, nome, tipo").order("nome"),
     supabase.from("subcategorias").select("id, nome, categoria_id").order("nome"),
@@ -116,21 +115,25 @@ async function fetchHierarchy(): Promise<CategoriaHierarchy> {
 }
 
 async function fetchContasBancarias(): Promise<ContaBancariaRow[]> {
+  const supabase = createClient()
   const { data } = await supabase.from("contas_bancarias").select("id, nome, tipo").order("nome")
   return data || []
 }
 
 async function fetchFornecedores(): Promise<FornecedorRow[]> {
+  const supabase = createClient()
   const { data } = await supabase.from("fornecedores").select("id, nome").order("nome")
   return data || []
 }
 
 async function fetchClientes(): Promise<ClienteRow[]> {
+  const supabase = createClient()
   const { data } = await supabase.from("clientes").select("id, nome").order("nome")
   return data || []
 }
 
 async function fetchRules(): Promise<MappingRule[]> {
+  const supabase = createClient()
   const { data, error } = await supabase
     .from("mapping_rules")
     .select(`
@@ -530,6 +533,7 @@ export default function ImportarTransacoesPage() {
 
   // Save rules from current mapping to Supabase
   async function saveNewRules() {
+    const supabase = createClient()
     const existingKeywords = new Set(allRules.map((r) => r.keyword.toUpperCase()))
     const newRuleInserts: { keyword: string; categoria_id: number | null; subcategoria_id: number | null; subcategoria_filho_id: number | null; fornecedor_id: number | null; cliente_id: number | null; cliente_fornecedor: string }[] = []
 
@@ -561,6 +565,7 @@ export default function ImportarTransacoesPage() {
 
   // Confirm import - save transactions to contas_pagar/contas_receber
   async function confirmImport() {
+    const supabase = createClient()
     setSaving(true)
     try {
       await saveNewRules()
@@ -675,6 +680,7 @@ export default function ImportarTransacoesPage() {
   }
 
   async function deleteRule(id: number) {
+    const supabase = createClient()
     await supabase.from("mapping_rules").delete().eq("id", id)
     await mutateRules()
   }

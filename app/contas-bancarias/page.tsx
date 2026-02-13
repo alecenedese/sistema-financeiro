@@ -71,9 +71,8 @@ function getIcon(tipo: string) {
   return ICON_MAP[tipo] || Landmark
 }
 
-const supabase = createClient()
-
 async function fetchContas(): Promise<ContaBancaria[]> {
+  const supabase = createClient()
   const { data, error } = await supabase.from("contas_bancarias").select("*").order("id")
   if (error) throw error
   return (data || []).map((r) => ({
@@ -142,6 +141,7 @@ function ContasBancariasPage() {
     if (!form.nome.trim()) return
     setSaving(true)
     try {
+      const supabase = createClient()
       if (editingConta) {
         await supabase.from("contas_bancarias").update({
           nome: form.nome,
@@ -168,6 +168,7 @@ function ContasBancariasPage() {
   }, [form, editingConta, contas.length, mutate])
 
   const handleDelete = useCallback(async (conta: ContaBancaria) => {
+    const supabase = createClient()
     await supabase.from("contas_bancarias").delete().eq("id", conta.id)
     await mutate()
     setDeleteConfirm(null)

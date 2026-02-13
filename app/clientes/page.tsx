@@ -47,9 +47,8 @@ interface Cliente {
   telefone: string
 }
 
-const supabase = createClient()
-
 async function fetchClientes(): Promise<Cliente[]> {
+  const supabase = createClient()
   const { data, error } = await supabase.from("clientes").select("*").order("nome")
   if (error) throw error
   return (data || []).map((r) => ({
@@ -110,6 +109,7 @@ function ClientesPage() {
     if (!form.nome.trim()) return
     setSaving(true)
     try {
+      const supabase = createClient()
       const payload = { nome: form.nome, documento: form.documento, email: form.email, telefone: form.telefone }
       if (editingItem) {
         await supabase.from("clientes").update(payload).eq("id", editingItem.id)
@@ -124,6 +124,7 @@ function ClientesPage() {
   }, [form, editingItem, mutate])
 
   const handleDelete = useCallback(async (item: Cliente) => {
+    const supabase = createClient()
     await supabase.from("clientes").delete().eq("id", item.id)
     await mutate()
     setDeleteConfirm(null)
