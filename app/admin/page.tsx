@@ -13,12 +13,13 @@ import {
   Building2,
   CheckCircle2,
   XCircle,
-  Eye,
-  EyeOff,
-  Copy,
+  LogIn,
   RefreshCw,
+  X,
 } from "lucide-react"
 import { useState, useCallback } from "react"
+import { useRouter } from "next/navigation"
+import { useTenant } from "@/hooks/use-tenant"
 import {
   Dialog,
   DialogContent,
@@ -106,6 +107,13 @@ export default function AdminPage() {
   const [cnpjLoading, setCnpjLoading] = useState(false)
   const [cnpjError, setCnpjError] = useState("")
   const [filterAtivo, setFilterAtivo] = useState<"Todos" | "Ativo" | "Inativo">("Todos")
+  const router = useRouter()
+  const { tenant, setTenant, clearTenant } = useTenant()
+
+  function acessarCliente(item: Cliente) {
+    setTenant({ id: item.id, nome: item.nome, cnpj: item.cnpj, plano: item.plano })
+    router.push("/")
+  }
 
   const filtered = clientes
     .filter((c) =>
@@ -228,10 +236,26 @@ export default function AdminPage() {
             {/* Admin Banner */}
             <div className="flex items-center gap-3 rounded-xl border border-[hsl(216,60%,22%)]/30 bg-[hsl(216,60%,22%)]/10 px-5 py-4">
               <Shield className="h-5 w-5 text-[hsl(216,60%,50%)]" />
-              <div>
+              <div className="flex-1">
                 <p className="text-sm font-semibold text-[hsl(216,60%,50%)]">Painel Administrativo</p>
                 <p className="text-xs text-muted-foreground">Gerencie todos os clientes do sistema BPO Financeiro MAJO.</p>
               </div>
+              {tenant && (
+                <div className="flex items-center gap-3">
+                  <div className="rounded-lg border border-[hsl(142,71%,40%)]/30 bg-[hsl(142,71%,40%)]/10 px-3 py-2">
+                    <p className="text-xs text-muted-foreground">Cliente ativo</p>
+                    <p className="text-sm font-semibold text-[hsl(142,71%,40%)]">{tenant.nome}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={clearTenant}
+                    title="Sair do cliente"
+                    className="flex h-8 w-8 items-center justify-center rounded-lg border border-border text-muted-foreground transition-colors hover:border-destructive/50 hover:bg-destructive/10 hover:text-destructive"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Summary Cards */}
@@ -333,6 +357,19 @@ export default function AdminPage() {
                       {item.created_at ? new Date(item.created_at).toLocaleDateString("pt-BR") : "-"}
                     </span>
                     <div className="flex items-center justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => acessarCliente(item)}
+                        title="Acessar como este cliente"
+                        className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors ${
+                          tenant?.id === item.id
+                            ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)] border border-[hsl(142,71%,40%)]/30"
+                            : "border border-border text-muted-foreground hover:bg-primary hover:text-primary-foreground opacity-0 group-hover:opacity-100"
+                        }`}
+                      >
+                        <LogIn className="h-3.5 w-3.5" />
+                        {tenant?.id === item.id ? "Ativo" : "Acessar"}
+                      </button>
                       <button type="button" onClick={() => openEdit(item)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground opacity-0 group-hover:opacity-100">
                         <Pencil className="h-3.5 w-3.5" />
                       </button>

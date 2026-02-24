@@ -186,12 +186,14 @@ function DonutChart({
   data,
   total,
   title,
+  accentColor,
 }: {
   data: CategoryItem[]
   total: number
   title: string
+  accentColor: string
 }) {
-  const size = 224
+  const size = 320
   const [drillCategory, setDrillCategory] = useState<CategoryItem | null>(null)
   const [activeIndex, setActiveIndex] = useState<number | undefined>(undefined)
 
@@ -213,8 +215,9 @@ function DonutChart({
   }
 
   return (
-    <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
-      <div className="mb-4 flex items-center gap-2">
+    <div className="flex flex-col rounded-xl border border-border bg-card p-6 shadow-sm">
+      {/* Header */}
+      <div className="mb-1 flex items-center gap-2">
         {drillCategory && (
           <button
             type="button"
@@ -225,27 +228,33 @@ function DonutChart({
           </button>
         )}
         <h3 className="text-base font-semibold text-card-foreground">
-          {drillCategory ? `${title} - ${drillCategory.name}` : title}
+          {drillCategory ? `${title} — ${drillCategory.name}` : title}
         </h3>
+        <span className="ml-auto text-lg font-bold" style={{ color: accentColor }}>
+          {formatCurrency(displayTotal)}
+        </span>
       </div>
       {!drillCategory && (
-        <p className="mb-3 text-xs text-muted-foreground">
+        <p className="mb-4 text-xs text-muted-foreground">
           Clique em uma fatia para detalhar por subcategoria
         </p>
       )}
-      <div className="flex flex-col items-center lg:flex-row lg:items-start gap-6">
+
+      {/* Chart + Legend side-by-side */}
+      <div className="flex flex-col items-center gap-6 xl:flex-row xl:items-center">
+        {/* Donut */}
         <div className="relative shrink-0" style={{ width: size, height: size }}>
-          <PieChart width={size} height={size} style={{ minWidth: size, minHeight: size }}>
+          <PieChart width={size} height={size}>
             <Pie
               data={displayData}
               cx={size / 2}
               cy={size / 2}
-              innerRadius={60}
-              outerRadius={95}
+              innerRadius={92}
+              outerRadius={140}
               paddingAngle={2}
               dataKey="value"
               stroke="none"
-              isAnimationActive={true}
+              isAnimationActive
               animationDuration={400}
               activeIndex={activeIndex}
               activeShape={!drillCategory ? renderActiveShape : undefined}
@@ -261,52 +270,57 @@ function DonutChart({
             <Tooltip content={<CustomTooltip />} />
           </PieChart>
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-            <span className="text-lg font-bold text-card-foreground">
+            <span className="text-2xl font-bold text-card-foreground">
               {formatCurrency(displayTotal)}
             </span>
-            <span className="text-xs text-muted-foreground">
+            <span className="mt-0.5 text-xs text-muted-foreground">
               {drillCategory ? drillCategory.name : "Total"}
             </span>
           </div>
         </div>
-        <div className="flex flex-col gap-2.5 flex-1 min-w-0">
-          {displayData.map((item, idx) => (
-            <button
-              key={item.name}
-              type="button"
-              onClick={() => {
-                if (!drillCategory) {
-                  setDrillCategory(data[idx])
-                  setActiveIndex(undefined)
-                }
-              }}
-              onMouseEnter={() => {
-                if (!drillCategory) setActiveIndex(idx)
-              }}
-              onMouseLeave={() => {
-                if (!drillCategory) setActiveIndex(undefined)
-              }}
-              className={`flex items-center gap-2.5 rounded-md px-2 py-1 text-left transition-colors ${
-                !drillCategory ? "hover:bg-muted cursor-pointer" : "cursor-default"
-              } ${activeIndex === idx && !drillCategory ? "bg-muted" : ""}`}
-            >
-              <div
-                className="h-3 w-3 shrink-0 rounded-sm"
-                style={{ backgroundColor: item.color }}
-              />
-              <span className="flex-1 truncate text-sm text-muted-foreground">
-                {item.name}
-              </span>
-              <span className="text-sm font-medium text-card-foreground">
-                {formatCurrency(item.value)}
-              </span>
-            </button>
-          ))}
+
+        {/* Legend */}
+        <div className="flex flex-1 flex-col gap-2 min-w-0 w-full">
+          {displayData.map((item, idx) => {
+            const pct = displayTotal > 0 ? Math.round((item.value / displayTotal) * 100) : 0
+            return (
+              <button
+                key={item.name}
+                type="button"
+                onClick={() => { if (!drillCategory) { setDrillCategory(data[idx]); setActiveIndex(undefined) } }}
+                onMouseEnter={() => { if (!drillCategory) setActiveIndex(idx) }}
+                onMouseLeave={() => { if (!drillCategory) setActiveIndex(undefined) }}
+                className={`group flex items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                  !drillCategory ? "hover:bg-muted cursor-pointer" : "cursor-default"
+                } ${activeIndex === idx && !drillCategory ? "bg-muted" : ""}`}
+              >
+                <div className="h-3 w-3 shrink-0 rounded-sm" style={{ backgroundColor: item.color }} />
+                <span className="flex-1 truncate text-sm text-muted-foreground group-hover:text-foreground transition-colors">
+                  {item.name}
+                </span>
+                <div className="flex items-center gap-3">
+                  {/* Bar */}
+                  <div className="hidden w-24 sm:block">
+                    <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{ width: `${pct}%`, backgroundColor: item.color }}
+                      />
+                    </div>
+                  </div>
+                  <span className="w-8 text-right text-xs text-muted-foreground">{pct}%</span>
+                  <span className="w-24 text-right text-sm font-semibold text-card-foreground">
+                    {formatCurrency(item.value)}
+                  </span>
+                </div>
+              </button>
+            )
+          })}
           {drillCategory && (
             <button
               type="button"
               onClick={handleBack}
-              className="mt-1 flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+              className="mt-2 flex items-center gap-1 text-xs font-medium text-primary hover:underline"
             >
               <ArrowLeft className="h-3 w-3" />
               Voltar para todas as categorias
@@ -320,16 +334,18 @@ function DonutChart({
 
 export default function CategoryChartsContent() {
   return (
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+    <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
       <DonutChart
         data={expenseData}
         total={expenseTotal}
         title="Despesas por Categoria"
+        accentColor="hsl(0, 72%, 51%)"
       />
       <DonutChart
         data={incomeData}
         total={incomeTotal}
         title="Receitas por Categoria"
+        accentColor="hsl(142, 71%, 40%)"
       />
     </div>
   )

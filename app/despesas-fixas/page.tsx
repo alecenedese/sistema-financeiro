@@ -47,6 +47,9 @@ interface DespesaFixa {
   valor: number
   dia_vencimento: number
   ativa: boolean
+  tipo_recorrencia: "mensal" | "parcelado"
+  total_parcelas: number
+  parcela_atual: number
   categoria_id: number | null
   subcategoria_id: number | null
   subcategoria_filho_id: number | null
@@ -79,6 +82,9 @@ async function fetchDespesas(): Promise<DespesaFixa[]> {
     valor: Number(r.valor),
     dia_vencimento: r.dia_vencimento as number,
     ativa: r.ativa as boolean,
+    tipo_recorrencia: (r.tipo_recorrencia as "mensal" | "parcelado") || "mensal",
+    total_parcelas: Number(r.total_parcelas) || 0,
+    parcela_atual: Number(r.parcela_atual) || 1,
     categoria_id: r.categoria_id as number | null,
     subcategoria_id: r.subcategoria_id as number | null,
     subcategoria_filho_id: r.subcategoria_filho_id as number | null,
@@ -122,6 +128,9 @@ const emptyForm = {
   valor: "",
   dia_vencimento: "1",
   ativa: true,
+  tipo_recorrencia: "mensal" as "mensal" | "parcelado",
+  total_parcelas: "0",
+  parcela_atual: "1",
   categoria_id: "",
   subcategoria_id: "",
   subcategoria_filho_id: "",
@@ -194,6 +203,9 @@ function DespesasFixasPage() {
       valor: formatBRL(item.valor),
       dia_vencimento: item.dia_vencimento.toString(),
       ativa: item.ativa,
+      tipo_recorrencia: item.tipo_recorrencia || "mensal",
+      total_parcelas: item.total_parcelas.toString(),
+      parcela_atual: item.parcela_atual.toString(),
       categoria_id: item.categoria_id?.toString() || "",
       subcategoria_id: item.subcategoria_id?.toString() || "",
       subcategoria_filho_id: item.subcategoria_filho_id?.toString() || "",
@@ -209,11 +221,15 @@ function DespesasFixasPage() {
     setSaving(true)
     try {
       const supabase = createClient()
+      const isParcelado = form.tipo_recorrencia === "parcelado"
       const payload = {
         descricao: form.descricao,
         valor: parseBRL(form.valor),
         dia_vencimento: Number(form.dia_vencimento) || 1,
         ativa: form.ativa,
+        tipo_recorrencia: form.tipo_recorrencia,
+        total_parcelas: isParcelado ? Number(form.total_parcelas) || 0 : 0,
+        parcela_atual: isParcelado ? Number(form.parcela_atual) || 1 : 1,
         categoria_id: form.categoria_id ? Number(form.categoria_id) : null,
         subcategoria_id: form.subcategoria_id ? Number(form.subcategoria_id) : null,
         subcategoria_filho_id: form.subcategoria_filho_id ? Number(form.subcategoria_filho_id) : null,
@@ -328,11 +344,12 @@ function DespesasFixasPage() {
 
             {/* List */}
             <div className="rounded-xl border border-border bg-card shadow-sm">
-              <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto_auto] gap-4 border-b border-border px-5 py-3 text-xs font-semibold uppercase text-muted-foreground">
+              <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto_auto_auto] gap-4 border-b border-border px-5 py-3 text-xs font-semibold uppercase text-muted-foreground">
                 <span>Status</span>
                 <span>Descricao</span>
                 <span>Valor</span>
                 <span>Dia Venc.</span>
+                <span>Recorrencia</span>
                 <span>Categoria</span>
                 <span>Fornecedor</span>
                 <span>Forma Pag.</span>
@@ -344,7 +361,7 @@ function DespesasFixasPage() {
                 </div>
               ) : (
                 filtered.map((item) => (
-                  <div key={item.id} className="group grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto_auto] items-center gap-4 border-b border-border px-5 py-3.5 last:border-b-0 transition-colors hover:bg-muted/50">
+                  <div key={item.id} className="group grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto_auto_auto] items-center gap-4 border-b border-border px-5 py-3.5 last:border-b-0 transition-colors hover:bg-muted/50">
                     <button
                       type="button"
                       onClick={() => toggleAtiva(item)}
@@ -368,6 +385,17 @@ function DespesasFixasPage() {
                       <CalendarDays className="h-3.5 w-3.5" />
                       Dia {item.dia_vencimento}
                     </span>
+                    {item.tipo_recorrencia === "parcelado" && item.total_parcelas > 0 ? (
+                      <span className="flex items-center gap-1.5 rounded-full border border-primary/30 bg-primary/5 px-2.5 py-0.5 text-xs font-semibold text-primary">
+                        <CalendarDays className="h-3 w-3" />
+                        {item.parcela_atual}/{item.total_parcelas}x
+                      </span>
+                    ) : (
+                      <span className="flex items-center gap-1.5 rounded-full border border-border bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                        <RepeatIcon className="h-3 w-3" />
+                        Mensal
+                      </span>
+                    )}
                     <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">{item.categoria_nome || "-"}</span>
                     <span className="text-sm text-muted-foreground">{item.fornecedor_nome || "-"}</span>
                     <span className="text-sm text-muted-foreground">{item.forma_pagamento || "-"}</span>
@@ -401,7 +429,7 @@ function DespesasFixasPage() {
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="valor">Valor Mensal</Label>
+                <Label htmlFor="valor">Valor</Label>
                 <Input id="valor" type="text" placeholder="0,00" value={form.valor} onChange={(e) => setForm({ ...form, valor: handleCurrencyInput(e.target.value) })} />
               </div>
               <div className="space-y-2">
@@ -409,6 +437,71 @@ function DespesasFixasPage() {
                 <Input id="dia_vencimento" type="number" min={1} max={31} placeholder="Ex: 5" value={form.dia_vencimento} onChange={(e) => setForm({ ...form, dia_vencimento: e.target.value })} />
               </div>
             </div>
+
+            {/* Tipo de recorrencia */}
+            <div className="space-y-2">
+              <Label>Tipo de Recorrencia</Label>
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, tipo_recorrencia: "mensal", total_parcelas: "0", parcela_atual: "1" })}
+                  className={`flex flex-col items-center justify-center gap-1 rounded-lg border p-3 text-sm font-medium transition-colors ${form.tipo_recorrencia === "mensal" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-primary/50 hover:bg-muted"}`}
+                >
+                  <RepeatIcon className="h-5 w-5" />
+                  <span>Mensal Indefinido</span>
+                  <span className="text-xs font-normal opacity-70">Repete todo mes sem fim</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setForm({ ...form, tipo_recorrencia: "parcelado" })}
+                  className={`flex flex-col items-center justify-center gap-1 rounded-lg border p-3 text-sm font-medium transition-colors ${form.tipo_recorrencia === "parcelado" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-primary/50 hover:bg-muted"}`}
+                >
+                  <CalendarDays className="h-5 w-5" />
+                  <span>Parcelado</span>
+                  <span className="text-xs font-normal opacity-70">Numero fixo de vezes</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Parcelas — apenas quando parcelado */}
+            {form.tipo_recorrencia === "parcelado" && (
+              <div className="grid grid-cols-2 gap-4 rounded-lg border border-primary/20 bg-primary/5 p-4">
+                <div className="space-y-2">
+                  <Label htmlFor="total_parcelas">Total de Parcelas</Label>
+                  <Input
+                    id="total_parcelas"
+                    type="number"
+                    min={1}
+                    max={360}
+                    placeholder="Ex: 12"
+                    value={form.total_parcelas}
+                    onChange={(e) => setForm({ ...form, total_parcelas: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground">Quantas vezes / meses no total</p>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="parcela_atual">Parcela Atual</Label>
+                  <Input
+                    id="parcela_atual"
+                    type="number"
+                    min={1}
+                    max={Number(form.total_parcelas) || 360}
+                    placeholder="Ex: 1"
+                    value={form.parcela_atual}
+                    onChange={(e) => setForm({ ...form, parcela_atual: e.target.value })}
+                  />
+                  <p className="text-xs text-muted-foreground">Parcela em que esta no momento</p>
+                </div>
+                {Number(form.total_parcelas) > 0 && Number(form.parcela_atual) > 0 && (
+                  <div className="col-span-2 flex items-center gap-2 rounded-md bg-background px-3 py-2 text-sm text-muted-foreground">
+                    <CalendarDays className="h-4 w-4 shrink-0 text-primary" />
+                    <span>
+                      Parcela <strong className="text-foreground">{form.parcela_atual}</strong> de <strong className="text-foreground">{form.total_parcelas}</strong> — restam <strong className="text-foreground">{Math.max(0, Number(form.total_parcelas) - Number(form.parcela_atual) + 1)}</strong> {Number(form.total_parcelas) - Number(form.parcela_atual) + 1 === 1 ? "mes" : "meses"}
+                    </span>
+                  </div>
+                )}
+              </div>
+            )}
             <div className="space-y-2">
               <Label htmlFor="fornecedor">Fornecedor</Label>
               <select id="fornecedor" value={form.fornecedor_id} onChange={(e) => setForm({ ...form, fornecedor_id: e.target.value })} className={selectClass}>
