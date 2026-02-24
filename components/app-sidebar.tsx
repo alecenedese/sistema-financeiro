@@ -19,6 +19,8 @@ import {
   Plus,
   ChevronLeft,
   ChevronRight,
+  RepeatIcon,
+  Shield,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -32,8 +34,10 @@ const menuItems = [
   { icon: BarChart3, label: "Relatorios", href: "/relatorios" },
   { icon: Upload, label: "Importar Transacoes", href: "/importar-transacoes" },
   { icon: Tags, label: "Categorias", href: "/categorias" },
+  { icon: RepeatIcon, label: "Despesas Fixas", href: "/despesas-fixas" },
   { icon: Building2, label: "Fornecedores", href: "/fornecedores" },
   { icon: Users, label: "Clientes", href: "/clientes" },
+  { icon: Shield, label: "Admin", href: "/admin" },
 ]
 
 const novoOptions = [
@@ -43,6 +47,7 @@ const novoOptions = [
   { icon: FileUp, label: "Nova Conta a Receber", href: "/contas-a-receber?novo=1" },
   { icon: Target, label: "Nova Meta", href: "/planejamento?novo=1" },
   { icon: Tags, label: "Nova Categoria", href: "/categorias?novo=1" },
+  { icon: RepeatIcon, label: "Nova Despesa Fixa", href: "/despesas-fixas?novo=1" },
   { icon: Building2, label: "Novo Fornecedor", href: "/fornecedores?novo=1" },
   { icon: Users, label: "Novo Cliente", href: "/clientes?novo=1" },
 ]

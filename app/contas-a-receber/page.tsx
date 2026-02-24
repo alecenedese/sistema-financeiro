@@ -49,6 +49,7 @@ interface ContaReceber {
   subcategoria_id: number | null
   subcategoria_filho_id: number | null
   conta_bancaria_id: number | null
+  forma_pagamento: string
   categoria_nome: string
   subcategoria_nome: string
   filho_nome: string
@@ -84,6 +85,7 @@ async function fetchContas(): Promise<ContaReceber[]> {
     subcategoria_id: row.subcategoria_id as number | null,
     subcategoria_filho_id: row.subcategoria_filho_id as number | null,
     conta_bancaria_id: row.conta_bancaria_id as number | null,
+    forma_pagamento: (row.forma_pagamento as string) || "",
     categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
     subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
     filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
@@ -135,7 +137,9 @@ function formatDateDisplay(dateStr: string) {
   return `${d}/${m}/${y}`
 }
 
-const emptyForm = { descricao: "", valor: "", vencimento: "", cliente_id: "", categoria_id: "", subcategoria_id: "", subcategoria_filho_id: "", conta_bancaria_id: "", status: "pendente" }
+const FORMAS_PAGAMENTO = ["PIX", "Boleto", "Cartao de Credito", "Cartao de Debito", "Transferencia", "Dinheiro", "Cheque"]
+
+const emptyForm = { descricao: "", valor: "", vencimento: "", cliente_id: "", categoria_id: "", subcategoria_id: "", subcategoria_filho_id: "", conta_bancaria_id: "", status: "pendente", forma_pagamento: "" }
 
 export default function ContasAReceberPageWrapper() {
   return <Suspense><ContasAReceberPage /></Suspense>
@@ -209,6 +213,7 @@ function ContasAReceberPage() {
       subcategoria_filho_id: conta.subcategoria_filho_id?.toString() || "",
       conta_bancaria_id: conta.conta_bancaria_id?.toString() || "",
       status: conta.status,
+      forma_pagamento: conta.forma_pagamento || "",
     })
     setDialogOpen(true)
   }
@@ -230,6 +235,7 @@ function ContasAReceberPage() {
         subcategoria_filho_id: form.subcategoria_filho_id ? Number(form.subcategoria_filho_id) : null,
         conta_bancaria_id: form.conta_bancaria_id ? Number(form.conta_bancaria_id) : null,
         status: form.status,
+        forma_pagamento: form.forma_pagamento || null,
       }
       if (editingConta) {
         await supabase.from("contas_receber").update(payload).eq("id", editingConta.id)
@@ -453,13 +459,22 @@ function ContasAReceberPage() {
                 </select>
               </div>
             )}
-            <div className="space-y-2">
-              <Label htmlFor="status">Status</Label>
-              <select id="status" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                <option value="pendente">Pendente</option>
-                <option value="recebido">Recebido</option>
-                <option value="vencido">Vencido</option>
-              </select>
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="forma_pagamento">Forma de Pagamento</Label>
+                <select id="forma_pagamento" value={form.forma_pagamento} onChange={(e) => setForm({ ...form, forma_pagamento: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                  <option value="">Selecione...</option>
+                  {FORMAS_PAGAMENTO.map((fp) => <option key={fp} value={fp}>{fp}</option>)}
+                </select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="status">Status</Label>
+                <select id="status" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+                  <option value="pendente">Pendente</option>
+                  <option value="recebido">Recebido</option>
+                  <option value="vencido">Vencido</option>
+                </select>
+              </div>
             </div>
           </div>
           <DialogFooter>
