@@ -8,7 +8,6 @@ export interface ActiveTenant {
   id: number
   nome: string
   cnpj: string
-  plano: string
 }
 
 export function useTenant() {

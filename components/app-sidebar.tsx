@@ -182,7 +182,7 @@ export function AppSidebar() {
             <div className="flex items-center gap-2 rounded-lg border border-[hsl(142,71%,40%)]/30 bg-[hsl(142,71%,40%)]/10 px-3 py-2">
               <div className="flex-1 min-w-0">
                 <p className="truncate text-xs font-semibold text-[hsl(142,71%,55%)]">{tenant.nome}</p>
-                <p className="text-[10px] text-[hsl(216,20%,60%)]">{tenant.plano}</p>
+                {tenant.cnpj && <p className="truncate text-[10px] text-[hsl(216,20%,60%)]">{tenant.cnpj}</p>}
               </div>
               <button
                 type="button"

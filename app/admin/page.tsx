@@ -52,7 +52,6 @@ interface Cliente {
   responsavel: string
   ativo: boolean
   created_at: string
-  plano: string
   observacoes: string
 }
 
@@ -69,7 +68,6 @@ async function fetchClientesAdmin(): Promise<Cliente[]> {
     responsavel: r.responsavel || "",
     ativo: r.ativo ?? true,
     created_at: r.created_at,
-    plano: r.plano || "Basico",
     observacoes: r.observacoes || "",
   }))
 }
@@ -83,8 +81,6 @@ function formatCNPJ(value: string) {
   return `${digits.slice(0, 2)}.${digits.slice(2, 5)}.${digits.slice(5, 8)}/${digits.slice(8, 12)}-${digits.slice(12)}`
 }
 
-const PLANOS = ["Basico", "Intermediario", "Avancado", "Personalizado"]
-
 const emptyForm = {
   nome: "",
   cnpj: "",
@@ -92,7 +88,6 @@ const emptyForm = {
   telefone: "",
   responsavel: "",
   ativo: true,
-  plano: "Basico",
   observacoes: "",
 }
 
@@ -111,7 +106,7 @@ export default function AdminPage() {
   const { tenant, setTenant, clearTenant } = useTenant()
 
   function acessarCliente(item: Cliente) {
-    setTenant({ id: item.id, nome: item.nome, cnpj: item.cnpj, plano: item.plano })
+    setTenant({ id: item.id, nome: item.nome, cnpj: item.cnpj })
     router.push("/")
   }
 
@@ -165,7 +160,6 @@ export default function AdminPage() {
       telefone: item.telefone,
       responsavel: item.responsavel,
       ativo: item.ativo,
-      plano: item.plano,
       observacoes: item.observacoes,
     })
     setCnpjError("")
@@ -184,7 +178,6 @@ export default function AdminPage() {
         telefone: form.telefone,
         responsavel: form.responsavel,
         ativo: form.ativo,
-        plano: form.plano,
         observacoes: form.observacoes,
       }
       if (editingItem) {
@@ -312,13 +305,12 @@ export default function AdminPage() {
 
             {/* Table */}
             <div className="rounded-xl border border-border bg-card shadow-sm">
-              <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto_auto] gap-4 border-b border-border px-5 py-3 text-xs font-semibold uppercase text-muted-foreground">
+              <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto] gap-4 border-b border-border px-5 py-3 text-xs font-semibold uppercase text-muted-foreground">
                 <span>Status</span>
                 <span>Nome / Empresa</span>
                 <span>CNPJ</span>
                 <span>Responsavel</span>
                 <span>Email</span>
-                <span>Plano</span>
                 <span>Cadastro</span>
                 <span className="text-right">Acoes</span>
               </div>
@@ -328,7 +320,7 @@ export default function AdminPage() {
                 </div>
               ) : (
                 filtered.map((item) => (
-                  <div key={item.id} className="group grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto_auto] items-center gap-4 border-b border-border px-5 py-3.5 last:border-b-0 transition-colors hover:bg-muted/50">
+                  <div key={item.id} className="group grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto] items-center gap-4 border-b border-border px-5 py-3.5 last:border-b-0 transition-colors hover:bg-muted/50">
                     <button type="button" onClick={() => toggleAtivo(item)} title={item.ativo ? "Clique para desativar" : "Clique para ativar"}>
                       {item.ativo ? (
                         <CheckCircle2 className="h-5 w-5 text-[hsl(142,71%,40%)]" />
@@ -348,11 +340,6 @@ export default function AdminPage() {
                     <span className="font-mono text-sm text-muted-foreground">{item.cnpj || "-"}</span>
                     <span className="text-sm text-muted-foreground">{item.responsavel || "-"}</span>
                     <span className="text-sm text-muted-foreground">{item.email || "-"}</span>
-                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                      item.plano === "Avancado" ? "bg-[hsl(216,60%,22%)]/10 text-[hsl(216,60%,40%)]" :
-                      item.plano === "Intermediario" ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)]" :
-                      "bg-muted text-muted-foreground"
-                    }`}>{item.plano}</span>
                     <span className="text-sm text-muted-foreground">
                       {item.created_at ? new Date(item.created_at).toLocaleDateString("pt-BR") : "-"}
                     </span>
@@ -434,12 +421,7 @@ export default function AdminPage() {
                 <Input id="telefone" placeholder="(31) 3333-1234" value={form.telefone} onChange={(e) => setForm({ ...form, telefone: e.target.value })} />
               </div>
             </div>
-            <div className="space-y-2">
-              <Label htmlFor="plano">Plano</Label>
-              <select id="plano" value={form.plano} onChange={(e) => setForm({ ...form, plano: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                {PLANOS.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </div>
+
             <div className="space-y-2">
               <Label htmlFor="observacoes">Observacoes</Label>
               <Input id="observacoes" placeholder="Notas internas..." value={form.observacoes} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} />
