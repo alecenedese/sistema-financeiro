@@ -2,156 +2,21 @@
 
 import { useState } from "react"
 import { PieChart, Pie, Cell, Tooltip, Sector } from "recharts"
-import { ArrowLeft } from "lucide-react"
-
-interface SubcategoryItem {
-  name: string
-  value: number
-  color: string
-}
-
-interface CategoryItem {
-  name: string
-  value: number
-  color: string
-  subcategorias: SubcategoryItem[]
-}
-
-const expenseData: CategoryItem[] = [
-  {
-    name: "Moradia",
-    value: 1290,
-    color: "#1B3A5C",
-    subcategorias: [
-      { name: "Aluguel", value: 800, color: "#1B3A5C" },
-      { name: "Condominio", value: 250, color: "#274B70" },
-      { name: "Conta de Energia", value: 140, color: "#335C84" },
-      { name: "Conta de Agua", value: 60, color: "#3F6D98" },
-      { name: "Internet", value: 40, color: "#4B7EAC" },
-    ],
-  },
-  {
-    name: "Transporte",
-    value: 1110,
-    color: "#2C5F8A",
-    subcategorias: [
-      { name: "Combustivel", value: 520, color: "#2C5F8A" },
-      { name: "Estacionamento", value: 280, color: "#3A6F9A" },
-      { name: "Manutencao Veiculo", value: 210, color: "#487FAA" },
-      { name: "Transporte Publico", value: 100, color: "#568FBA" },
-    ],
-  },
-  {
-    name: "Alimentacao",
-    value: 920,
-    color: "#7A8FA6",
-    subcategorias: [
-      { name: "Supermercado", value: 485, color: "#7A8FA6" },
-      { name: "Restaurante", value: 220, color: "#8A9DB2" },
-      { name: "Delivery", value: 125, color: "#9AABBC" },
-      { name: "Padaria", value: 90, color: "#AAB9C6" },
-    ],
-  },
-  {
-    name: "Saude",
-    value: 350,
-    color: "#A8B8C8",
-    subcategorias: [
-      { name: "Plano de Saude", value: 200, color: "#A8B8C8" },
-      { name: "Farmacia", value: 95, color: "#B4C2D0" },
-      { name: "Consultas", value: 55, color: "#C0CCD8" },
-    ],
-  },
-  {
-    name: "Lazer",
-    value: 220,
-    color: "#C4CFD9",
-    subcategorias: [
-      { name: "Streaming", value: 80, color: "#C4CFD9" },
-      { name: "Cinema", value: 60, color: "#CDD7DF" },
-      { name: "Viagens", value: 50, color: "#D6DFE5" },
-      { name: "Esportes", value: 30, color: "#DFE7EB" },
-    ],
-  },
-  {
-    name: "Outros",
-    value: 134,
-    color: "#D9E1E8",
-    subcategorias: [
-      { name: "Assinaturas", value: 74, color: "#D9E1E8" },
-      { name: "Presentes", value: 60, color: "#E2E8EE" },
-    ],
-  },
-]
-
-const incomeData: CategoryItem[] = [
-  {
-    name: "Salario",
-    value: 4200,
-    color: "#1B3A5C",
-    subcategorias: [
-      { name: "Salario Fixo", value: 3500, color: "#1B3A5C" },
-      { name: "Bonus", value: 400, color: "#274B70" },
-      { name: "Horas Extras", value: 300, color: "#335C84" },
-    ],
-  },
-  {
-    name: "Freelancer",
-    value: 800,
-    color: "#3D7AB5",
-    subcategorias: [
-      { name: "Projetos Web", value: 500, color: "#3D7AB5" },
-      { name: "Consultoria", value: 200, color: "#4D8AC5" },
-      { name: "Design", value: 100, color: "#5D9AD5" },
-    ],
-  },
-  {
-    name: "Investimentos",
-    value: 355.5,
-    color: "#7A8FA6",
-    subcategorias: [
-      { name: "Dividendos", value: 155.5, color: "#7A8FA6" },
-      { name: "Renda Fixa", value: 120, color: "#8A9DB2" },
-      { name: "Fundos Imobiliarios", value: 80, color: "#9AABBC" },
-    ],
-  },
-  {
-    name: "Outros",
-    value: 150,
-    color: "#B0BEC5",
-    subcategorias: [
-      { name: "Cashback", value: 90, color: "#B0BEC5" },
-      { name: "Reembolsos", value: 60, color: "#BCCAD1" },
-    ],
-  },
-]
-
-const expenseTotal = expenseData.reduce((acc, item) => acc + item.value, 0)
-const incomeTotal = incomeData.reduce((acc, item) => acc + item.value, 0)
-
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-  }).format(value)
-}
+import { ArrowLeft, PieChartIcon } from "lucide-react"
+import { useCategoryCharts, fmt, type CategoryPoint } from "@/hooks/use-dashboard-data"
 
 function CustomTooltip({
   active,
   payload,
 }: {
   active?: boolean
-  payload?: Array<{ name: string; value: number; payload: { color: string } }>
+  payload?: Array<{ name: string; value: number }>
 }) {
   if (active && payload && payload.length) {
     return (
       <div className="rounded-lg border border-border bg-card px-3 py-2 shadow-lg">
-        <p className="text-sm font-medium text-card-foreground">
-          {payload[0].name}
-        </p>
-        <p className="text-sm text-muted-foreground">
-          {formatCurrency(payload[0].value)}
-        </p>
+        <p className="text-sm font-medium text-card-foreground">{payload[0].name}</p>
+        <p className="text-sm text-muted-foreground">{fmt(payload[0].value)}</p>
       </div>
     )
   }
@@ -160,47 +25,49 @@ function CustomTooltip({
 
 function renderActiveShape(props: Record<string, unknown>) {
   const { cx, cy, innerRadius, outerRadius, startAngle, endAngle, fill } = props as {
-    cx: number
-    cy: number
-    innerRadius: number
-    outerRadius: number
-    startAngle: number
-    endAngle: number
-    fill: string
+    cx: number; cy: number; innerRadius: number; outerRadius: number
+    startAngle: number; endAngle: number; fill: string
   }
   return (
     <Sector
-      cx={cx}
-      cy={cy}
-      innerRadius={innerRadius as number}
-      outerRadius={(outerRadius as number) + 6}
-      startAngle={startAngle}
-      endAngle={endAngle}
+      cx={cx} cy={cy}
+      innerRadius={innerRadius}
+      outerRadius={(outerRadius) + 6}
+      startAngle={startAngle} endAngle={endAngle}
       fill={fill}
       style={{ cursor: "pointer", filter: "brightness(1.15)" }}
     />
   )
 }
 
-function DonutChart({
-  data,
-  total,
-  title,
-  accentColor,
-}: {
-  data: CategoryItem[]
+function EmptyChart({ title }: { title: string }) {
+  return (
+    <div className="flex flex-col rounded-xl border border-border bg-card p-6 shadow-sm">
+      <h3 className="mb-1 text-base font-semibold text-card-foreground">{title}</h3>
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 py-16 text-muted-foreground">
+        <PieChartIcon className="h-10 w-10 opacity-20" />
+        <p className="text-sm">Nenhum lancamento neste mes</p>
+      </div>
+    </div>
+  )
+}
+
+function DonutChart({ data, total, title, accentColor }: {
+  data: CategoryPoint[]
   total: number
   title: string
   accentColor: string
 }) {
   const size = 320
-  const [drillCategory, setDrillCategory] = useState<CategoryItem | null>(null)
+  const [drillCategory, setDrillCategory] = useState<CategoryPoint | null>(null)
   const [activeIndex, setActiveIndex] = useState<number | undefined>(undefined)
 
   const displayData = drillCategory ? drillCategory.subcategorias : data
   const displayTotal = drillCategory
     ? drillCategory.subcategorias.reduce((acc, s) => acc + s.value, 0)
     : total
+
+  if (data.length === 0) return <EmptyChart title={title} />
 
   function handlePieClick(_: unknown, index: number) {
     if (!drillCategory) {
@@ -216,7 +83,6 @@ function DonutChart({
 
   return (
     <div className="flex flex-col rounded-xl border border-border bg-card p-6 shadow-sm">
-      {/* Header */}
       <div className="mb-1 flex items-center gap-2">
         {drillCategory && (
           <button
@@ -231,7 +97,7 @@ function DonutChart({
           {drillCategory ? `${title} — ${drillCategory.name}` : title}
         </h3>
         <span className="ml-auto text-lg font-bold" style={{ color: accentColor }}>
-          {formatCurrency(displayTotal)}
+          {fmt(displayTotal)}
         </span>
       </div>
       {!drillCategory && (
@@ -240,9 +106,7 @@ function DonutChart({
         </p>
       )}
 
-      {/* Chart + Legend side-by-side */}
       <div className="flex flex-col items-center gap-6 xl:flex-row xl:items-center">
-        {/* Donut */}
         <div className="relative shrink-0" style={{ width: size, height: size }}>
           <PieChart width={size} height={size}>
             <Pie
@@ -251,7 +115,7 @@ function DonutChart({
               cy={size / 2}
               innerRadius={92}
               outerRadius={140}
-              paddingAngle={2}
+              paddingAngle={displayData.length > 1 ? 2 : 0}
               dataKey="value"
               stroke="none"
               isAnimationActive
@@ -270,16 +134,13 @@ function DonutChart({
             <Tooltip content={<CustomTooltip />} />
           </PieChart>
           <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-            <span className="text-2xl font-bold text-card-foreground">
-              {formatCurrency(displayTotal)}
-            </span>
+            <span className="text-2xl font-bold text-card-foreground">{fmt(displayTotal)}</span>
             <span className="mt-0.5 text-xs text-muted-foreground">
               {drillCategory ? drillCategory.name : "Total"}
             </span>
           </div>
         </div>
 
-        {/* Legend */}
         <div className="flex flex-1 flex-col gap-2 min-w-0 w-full">
           {displayData.map((item, idx) => {
             const pct = displayTotal > 0 ? Math.round((item.value / displayTotal) * 100) : 0
@@ -287,7 +148,7 @@ function DonutChart({
               <button
                 key={item.name}
                 type="button"
-                onClick={() => { if (!drillCategory) { setDrillCategory(data[idx]); setActiveIndex(undefined) } }}
+                onClick={() => { if (!drillCategory && data[idx]?.subcategorias?.length) { setDrillCategory(data[idx]); setActiveIndex(undefined) } }}
                 onMouseEnter={() => { if (!drillCategory) setActiveIndex(idx) }}
                 onMouseLeave={() => { if (!drillCategory) setActiveIndex(undefined) }}
                 className={`group flex items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
@@ -299,7 +160,6 @@ function DonutChart({
                   {item.name}
                 </span>
                 <div className="flex items-center gap-3">
-                  {/* Bar */}
                   <div className="hidden w-24 sm:block">
                     <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
                       <div
@@ -310,7 +170,7 @@ function DonutChart({
                   </div>
                   <span className="w-8 text-right text-xs text-muted-foreground">{pct}%</span>
                   <span className="w-24 text-right text-sm font-semibold text-card-foreground">
-                    {formatCurrency(item.value)}
+                    {fmt(item.value)}
                   </span>
                 </div>
               </button>
@@ -333,17 +193,44 @@ function DonutChart({
 }
 
 export default function CategoryChartsContent() {
+  const { data, isLoading } = useCategoryCharts()
+
+  if (isLoading) {
+    return (
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+        {[0, 1].map((i) => (
+          <div key={i} className="rounded-xl border border-border bg-card p-6 shadow-sm">
+            <div className="mb-4 h-5 w-48 animate-pulse rounded bg-muted" />
+            <div className="flex flex-col items-center xl:flex-row xl:items-center gap-6">
+              <div className="h-80 w-80 shrink-0 animate-pulse rounded-full bg-muted" />
+              <div className="flex flex-col gap-3 flex-1 w-full">
+                {[0, 1, 2, 3, 4].map((j) => (
+                  <div key={j} className="h-8 w-full animate-pulse rounded-lg bg-muted" />
+                ))}
+              </div>
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  const expenses = data?.expenses ?? []
+  const incomes = data?.incomes ?? []
+  const expTotal = expenses.reduce((a, b) => a + b.value, 0)
+  const incTotal = incomes.reduce((a, b) => a + b.value, 0)
+
   return (
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
       <DonutChart
-        data={expenseData}
-        total={expenseTotal}
+        data={expenses}
+        total={expTotal}
         title="Despesas por Categoria"
         accentColor="hsl(0, 72%, 51%)"
       />
       <DonutChart
-        data={incomeData}
-        total={incomeTotal}
+        data={incomes}
+        total={incTotal}
         title="Receitas por Categoria"
         accentColor="hsl(142, 71%, 40%)"
       />
