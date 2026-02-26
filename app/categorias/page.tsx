@@ -7,27 +7,30 @@ import useSWR from "swr"
 import { createClient } from "@/lib/supabase/client"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
-import { Tags, Plus, ChevronDown, ChevronRight, Pencil, Trash2, Loader2 } from "lucide-react"
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
+  Tags, Plus, ChevronDown, ChevronRight, Pencil, Trash2, Loader2,
+  X, ArrowRight, ReceiptText, CalendarClock, FileText, BarChart3
+} from "lucide-react"
+import {
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
 import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogAction,
-  AlertDialogCancel,
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel,
 } from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+
+// ---- Grupos DRE ----
+export const GRUPOS_DRE = [
+  { value: "receita_bruta",       label: "Receita Operacional Bruta",            tipo: "Receita" },
+  { value: "deducoes_receita",    label: "Deducoes de Receita Bruta (-)",         tipo: "Receita" },
+  { value: "custo_direto",        label: "Custo Direto de Vendas (-)",            tipo: "Despesa" },
+  { value: "despesas_operacionais",label: "Despesas Operacionais e Adm. (-)",    tipo: "Despesa" },
+  { value: "outras_receitas",     label: "Outras Receitas Nao Operacionais",      tipo: "Receita" },
+  { value: "outras_despesas",     label: "Outras Despesas Nao Operacionais (-)",  tipo: "Despesa" },
+  { value: "ir_csll",             label: "IR / CSLL (-)",                         tipo: "Despesa" },
+]
 
 interface SubcategoriaFilho {
   id: number
@@ -47,57 +50,68 @@ interface Categoria {
   nome: string
   tipo: "Receita" | "Despesa"
   cor: string
+  grupo_dre: string | null
   subcategorias: Subcategoria[]
+}
+
+interface DrillItem {
+  id: number
+  descricao: string
+  valor: number
+  data: string
+  tipo: string
+  origem: "lancamento" | "despesa_fixa" | "conta"
+  status?: string
 }
 
 const COLORS = ["#1B3A5C", "#2C5F8A", "#7A8FA6", "#A8B8C8", "#3D7AB5", "#C4CFD9"]
 
+function formatCurrency(v: number) {
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v)
+}
+function formatDate(s: string) {
+  if (!s) return "-"
+  const [y, m, d] = s.split("-")
+  return `${d}/${m}/${y}`
+}
+
 async function fetchCategorias(): Promise<Categoria[]> {
   const supabase = createClient()
-  const { data: cats, error: catError } = await supabase
-    .from("categorias")
-    .select("*")
-    .order("nome")
+  const [{ data: cats }, { data: subs }, { data: filhos }] = await Promise.all([
+    supabase.from("categorias").select("*").order("nome"),
+    supabase.from("subcategorias").select("*").order("nome"),
+    supabase.from("subcategorias_filhos").select("*").order("nome"),
+  ])
 
-  if (catError) throw catError
-
-  const { data: subs, error: subError } = await supabase
-    .from("subcategorias")
-    .select("*")
-    .order("nome")
-
-  if (subError) throw subError
-
-  const { data: filhos, error: filhoError } = await supabase
-    .from("subcategorias_filhos")
-    .select("*")
-    .order("nome")
-
-  if (filhoError) throw filhoError
-
-  // Build hierarchy
   const filhosBySub: Record<number, SubcategoriaFilho[]> = {}
   for (const f of filhos || []) {
     if (!filhosBySub[f.subcategoria_id]) filhosBySub[f.subcategoria_id] = []
     filhosBySub[f.subcategoria_id].push(f)
   }
-
   const subsByCat: Record<number, Subcategoria[]> = {}
   for (const s of subs || []) {
     if (!subsByCat[s.categoria_id]) subsByCat[s.categoria_id] = []
-    subsByCat[s.categoria_id].push({
-      ...s,
-      filhos: filhosBySub[s.id] || [],
-    })
+    subsByCat[s.categoria_id].push({ ...s, filhos: filhosBySub[s.id] || [] })
   }
+  return (cats || []).map((c) => ({ ...c, grupo_dre: c.grupo_dre || null, subcategorias: subsByCat[c.id] || [] }))
+}
 
-  return (cats || []).map((c) => ({
-    ...c,
-    subcategorias: subsByCat[c.id] || [],
-  }))
+async function fetchDrillItems(categoriaId: number): Promise<DrillItem[]> {
+  const supabase = createClient()
+  const [{ data: lancs }, { data: fixas }, { data: contas }] = await Promise.all([
+    supabase.from("lancamentos").select("id,descricao,valor,data,tipo,status").eq("categoria_id", categoriaId).order("data", { ascending: false }).limit(50),
+    supabase.from("despesas_fixas").select("id,descricao,valor,ativa").eq("categoria_id", categoriaId).order("descricao"),
+    supabase.from("contas_a_pagar").select("id,descricao,valor,data_vencimento,status").eq("categoria_id", categoriaId).order("data_vencimento", { ascending: false }).limit(30),
+  ])
+  const items: DrillItem[] = []
+  for (const l of lancs || []) items.push({ id: l.id, descricao: l.descricao, valor: Number(l.valor), data: l.data, tipo: l.tipo, status: l.status, origem: "lancamento" })
+  for (const f of fixas || []) items.push({ id: f.id, descricao: f.descricao, valor: Number(f.valor), data: "", tipo: "despesa", status: f.ativa ? "ativa" : "inativa", origem: "despesa_fixa" })
+  for (const c of contas || []) items.push({ id: c.id, descricao: c.descricao, valor: Number(c.valor), data: c.data_vencimento, tipo: "despesa", status: c.status, origem: "conta" })
+  return items
 }
 
 type DialogMode = "categoria" | "subcategoria" | "subcategoria-filho"
+type DrillTab = "lancamentos" | "despesas_fixas" | "contas"
 
 export default function CategoriasPageWrapper() {
   return <Suspense><CategoriasPage /></Suspense>
@@ -119,13 +133,18 @@ function CategoriasPage() {
   const [editingFilho, setEditingFilho] = useState<{ catId: number; subId: number; filho: SubcategoriaFilho } | null>(null)
   const [parentCatId, setParentCatId] = useState<number | null>(null)
   const [parentSubId, setParentSubId] = useState<number | null>(null)
-
-  // Delete state
   const [deleteConfirm, setDeleteConfirm] = useState<{ type: "cat" | "sub" | "filho"; catId: number; subId?: number; filhoId?: number; nome: string } | null>(null)
 
   // Form
   const [formNome, setFormNome] = useState("")
   const [formTipo, setFormTipo] = useState<"Receita" | "Despesa">("Despesa")
+  const [formGrupoDre, setFormGrupoDre] = useState<string>("")
+
+  // Drill-down panel
+  const [drillCat, setDrillCat] = useState<Categoria | null>(null)
+  const [drillTab, setDrillTab] = useState<DrillTab>("lancamentos")
+  const [drillItems, setDrillItems] = useState<DrillItem[]>([])
+  const [drillLoading, setDrillLoading] = useState(false)
 
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -135,6 +154,7 @@ function CategoriasPage() {
     setEditingCat(null)
     setFormNome("")
     setFormTipo("Despesa")
+    setFormGrupoDre("")
     setDialogOpen(true)
   }, [])
 
@@ -145,32 +165,35 @@ function CategoriasPage() {
     }
   }, [searchParams, router, openNewCategoria])
 
-  function toggleExpand(id: number) {
-    setExpandedCats((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+  async function openDrill(cat: Categoria) {
+    setDrillCat(cat)
+    setDrillTab("lancamentos")
+    setDrillLoading(true)
+    setDrillItems([])
+    try {
+      const items = await fetchDrillItems(cat.id)
+      setDrillItems(items)
+    } finally {
+      setDrillLoading(false)
+    }
   }
 
+  function toggleExpand(id: number) {
+    setExpandedCats((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
+  }
   function toggleExpandSub(id: number) {
-    setExpandedSubs((prev) => {
-      const next = new Set(prev)
-      if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
+    setExpandedSubs((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
   }
 
   const filtered = filterTipo === "Todos" ? (categorias || []) : (categorias || []).filter((c) => c.tipo === filterTipo)
 
-  // --- Categoria CRUD ---
+  // Categoria CRUD
   function openEditCategoria(cat: Categoria) {
     setDialogMode("categoria")
     setEditingCat(cat)
     setFormNome(cat.nome)
     setFormTipo(cat.tipo)
+    setFormGrupoDre(cat.grupo_dre || "")
     setDialogOpen(true)
   }
 
@@ -179,10 +202,11 @@ function CategoriasPage() {
     setSaving(true)
     try {
       const supabase = createClient()
+      const payload = { nome: formNome, tipo: formTipo, grupo_dre: formGrupoDre || null }
       if (editingCat) {
-        await supabase.from("categorias").update({ nome: formNome, tipo: formTipo }).eq("id", editingCat.id)
+        await supabase.from("categorias").update(payload).eq("id", editingCat.id)
       } else {
-        await supabase.from("categorias").insert({ nome: formNome, tipo: formTipo, cor: COLORS[(categorias?.length || 0) % COLORS.length] })
+        await supabase.from("categorias").insert({ ...payload, cor: COLORS[(categorias?.length || 0) % COLORS.length] })
       }
       await mutate()
       setDialogOpen(false)
@@ -191,200 +215,147 @@ function CategoriasPage() {
     }
   }
 
-  // --- Subcategoria CRUD ---
+  // Subcategoria CRUD
   function openNewSubcategoria(catId: number) {
-    setDialogMode("subcategoria")
-    setEditingSub(null)
-    setParentCatId(catId)
-    setFormNome("")
-    setDialogOpen(true)
+    setDialogMode("subcategoria"); setEditingSub(null); setParentCatId(catId); setFormNome(""); setDialogOpen(true)
   }
-
   function openEditSubcategoria(catId: number, sub: Subcategoria) {
-    setDialogMode("subcategoria")
-    setEditingSub({ catId, sub })
-    setParentCatId(catId)
-    setFormNome(sub.nome)
-    setDialogOpen(true)
+    setDialogMode("subcategoria"); setEditingSub({ catId, sub }); setParentCatId(catId); setFormNome(sub.nome); setDialogOpen(true)
   }
-
   async function handleSaveSubcategoria() {
     if (!formNome.trim() || !parentCatId) return
     setSaving(true)
     try {
       const supabase = createClient()
-      if (editingSub) {
-        await supabase.from("subcategorias").update({ nome: formNome }).eq("id", editingSub.sub.id)
-      } else {
-        await supabase.from("subcategorias").insert({ nome: formNome, categoria_id: parentCatId })
-      }
-      await mutate()
-      setDialogOpen(false)
-    } finally {
-      setSaving(false)
-    }
+      if (editingSub) await supabase.from("subcategorias").update({ nome: formNome }).eq("id", editingSub.sub.id)
+      else await supabase.from("subcategorias").insert({ nome: formNome, categoria_id: parentCatId })
+      await mutate(); setDialogOpen(false)
+    } finally { setSaving(false) }
   }
 
-  // --- Subcategoria Filho CRUD ---
+  // Filho CRUD
   function openNewFilho(catId: number, subId: number) {
-    setDialogMode("subcategoria-filho")
-    setEditingFilho(null)
-    setParentCatId(catId)
-    setParentSubId(subId)
-    setFormNome("")
-    setDialogOpen(true)
+    setDialogMode("subcategoria-filho"); setEditingFilho(null); setParentCatId(catId); setParentSubId(subId); setFormNome(""); setDialogOpen(true)
   }
-
   function openEditFilho(catId: number, subId: number, filho: SubcategoriaFilho) {
-    setDialogMode("subcategoria-filho")
-    setEditingFilho({ catId, subId, filho })
-    setParentCatId(catId)
-    setParentSubId(subId)
-    setFormNome(filho.nome)
-    setDialogOpen(true)
+    setDialogMode("subcategoria-filho"); setEditingFilho({ catId, subId, filho }); setParentCatId(catId); setParentSubId(subId); setFormNome(filho.nome); setDialogOpen(true)
   }
-
   async function handleSaveFilho() {
     if (!formNome.trim() || !parentSubId) return
     setSaving(true)
     try {
       const supabase = createClient()
-      if (editingFilho) {
-        await supabase.from("subcategorias_filhos").update({ nome: formNome }).eq("id", editingFilho.filho.id)
-      } else {
-        await supabase.from("subcategorias_filhos").insert({ nome: formNome, subcategoria_id: parentSubId })
-      }
-      await mutate()
-      setDialogOpen(false)
-    } finally {
-      setSaving(false)
-    }
+      if (editingFilho) await supabase.from("subcategorias_filhos").update({ nome: formNome }).eq("id", editingFilho.filho.id)
+      else await supabase.from("subcategorias_filhos").insert({ nome: formNome, subcategoria_id: parentSubId })
+      await mutate(); setDialogOpen(false)
+    } finally { setSaving(false) }
   }
 
-  // --- Delete ---
   async function handleDelete() {
     if (!deleteConfirm) return
     setSaving(true)
     try {
       const supabase = createClient()
-      if (deleteConfirm.type === "cat") {
-        await supabase.from("categorias").delete().eq("id", deleteConfirm.catId)
-      } else if (deleteConfirm.type === "sub") {
-        await supabase.from("subcategorias").delete().eq("id", deleteConfirm.subId!)
-      } else if (deleteConfirm.type === "filho") {
-        await supabase.from("subcategorias_filhos").delete().eq("id", deleteConfirm.filhoId!)
-      }
-      await mutate()
-      setDeleteConfirm(null)
-    } finally {
-      setSaving(false)
-    }
+      if (deleteConfirm.type === "cat") await supabase.from("categorias").delete().eq("id", deleteConfirm.catId)
+      else if (deleteConfirm.type === "sub") await supabase.from("subcategorias").delete().eq("id", deleteConfirm.subId!)
+      else await supabase.from("subcategorias_filhos").delete().eq("id", deleteConfirm.filhoId!)
+      await mutate(); setDeleteConfirm(null)
+    } finally { setSaving(false) }
   }
+
+  function handleSave() {
+    if (dialogMode === "categoria") return handleSaveCategoria()
+    if (dialogMode === "subcategoria") return handleSaveSubcategoria()
+    return handleSaveFilho()
+  }
+
+  const drillLancamentos = drillItems.filter((i) => i.origem === "lancamento")
+  const drillFixas = drillItems.filter((i) => i.origem === "despesa_fixa")
+  const drillContas = drillItems.filter((i) => i.origem === "conta")
+  const drillTabItems = drillTab === "lancamentos" ? drillLancamentos : drillTab === "despesas_fixas" ? drillFixas : drillContas
+  const grupoDreLabel = drillCat?.grupo_dre ? GRUPOS_DRE.find(g => g.value === drillCat.grupo_dre)?.label : null
+
+  const tabsConfig: { key: DrillTab; label: string; count: number; Icon: typeof ReceiptText }[] = [
+    { key: "lancamentos", label: "Lancamentos", count: drillLancamentos.length, Icon: ReceiptText },
+    { key: "despesas_fixas", label: "Despesas Fixas", count: drillFixas.length, Icon: CalendarClock },
+    { key: "contas", label: "Contas", count: drillContas.length, Icon: FileText },
+  ]
 
   return (
     <div className="flex min-h-screen bg-background">
       <AppSidebar />
       <div className="ml-[72px] flex flex-1 flex-col">
         <PageHeader title="Categorias" />
-        <main className="flex-1 overflow-y-auto p-6">
-          <div className="mx-auto max-w-7xl space-y-6">
-            {/* Top bar */}
-            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-muted-foreground">
-                Organize suas transacoes com categorias e subcategorias.
-              </p>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center rounded-lg border border-border bg-card">
-                  {(["Todos", "Receita", "Despesa"] as const).map((tipo) => (
-                    <button
-                      key={tipo}
-                      type="button"
-                      onClick={() => setFilterTipo(tipo)}
-                      className={`px-3 py-1.5 text-sm font-medium transition-colors first:rounded-l-lg last:rounded-r-lg ${
-                        filterTipo === tipo ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"
-                      }`}
-                    >
-                      {tipo}
-                    </button>
-                  ))}
+        <main className="flex flex-1 overflow-hidden">
+          {/* List */}
+          <div className={`flex-1 overflow-y-auto p-6 transition-all duration-300 ${drillCat ? "xl:pr-3" : ""}`}>
+            <div className="mx-auto max-w-5xl space-y-6">
+              {/* Top bar */}
+              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-sm text-muted-foreground">Organize suas transacoes com categorias, subcategorias e grupos DRE.</p>
+                <div className="flex items-center gap-3">
+                  <div className="flex items-center rounded-lg border border-border bg-card">
+                    {(["Todos", "Receita", "Despesa"] as const).map((tipo) => (
+                      <button key={tipo} type="button" onClick={() => setFilterTipo(tipo)}
+                        className={`px-3 py-1.5 text-sm font-medium transition-colors first:rounded-l-lg last:rounded-r-lg ${filterTipo === tipo ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                        {tipo}
+                      </button>
+                    ))}
+                  </div>
+                  <button type="button" onClick={openNewCategoria} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
+                    <Plus className="h-4 w-4" />Nova Categoria
+                  </button>
                 </div>
-                <button type="button" onClick={openNewCategoria} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
-                  <Plus className="h-4 w-4" />
-                  Nova Categoria
-                </button>
               </div>
-            </div>
 
-            {/* Loading state */}
-            {isLoading && (
-              <div className="flex items-center justify-center py-12">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                <span className="ml-2 text-sm text-muted-foreground">Carregando categorias...</span>
-              </div>
-            )}
+              {isLoading && <div className="flex items-center justify-center py-12"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /><span className="ml-2 text-sm text-muted-foreground">Carregando...</span></div>}
+              {error && <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center"><p className="text-sm text-destructive">Erro ao carregar. <button type="button" onClick={() => mutate()} className="font-medium text-primary underline">Recarregar</button></p></div>}
 
-            {/* Error state */}
-            {error && (
-              <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center">
-                <p className="text-sm text-destructive">Erro ao carregar categorias. Tente novamente.</p>
-                <button type="button" onClick={() => mutate()} className="mt-2 text-sm font-medium text-primary hover:underline">
-                  Recarregar
-                </button>
-              </div>
-            )}
-
-            {/* Category list */}
-            {!isLoading && !error && (
-              <div className="space-y-3">
-                {filtered.map((cat) => {
-                  const isExpanded = expandedCats.has(cat.id)
-                  return (
-                    <div key={cat.id} className="rounded-xl border border-border bg-card shadow-sm transition-shadow hover:shadow-md">
-                      {/* Category header */}
-                      <div className="flex w-full items-center gap-4 p-5">
-                        <button type="button" onClick={() => toggleExpand(cat.id)} className="flex flex-1 items-center gap-4 text-left">
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${cat.cor}18` }}>
-                            <Tags className="h-5 w-5" style={{ color: cat.cor }} />
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2">
-                              <p className="font-semibold text-card-foreground">{cat.nome}</p>
-                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
-                                cat.tipo === "Receita" ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)]" : "bg-[hsl(0,72%,51%)]/10 text-[hsl(0,72%,51%)]"
-                              }`}>
-                                {cat.tipo}
-                              </span>
+              {!isLoading && !error && (
+                <div className="space-y-3">
+                  {filtered.map((cat) => {
+                    const isExpanded = expandedCats.has(cat.id)
+                    const grupoDre = GRUPOS_DRE.find(g => g.value === cat.grupo_dre)
+                    const isActive = drillCat?.id === cat.id
+                    return (
+                      <div key={cat.id} className={`rounded-xl border bg-card shadow-sm transition-all ${isActive ? "border-primary/40 shadow-md" : "border-border hover:shadow-md"}`}>
+                        <div className="flex w-full items-center gap-4 p-5">
+                          <button type="button" onClick={() => toggleExpand(cat.id)} className="flex flex-1 items-center gap-4 text-left">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${cat.cor}18` }}>
+                              <Tags className="h-5 w-5" style={{ color: cat.cor }} />
                             </div>
-                            <p className="text-xs text-muted-foreground">
-                              {cat.subcategorias.length} subcategorias
-                            </p>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="font-semibold text-card-foreground">{cat.nome}</p>
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${cat.tipo === "Receita" ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)]" : "bg-[hsl(0,72%,51%)]/10 text-[hsl(0,72%,51%)]"}`}>{cat.tipo}</span>
+                                {grupoDre && (
+                                  <span className="rounded-full border border-[hsl(216,60%,50%)]/30 bg-[hsl(216,60%,50%)]/10 px-2 py-0.5 text-[10px] font-medium text-[hsl(216,60%,50%)]">
+                                    DRE: {grupoDre.label}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-muted-foreground">{cat.subcategorias.length} subcategorias</p>
+                            </div>
+                          </button>
+                          <div className="flex items-center gap-1.5">
+                            <button type="button" onClick={() => isActive ? setDrillCat(null) : openDrill(cat)}
+                              className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${isActive ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/30 hover:bg-primary/5 hover:text-primary"}`}>
+                              <BarChart3 className="h-3.5 w-3.5" />
+                              {isActive ? "Fechar" : "Ver"}
+                            </button>
+                            <button type="button" onClick={() => openEditCategoria(cat)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"><Pencil className="h-3.5 w-3.5" /></button>
+                            <button type="button" onClick={() => setDeleteConfirm({ type: "cat", catId: cat.id, nome: cat.nome })} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
+                            <button type="button" onClick={() => toggleExpand(cat.id)} className="text-muted-foreground">
+                              {isExpanded ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
+                            </button>
                           </div>
-                        </button>
-                        <div className="flex items-center gap-2">
-                          <button type="button" onClick={() => openEditCategoria(cat)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                            <Pencil className="h-3.5 w-3.5" />
-                          </button>
-                          <button type="button" onClick={() => setDeleteConfirm({ type: "cat", catId: cat.id, nome: cat.nome })} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive">
-                            <Trash2 className="h-3.5 w-3.5" />
-                          </button>
-                          <button type="button" onClick={() => toggleExpand(cat.id)} className="text-muted-foreground">
-                            {isExpanded ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
-                          </button>
                         </div>
-                      </div>
 
-                      {/* Subcategories */}
-                      {isExpanded && (
-                        <div className="border-t border-border">
-                          <div className="px-5 py-3">
+                        {isExpanded && (
+                          <div className="border-t border-border px-5 py-3">
                             <div className="flex items-center justify-between pb-2">
-                              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                                Subcategorias
-                              </span>
-                              <button type="button" onClick={() => openNewSubcategoria(cat.id)} className="flex items-center gap-1 text-xs font-medium text-primary hover:underline">
-                                <Plus className="h-3 w-3" />
-                                Adicionar
-                              </button>
+                              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Subcategorias</span>
+                              <button type="button" onClick={() => openNewSubcategoria(cat.id)} className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"><Plus className="h-3 w-3" />Adicionar</button>
                             </div>
                             <div className="space-y-1">
                               {cat.subcategorias.map((sub) => {
@@ -399,40 +370,23 @@ function CategoriasPage() {
                                       ) : (
                                         <div className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: cat.cor }} />
                                       )}
-                                      <button type="button" onClick={() => toggleExpandSub(sub.id)} className="flex flex-1 items-center gap-2 text-left">
-                                        <span className="text-sm text-card-foreground">{sub.nome}</span>
-                                        {sub.filhos.length > 0 && (
-                                          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
-                                            {sub.filhos.length}
-                                          </span>
-                                        )}
-                                      </button>
+                                      <span className="flex-1 text-sm text-card-foreground">{sub.nome}</span>
+                                      {sub.filhos.length > 0 && <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{sub.filhos.length}</span>}
                                       <div className="flex items-center gap-1">
-                                        <button type="button" onClick={() => openNewFilho(cat.id, sub.id)} className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-primary/10 hover:text-primary" title="Adicionar sub-filho">
-                                          <Plus className="h-3 w-3" />
-                                        </button>
-                                        <button type="button" onClick={() => openEditSubcategoria(cat.id, sub)} className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                                          <Pencil className="h-3 w-3" />
-                                        </button>
-                                        <button type="button" onClick={() => setDeleteConfirm({ type: "sub", catId: cat.id, subId: sub.id, nome: sub.nome })} className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive">
-                                          <Trash2 className="h-3 w-3" />
-                                        </button>
+                                        <button type="button" onClick={() => openNewFilho(cat.id, sub.id)} className="rounded p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary"><Plus className="h-3 w-3" /></button>
+                                        <button type="button" onClick={() => openEditSubcategoria(cat.id, sub)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"><Pencil className="h-3 w-3" /></button>
+                                        <button type="button" onClick={() => setDeleteConfirm({ type: "sub", catId: cat.id, subId: sub.id, nome: sub.nome })} className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-3 w-3" /></button>
                                       </div>
                                     </div>
-                                    {/* Subcategoria Filhos (3o nivel) */}
                                     {isSubExpanded && sub.filhos.length > 0 && (
                                       <div className="ml-6 border-l-2 border-border pl-4 mt-1 mb-1">
                                         {sub.filhos.map((filho) => (
                                           <div key={filho.id} className="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-muted">
                                             <div className="h-1.5 w-1.5 shrink-0 rounded-full border border-current opacity-40" style={{ color: cat.cor }} />
-                                            <span className="flex-1 text-sm text-card-foreground">{filho.nome}</span>
+                                            <span className="flex-1 text-sm">{filho.nome}</span>
                                             <div className="flex items-center gap-1">
-                                              <button type="button" onClick={() => openEditFilho(cat.id, sub.id, filho)} className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
-                                                <Pencil className="h-3 w-3" />
-                                              </button>
-                                              <button type="button" onClick={() => setDeleteConfirm({ type: "filho", catId: cat.id, subId: sub.id, filhoId: filho.id, nome: filho.nome })} className="flex items-center justify-center rounded p-1 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive">
-                                                <Trash2 className="h-3 w-3" />
-                                              </button>
+                                              <button type="button" onClick={() => openEditFilho(cat.id, sub.id, filho)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"><Pencil className="h-3 w-3" /></button>
+                                              <button type="button" onClick={() => setDeleteConfirm({ type: "filho", catId: cat.id, subId: sub.id, filhoId: filho.id, nome: filho.nome })} className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-3 w-3" /></button>
                                             </div>
                                           </div>
                                         ))}
@@ -441,86 +395,167 @@ function CategoriasPage() {
                                   </div>
                                 )
                               })}
+                              {cat.subcategorias.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">Nenhuma subcategoria.</p>}
                             </div>
                           </div>
-                        </div>
-                      )}
+                        )}
+                      </div>
+                    )
+                  })}
+                  {filtered.length === 0 && !isLoading && (
+                    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-16 text-center">
+                      <Tags className="h-10 w-10 text-muted-foreground/40" />
+                      <p className="mt-3 text-sm font-medium text-muted-foreground">Nenhuma categoria encontrada.</p>
+                      <button type="button" onClick={openNewCategoria} className="mt-4 flex items-center gap-1 text-sm font-medium text-primary hover:underline"><Plus className="h-3.5 w-3.5" />Criar primeira categoria</button>
                     </div>
-                  )
-                })}
-              </div>
-            )}
+                  )}
+                </div>
+              )}
+            </div>
           </div>
+
+          {/* Drill-down panel */}
+          {drillCat && (
+            <div className="hidden w-[420px] shrink-0 border-l border-border bg-card xl:flex xl:flex-col">
+              {/* Panel header */}
+              <div className="flex items-center gap-3 border-b border-border px-5 py-4">
+                <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${drillCat.cor}18` }}>
+                  <Tags className="h-4 w-4" style={{ color: drillCat.cor }} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="font-semibold text-card-foreground truncate">{drillCat.nome}</p>
+                  {grupoDreLabel && <p className="text-[10px] text-[hsl(216,60%,50%)] truncate">DRE: {grupoDreLabel}</p>}
+                </div>
+                <button type="button" onClick={() => setDrillCat(null)} className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground">
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Tabs */}
+              <div className="flex border-b border-border">
+                {tabsConfig.map(({ key, label, count, Icon }) => (
+                  <button key={key} type="button" onClick={() => setDrillTab(key)}
+                    className={`flex flex-1 items-center justify-center gap-1.5 px-2 py-3 text-xs font-medium transition-colors border-b-2 ${drillTab === key ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"}`}>
+                    <Icon className="h-3.5 w-3.5" />
+                    {label}
+                    <span className={`rounded-full px-1.5 py-0.5 text-[10px] ${drillTab === key ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>{count}</span>
+                  </button>
+                ))}
+              </div>
+
+              {/* Items */}
+              <div className="flex-1 overflow-y-auto">
+                {drillLoading ? (
+                  <div className="flex items-center justify-center py-12"><Loader2 className="h-5 w-5 animate-spin text-muted-foreground" /></div>
+                ) : drillTabItems.length === 0 ? (
+                  <div className="flex flex-col items-center justify-center py-12 text-center">
+                    <p className="text-sm text-muted-foreground">Nenhum registro encontrado.</p>
+                  </div>
+                ) : (
+                  <div className="divide-y divide-border">
+                    {drillTabItems.map((item) => (
+                      <div key={`${item.origem}-${item.id}`} className="flex items-center gap-3 px-5 py-3.5 hover:bg-muted/50 transition-colors">
+                        <div className="flex-1 min-w-0">
+                          <p className="truncate text-sm font-medium text-card-foreground">{item.descricao}</p>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            {item.data && <span className="text-xs text-muted-foreground">{formatDate(item.data)}</span>}
+                            {item.status && (
+                              <span className={`text-[10px] font-medium rounded-full px-1.5 py-0.5 ${
+                                item.status === "confirmado" || item.status === "ativa" || item.status === "pago" ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)]" :
+                                item.status === "pendente" ? "bg-amber-500/10 text-amber-600" :
+                                "bg-muted text-muted-foreground"
+                              }`}>{item.status}</span>
+                            )}
+                          </div>
+                        </div>
+                        <span className={`text-sm font-semibold ${item.tipo === "receita" ? "text-[hsl(142,71%,45%)]" : "text-[hsl(0,72%,51%)]"}`}>
+                          {item.tipo === "receita" ? "+" : "-"}{formatCurrency(Math.abs(item.valor))}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Footer */}
+              {drillTabItems.length > 0 && (
+                <div className="border-t border-border px-5 py-3">
+                  <div className="flex items-center justify-between text-xs text-muted-foreground">
+                    <span>{drillTabItems.length} registros</span>
+                    <span className="font-semibold text-card-foreground">{formatCurrency(drillTabItems.reduce((acc, i) => acc + i.valor, 0))}</span>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
         </main>
       </div>
 
-      {/* Dialog - Novo/Editar */}
+      {/* Dialog Categoria/Subcategoria/Filho */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
-              {dialogMode === "categoria"
-                ? editingCat ? "Editar Categoria" : "Nova Categoria"
-                : dialogMode === "subcategoria"
-                ? editingSub ? "Editar Subcategoria" : "Nova Subcategoria"
-                : editingFilho ? "Editar Subcategoria Filho" : "Nova Subcategoria Filho"
-              }
+              {dialogMode === "categoria" ? (editingCat ? "Editar Categoria" : "Nova Categoria") :
+               dialogMode === "subcategoria" ? (editingSub ? "Editar Subcategoria" : "Nova Subcategoria") :
+               (editingFilho ? "Editar Sub-filho" : "Novo Sub-filho")}
             </DialogTitle>
             <DialogDescription>
-              {dialogMode === "categoria"
-                ? editingCat ? "Atualize o nome e tipo da categoria." : "Preencha os dados para criar uma nova categoria."
-                : dialogMode === "subcategoria"
-                ? editingSub ? "Atualize o nome da subcategoria." : "Preencha o nome da nova subcategoria."
-                : editingFilho ? "Atualize o nome da subcategoria filho." : "Preencha o nome da nova subcategoria filho."
-              }
+              {dialogMode === "categoria" ? "Defina nome, tipo e o grupo do DRE para esta categoria." :
+               dialogMode === "subcategoria" ? "Nome da subcategoria." : "Nome do sub-filho."}
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4 py-2">
             <div className="space-y-2">
-              <Label htmlFor="nome">Nome</Label>
-              <Input id="nome" placeholder={dialogMode === "categoria" ? "Ex: Moradia, Transporte..." : dialogMode === "subcategoria" ? "Ex: Aluguel, Combustivel..." : "Ex: Residencial, Gasolina..."} value={formNome} onChange={(e) => setFormNome(e.target.value)} />
+              <Label htmlFor="formNome">Nome</Label>
+              <Input id="formNome" placeholder="Ex: Vendas, Aluguel..." value={formNome} onChange={(e) => setFormNome(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") handleSave() }} />
             </div>
             {dialogMode === "categoria" && (
-              <div className="space-y-2">
-                <Label htmlFor="tipo">Tipo</Label>
-                <select id="tipo" value={formTipo} onChange={(e) => setFormTipo(e.target.value as "Receita" | "Despesa")} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                  <option value="Despesa">Despesa</option>
-                  <option value="Receita">Receita</option>
-                </select>
-              </div>
+              <>
+                <div className="space-y-2">
+                  <Label>Tipo</Label>
+                  <div className="grid grid-cols-2 gap-3">
+                    {(["Receita", "Despesa"] as const).map((t) => (
+                      <button key={t} type="button" onClick={() => { setFormTipo(t); setFormGrupoDre("") }}
+                        className={`rounded-lg border p-3 text-sm font-medium transition-colors ${formTipo === t ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-primary/40"}`}>
+                        {t}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="grupoDre">Grupo do DRE</Label>
+                  <select id="grupoDre" value={formGrupoDre} onChange={(e) => setFormGrupoDre(e.target.value)}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <option value="">-- Sem grupo DRE --</option>
+                    {GRUPOS_DRE.filter(g => g.tipo === formTipo || !formTipo).map((g) => (
+                      <option key={g.value} value={g.value}>{g.label}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-muted-foreground">Vincule ao grupo correto para que o DRE seja calculado automaticamente.</p>
+                </div>
+              </>
             )}
           </div>
           <DialogFooter>
-            <button type="button" onClick={() => setDialogOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted">
-              Cancelar
-            </button>
-            <button
-              type="button"
-              disabled={saving}
-              onClick={dialogMode === "categoria" ? handleSaveCategoria : dialogMode === "subcategoria" ? handleSaveSubcategoria : handleSaveFilho}
-              className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
-            >
-              {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-              {(dialogMode === "categoria" ? editingCat : dialogMode === "subcategoria" ? editingSub : editingFilho) ? "Salvar" : "Adicionar"}
+            <button type="button" onClick={() => setDialogOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">Cancelar</button>
+            <button type="button" onClick={handleSave} disabled={saving} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : editingCat || editingSub || editingFilho ? "Salvar" : "Adicionar"}
             </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation */}
+      {/* Delete */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir {deleteConfirm?.type === "cat" ? "categoria" : deleteConfirm?.type === "sub" ? "subcategoria" : "subcategoria filho"}</AlertDialogTitle>
-            <AlertDialogDescription>
-              Tem certeza que deseja excluir &quot;{deleteConfirm?.nome}&quot;? Esta acao nao pode ser desfeita.
-            </AlertDialogDescription>
+            <AlertDialogTitle>Confirmar exclusao</AlertDialogTitle>
+            <AlertDialogDescription>Deseja excluir &quot;{deleteConfirm?.nome}&quot;? Esta acao nao pode ser desfeita.</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleDelete} disabled={saving} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
-              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Excluir"}
-            </AlertDialogAction>
+            <AlertDialogAction onClick={handleDelete} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">Excluir</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
