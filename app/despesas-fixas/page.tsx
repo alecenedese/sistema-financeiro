@@ -254,6 +254,7 @@ export default function DespesasFixasPage() {
       const isParcelado = form.tipo_recorrencia === "parcelado"
       const payload: Record<string, unknown> = {
         descricao: form.descricao.trim(),
+        keyword: form.descricao.trim().toLowerCase(),
         valor: parseBRL(form.valor),
         dia_vencimento: Number(form.dia_vencimento) || 1,
         ativa: form.ativa,
