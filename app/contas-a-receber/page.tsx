@@ -382,49 +382,75 @@ function ContasAReceberPage() {
             )}
 
             {!isLoading && !error && (
-              <div className="rounded-xl border border-border bg-card shadow-sm">
-                <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto_auto] gap-4 border-b border-border px-5 py-3 text-xs font-semibold uppercase text-muted-foreground">
-                  <span>Descricao</span>
-                  <span>Cliente</span>
-                  <span>Categoria</span>
-                  <span>Conta Bancaria</span>
-                  <span>Vencimento</span>
-                  <span>Status</span>
-                  <span className="text-right">Valor</span>
-                  <span className="text-right">Acoes</span>
+              <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[860px] border-collapse text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/40">
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Descricao</th>
+                        <th className="w-36 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cliente</th>
+                        <th className="w-44 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Categoria</th>
+                        <th className="w-36 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Conta Bancaria</th>
+                        <th className="w-28 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Vencimento</th>
+                        <th className="w-24 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
+                        <th className="w-32 px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Valor</th>
+                        <th className="w-20 px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Acoes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filtered.length === 0 ? (
+                        <tr>
+                          <td colSpan={8} className="px-5 py-12 text-center text-sm text-muted-foreground">
+                            {hasFilter ? "Nenhuma conta encontrada com os filtros atuais." : "Nenhuma conta a receber cadastrada."}
+                          </td>
+                        </tr>
+                      ) : filtered.map((conta) => (
+                        <tr key={conta.id} className="group border-b border-border last:border-b-0 transition-colors hover:bg-muted/40">
+                          <td className="px-4 py-3.5">
+                            <div className="flex items-center gap-3">
+                              <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${conta.status === "vencido" ? "bg-[hsl(0,72%,51%)]/10" : conta.status === "recebido" ? "bg-[hsl(142,71%,40%)]/10" : "bg-[hsl(38,92%,50%)]/10"}`}>
+                                <FileUp className={`h-4 w-4 ${conta.status === "vencido" ? "text-[hsl(0,72%,51%)]" : conta.status === "recebido" ? "text-[hsl(142,71%,40%)]" : "text-[hsl(38,92%,50%)]"}`} />
+                              </div>
+                              <span className="font-medium text-card-foreground">{conta.descricao}</span>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <span className="text-muted-foreground">{conta.cliente_nome || conta.cliente || "-"}</span>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <span className="inline-block max-w-[168px] truncate rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground" title={[conta.categoria_nome, conta.subcategoria_nome, conta.filho_nome].filter(Boolean).join(" > ") || "-"}>
+                              {[conta.categoria_nome, conta.subcategoria_nome, conta.filho_nome].filter(Boolean).join(" > ") || "-"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <span className="text-muted-foreground">{conta.conta_bancaria_nome || "-"}</span>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <span className="whitespace-nowrap text-muted-foreground">{formatDateDisplay(conta.vencimento)}</span>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <span className={`whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-semibold ${conta.status === "recebido" ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)]" : conta.status === "vencido" ? "bg-[hsl(0,72%,51%)]/10 text-[hsl(0,72%,51%)]" : "bg-[hsl(38,92%,50%)]/10 text-[hsl(38,92%,50%)]"}`}>
+                              {conta.status === "recebido" ? "Recebido" : conta.status === "vencido" ? "Vencido" : "Pendente"}
+                            </span>
+                          </td>
+                          <td className="px-4 py-3.5 text-right">
+                            <span className="whitespace-nowrap font-semibold text-[hsl(142,71%,40%)]">+ {formatCurrency(conta.valor)}</span>
+                          </td>
+                          <td className="px-4 py-3.5">
+                            <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                              <button type="button" onClick={() => openEdit(conta)} className="flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground">
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                              <button type="button" onClick={() => setDeleteConfirm(conta)} className="flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
                 </div>
-                {filtered.length === 0 ? (
-                  <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-                    {hasFilter ? "Nenhuma conta encontrada com os filtros atuais." : "Nenhuma conta a receber cadastrada."}
-                  </div>
-                ) : filtered.map((conta) => (
-                  <div key={conta.id} className="group grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto_auto] items-center gap-4 border-b border-border px-5 py-3.5 last:border-b-0 transition-colors hover:bg-muted/50">
-                    <div className="flex items-center gap-3">
-                      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${conta.status === "vencido" ? "bg-[hsl(0,72%,51%)]/10" : conta.status === "recebido" ? "bg-[hsl(142,71%,40%)]/10" : "bg-[hsl(38,92%,50%)]/10"}`}>
-                        <FileUp className={`h-5 w-5 ${conta.status === "vencido" ? "text-[hsl(0,72%,51%)]" : conta.status === "recebido" ? "text-[hsl(142,71%,40%)]" : "text-[hsl(38,92%,50%)]"}`} />
-                      </div>
-                      <span className="text-sm font-medium text-card-foreground">{conta.descricao}</span>
-                    </div>
-                    <span className="text-sm text-muted-foreground">{conta.cliente_nome || conta.cliente || "-"}</span>
-                    <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
-                      {[conta.categoria_nome, conta.subcategoria_nome, conta.filho_nome].filter(Boolean).join(" > ") || "-"}
-                    </span>
-                    <span className="text-sm text-muted-foreground">{conta.conta_bancaria_nome || "-"}</span>
-                    <span className="text-sm text-muted-foreground">{formatDateDisplay(conta.vencimento)}</span>
-                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${conta.status === "recebido" ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)]" : conta.status === "vencido" ? "bg-[hsl(0,72%,51%)]/10 text-[hsl(0,72%,51%)]" : "bg-[hsl(38,92%,50%)]/10 text-[hsl(38,92%,50%)]"}`}>
-                      {conta.status === "recebido" ? "Recebido" : conta.status === "vencido" ? "Vencido" : "Pendente"}
-                    </span>
-                    <span className="text-right text-sm font-semibold text-[hsl(142,71%,40%)]">+ {formatCurrency(conta.valor)}</span>
-                    <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                      <button type="button" onClick={() => openEdit(conta)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button type="button" onClick={() => setDeleteConfirm(conta)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))}
               </div>
             )}
           </div>
