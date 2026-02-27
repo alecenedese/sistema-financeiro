@@ -14,9 +14,7 @@ import {
   AlertTriangle,
   CalendarDays,
 } from "lucide-react"
-import { useState, useEffect, useCallback, useMemo, useRef } from "react"
-import { useSearchParams, useRouter } from "next/navigation"
-import { Suspense } from "react"
+import { useState, useEffect, useMemo } from "react"
 import {
   Dialog,
   DialogContent,
@@ -38,7 +36,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createClient } from "@/lib/supabase/client"
-import { getActiveTenantId } from "@/hooks/use-tenant"
+import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
 import { handleCurrencyInput, parseBRL, formatBRL } from "@/lib/currency-input"
 import useSWR from "swr"
 
@@ -75,7 +73,7 @@ async function fetchDespesas(): Promise<DespesaFixa[]> {
   const tid = getActiveTenantId()
   let q = supabase
     .from("despesas_fixas")
-    .select(`*, categorias(nome), fornecedores(nome), contas_bancarias(nome, tipo)`)
+    .select("*, categorias(nome), fornecedores(nome), contas_bancarias(nome, tipo)")
     .order("dia_vencimento", { ascending: true })
   if (tid) q = q.eq("tenant_id", tid)
   const { data, error } = await q
@@ -103,23 +101,34 @@ async function fetchDespesas(): Promise<DespesaFixa[]> {
 
 async function fetchHierarchy() {
   const supabase = createClient()
-  const [catRes, subRes, filhoRes] = await Promise.all([
-    supabase.from("categorias").select("id, nome, tipo").order("nome"),
-    supabase.from("subcategorias").select("id, nome, categoria_id").order("nome"),
-    supabase.from("subcategorias_filhos").select("id, nome, subcategoria_id").order("nome"),
-  ])
-  return { categorias: (catRes.data || []) as CategoriaRow[], subcategorias: (subRes.data || []) as SubcategoriaRow[], filhos: (filhoRes.data || []) as SubcategoriaFilhoRow[] }
+  const tid = getActiveTenantId()
+  let catQ = supabase.from("categorias").select("id, nome, tipo").order("nome")
+  let subQ = supabase.from("subcategorias").select("id, nome, categoria_id").order("nome")
+  let filhoQ = supabase.from("subcategorias_filhos").select("id, nome, subcategoria_id").order("nome")
+  if (tid) { catQ = catQ.eq("tenant_id", tid); subQ = subQ.eq("tenant_id", tid); filhoQ = filhoQ.eq("tenant_id", tid) }
+  const [catRes, subRes, filhoRes] = await Promise.all([catQ, subQ, filhoQ])
+  return {
+    categorias: (catRes.data || []) as CategoriaRow[],
+    subcategorias: (subRes.data || []) as SubcategoriaRow[],
+    filhos: (filhoRes.data || []) as SubcategoriaFilhoRow[],
+  }
 }
 
 async function fetchFornecedores(): Promise<FornecedorRow[]> {
   const supabase = createClient()
-  const { data } = await supabase.from("fornecedores").select("id, nome").order("nome")
+  const tid = getActiveTenantId()
+  let q = supabase.from("fornecedores").select("id, nome").order("nome")
+  if (tid) q = q.eq("tenant_id", tid)
+  const { data } = await q
   return data || []
 }
 
 async function fetchContasBancarias(): Promise<ContaBancariaRow[]> {
   const supabase = createClient()
-  const { data } = await supabase.from("contas_bancarias").select("id, nome, tipo").order("nome")
+  const tid = getActiveTenantId()
+  let q = supabase.from("contas_bancarias").select("id, nome, tipo").order("nome")
+  if (tid) q = q.eq("tenant_id", tid)
+  const { data } = await q
   return data || []
 }
 
@@ -127,59 +136,60 @@ function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
 }
 
-const emptyForm = {
-  descricao: "",
-  valor: "",
-  dia_vencimento: "1",
-  ativa: true,
-  tipo_recorrencia: "mensal" as "mensal" | "parcelado",
-  total_parcelas: "0",
-  parcela_atual: "1",
-  categoria_id: "",
-  subcategoria_id: "",
-  subcategoria_filho_id: "",
-  fornecedor_id: "",
-  conta_bancaria_id: "",
-  forma_pagamento: "",
+function makeEmptyForm() {
+  return {
+    descricao: "",
+    valor: "",
+    dia_vencimento: "1",
+    ativa: true,
+    tipo_recorrencia: "mensal" as "mensal" | "parcelado",
+    total_parcelas: "0",
+    parcela_atual: "1",
+    categoria_id: "",
+    subcategoria_id: "",
+    subcategoria_filho_id: "",
+    fornecedor_id: "",
+    conta_bancaria_id: "",
+    forma_pagamento: "",
+  }
 }
 
 const selectClass = "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 
-export default function DespesasFixasPageWrapper() {
-  return <Suspense><DespesasFixasPage /></Suspense>
-}
+export default function DespesasFixasPage() {
+  const { tenant } = useTenant()
+  const swrKey = ["despesas_fixas", tenant?.id ?? null]
+  const hierarchyKey = ["hierarchy_despesas_fixas", tenant?.id ?? null]
+  const fornKey = ["fornecedores_df", tenant?.id ?? null]
+  const contasKey = ["contas_bancarias_df", tenant?.id ?? null]
 
-function DespesasFixasPage() {
-  const { data: despesas = [], mutate, isLoading } = useSWR("despesas_fixas", fetchDespesas)
-  const { data: hierarchy } = useSWR("hierarchy_despesas_fixas", fetchHierarchy)
-  const { data: fornecedoresLista = [] } = useSWR("fornecedores_df", fetchFornecedores)
-  const { data: contasBancarias = [] } = useSWR("contas_bancarias_df", fetchContasBancarias)
+  const { data: despesas = [], mutate, isLoading } = useSWR(swrKey, fetchDespesas, { revalidateOnFocus: false })
+  const { data: hierarchy } = useSWR(hierarchyKey, fetchHierarchy, { revalidateOnFocus: false })
+  const { data: fornecedoresLista = [] } = useSWR(fornKey, fetchFornecedores, { revalidateOnFocus: false })
+  const { data: contasBancarias = [] } = useSWR(contasKey, fetchContasBancarias, { revalidateOnFocus: false })
 
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [editingItem, setEditingItem] = useState<DespesaFixa | null>(null)
+  const [editingId, setEditingId] = useState<number | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<DespesaFixa | null>(null)
-  const [form, setForm] = useState(emptyForm)
+  const [form, setForm] = useState(makeEmptyForm)
   const [saving, setSaving] = useState(false)
+  const [saveError, setSaveError] = useState("")
   const [search, setSearch] = useState("")
 
-  const searchParams = useSearchParams()
-  const router = useRouter()
-
-  // Abre o dialog uma única vez via ?novo=1, sem re-render em loop
-  const novoParam = searchParams.get("novo")
+  // Abre via ?novo=1 usando history API (sem router.replace que causa re-render)
   useEffect(() => {
-    if (novoParam === "1") {
-      // Limpa a URL imediatamente (sem aguardar o re-render do searchParams)
+    if (typeof window !== "undefined" && new URLSearchParams(window.location.search).get("novo") === "1") {
       window.history.replaceState(null, "", "/despesas-fixas")
-      setEditingItem(null)
-      setForm(emptyForm)
+      setEditingId(null)
+      setForm(makeEmptyForm())
+      setSaveError("")
       setDialogOpen(true)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []) // roda só na montagem — o novoParam já está capturado no closure
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const despesaCategorias = useMemo(
-    () => (hierarchy?.categorias || []).filter((c) => c.tipo === "Despesa"),
+    () => (hierarchy?.categorias || []).filter((c) => c.tipo === "Despesa" || c.tipo === "despesa"),
     [hierarchy]
   )
   const subcategoriasDisponiveis = useMemo(
@@ -191,23 +201,27 @@ function DespesasFixasPage() {
     [hierarchy, form.subcategoria_id]
   )
 
-  const filtered = despesas.filter((d) =>
-    d.descricao.toLowerCase().includes(search.toLowerCase()) ||
-    d.fornecedor_nome.toLowerCase().includes(search.toLowerCase())
+  const filtered = useMemo(
+    () => despesas.filter((d) =>
+      d.descricao.toLowerCase().includes(search.toLowerCase()) ||
+      d.fornecedor_nome.toLowerCase().includes(search.toLowerCase())
+    ),
+    [despesas, search]
   )
 
-  const totalMensal = despesas.filter((d) => d.ativa).reduce((a, d) => a + d.valor, 0)
+  const totalMensal = useMemo(() => despesas.filter((d) => d.ativa).reduce((a, d) => a + d.valor, 0), [despesas])
   const totalAtivas = despesas.filter((d) => d.ativa).length
   const totalInativas = despesas.filter((d) => !d.ativa).length
 
   function openNew() {
-    setEditingItem(null)
-    setForm(emptyForm)
+    setEditingId(null)
+    setForm(makeEmptyForm())
+    setSaveError("")
     setDialogOpen(true)
   }
 
   function openEdit(item: DespesaFixa) {
-    setEditingItem(item)
+    setEditingId(item.id)
     setForm({
       descricao: item.descricao,
       valor: formatBRL(item.valor),
@@ -223,18 +237,23 @@ function DespesasFixasPage() {
       conta_bancaria_id: item.conta_bancaria_id?.toString() || "",
       forma_pagamento: item.forma_pagamento || "",
     })
+    setSaveError("")
     setDialogOpen(true)
   }
 
-  const handleSave = useCallback(async () => {
-    if (!form.descricao.trim()) return
+  async function handleSave() {
+    if (!form.descricao.trim()) {
+      setSaveError("Descricao e obrigatoria.")
+      return
+    }
+    setSaveError("")
     setSaving(true)
     try {
       const supabase = createClient()
       const tid = getActiveTenantId()
       const isParcelado = form.tipo_recorrencia === "parcelado"
       const payload: Record<string, unknown> = {
-        descricao: form.descricao,
+        descricao: form.descricao.trim(),
         valor: parseBRL(form.valor),
         dia_vencimento: Number(form.dia_vencimento) || 1,
         ativa: form.ativa,
@@ -249,24 +268,36 @@ function DespesasFixasPage() {
         forma_pagamento: form.forma_pagamento || null,
       }
       if (tid) payload.tenant_id = tid
-      if (editingItem) {
-        await supabase.from("despesas_fixas").update(payload).eq("id", editingItem.id)
+
+      let err
+      if (editingId !== null) {
+        const res = await supabase.from("despesas_fixas").update(payload).eq("id", editingId)
+        err = res.error
       } else {
-        await supabase.from("despesas_fixas").insert(payload)
+        const res = await supabase.from("despesas_fixas").insert(payload)
+        err = res.error
       }
-      await mutate()
+
+      if (err) {
+        setSaveError(err.message)
+        return
+      }
+
       setDialogOpen(false)
+      await mutate()
+    } catch (e: unknown) {
+      setSaveError(e instanceof Error ? e.message : "Erro ao salvar.")
     } finally {
       setSaving(false)
     }
-  }, [form, editingItem, mutate])
+  }
 
-  const handleDelete = useCallback(async (item: DespesaFixa) => {
+  async function handleDelete(item: DespesaFixa) {
     const supabase = createClient()
     await supabase.from("despesas_fixas").delete().eq("id", item.id)
-    await mutate()
     setDeleteConfirm(null)
-  }, [mutate])
+    await mutate()
+  }
 
   async function toggleAtiva(item: DespesaFixa) {
     const supabase = createClient()
@@ -295,103 +326,93 @@ function DespesasFixasPage() {
         <PageHeader title="Despesas Fixas" />
         <main className="flex-1 overflow-y-auto p-6">
           <div className="mx-auto max-w-7xl space-y-6">
+
             {/* Summary Cards */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               <div className="flex items-center gap-4 rounded-xl border border-border bg-card p-5 shadow-sm">
-                <div className="flex-1">
-                  <p className="text-sm text-muted-foreground">Total Mensal</p>
-                  <p className="mt-1 text-xl font-bold text-[hsl(0,72%,51%)]">{formatCurrency(totalMensal)}</p>
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[hsl(0,72%,51%)]/10">
+                  <RepeatIcon className="h-5 w-5 text-[hsl(0,72%,51%)]" />
                 </div>
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[hsl(0,72%,51%)]">
-                  <RepeatIcon className="h-6 w-6 text-white" />
-                </div>
-              </div>
-              <div className="flex items-center gap-4 rounded-xl border border-border bg-card p-5 shadow-sm">
-                <div className="flex-1">
-                  <p className="text-sm text-muted-foreground">Despesas Ativas</p>
-                  <p className="mt-1 text-xl font-bold text-[hsl(142,71%,40%)]">{totalAtivas}</p>
-                </div>
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[hsl(142,71%,40%)]">
-                  <CheckCircle2 className="h-6 w-6 text-white" />
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Total Mensal</p>
+                  <p className="text-xl font-bold text-card-foreground">{formatCurrency(totalMensal)}</p>
                 </div>
               </div>
               <div className="flex items-center gap-4 rounded-xl border border-border bg-card p-5 shadow-sm">
-                <div className="flex-1">
-                  <p className="text-sm text-muted-foreground">Despesas Inativas</p>
-                  <p className="mt-1 text-xl font-bold text-muted-foreground">{totalInativas}</p>
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[hsl(142,71%,40%)]/10">
+                  <CheckCircle2 className="h-5 w-5 text-[hsl(142,71%,40%)]" />
                 </div>
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[hsl(216,20%,60%)]">
-                  <AlertTriangle className="h-6 w-6 text-white" />
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Ativas</p>
+                  <p className="text-xl font-bold text-card-foreground">{totalAtivas}</p>
                 </div>
               </div>
               <div className="flex items-center gap-4 rounded-xl border border-border bg-card p-5 shadow-sm">
-                <div className="flex-1">
-                  <p className="text-sm text-muted-foreground">Total Despesas</p>
-                  <p className="mt-1 text-xl font-bold text-card-foreground">{despesas.length}</p>
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-muted">
+                  <Clock className="h-5 w-5 text-muted-foreground" />
                 </div>
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[hsl(216,60%,22%)]">
-                  <CalendarDays className="h-6 w-6 text-white" />
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Inativas</p>
+                  <p className="text-xl font-bold text-card-foreground">{totalInativas}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-4 rounded-xl border border-border bg-card p-5 shadow-sm">
+                <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-[hsl(38,92%,50%)]/10">
+                  <AlertTriangle className="h-5 w-5 text-[hsl(38,92%,50%)]" />
+                </div>
+                <div>
+                  <p className="text-xs font-medium uppercase text-muted-foreground">Cadastradas</p>
+                  <p className="text-xl font-bold text-card-foreground">{despesas.length}</p>
                 </div>
               </div>
             </div>
 
-            {/* Search + Add */}
-            <div className="flex items-center justify-between gap-4">
-              <div className="relative max-w-sm flex-1">
+            {/* Header + search */}
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="relative w-full max-w-sm">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                <Input placeholder="Buscar despesa fixa..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
+                <Input
+                  placeholder="Buscar por descricao ou fornecedor..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-9"
+                />
               </div>
-              <button type="button" onClick={openNew} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
+              <button
+                type="button"
+                onClick={openNew}
+                className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+              >
                 <Plus className="h-4 w-4" />
                 Nova Despesa Fixa
               </button>
             </div>
 
-            {/* Info */}
-            <div className="rounded-lg border border-[hsl(38,92%,50%)]/30 bg-[hsl(38,92%,50%)]/5 px-4 py-3">
-              <p className="text-sm text-[hsl(38,92%,40%)]">
-                <strong>Como funciona:</strong> As despesas fixas sao automaticamente associadas ao importar extratos bancarios. O sistema identifica a descricao e preenche os dados automaticamente.
-              </p>
-            </div>
-
-            {/* List */}
-            <div className="rounded-xl border border-border bg-card shadow-sm">
-              <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto_auto_auto] gap-4 border-b border-border px-5 py-3 text-xs font-semibold uppercase text-muted-foreground">
-                <span>Status</span>
-                <span>Descricao</span>
-                <span>Valor</span>
-                <span>Dia Venc.</span>
-                <span>Recorrencia</span>
-                <span>Categoria</span>
-                <span>Fornecedor</span>
-                <span>Forma Pag.</span>
-                <span className="text-right">Acoes</span>
-              </div>
+            {/* Lista */}
+            <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
               {filtered.length === 0 ? (
-                <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-                  {search ? "Nenhuma despesa fixa encontrada." : "Nenhuma despesa fixa cadastrada."}
+                <div className="px-5 py-12 text-center text-sm text-muted-foreground">
+                  {search ? "Nenhuma despesa encontrada." : "Nenhuma despesa fixa cadastrada."}
                 </div>
               ) : (
                 filtered.map((item) => (
-                  <div key={item.id} className="group grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto_auto_auto] items-center gap-4 border-b border-border px-5 py-3.5 last:border-b-0 transition-colors hover:bg-muted/50">
+                  <div
+                    key={item.id}
+                    className="group grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto_auto] items-center gap-4 border-b border-border px-5 py-3.5 last:border-b-0 transition-colors hover:bg-muted/40"
+                  >
                     <button
                       type="button"
                       onClick={() => toggleAtiva(item)}
                       title={item.ativa ? "Clique para desativar" : "Clique para ativar"}
-                      className="flex items-center"
+                      className="shrink-0"
                     >
-                      {item.ativa ? (
-                        <CheckCircle2 className="h-5 w-5 text-[hsl(142,71%,40%)]" />
-                      ) : (
-                        <Clock className="h-5 w-5 text-muted-foreground" />
-                      )}
-                    </button>
-                    <div className="flex items-center gap-3">
-                      <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${item.ativa ? "bg-[hsl(0,72%,51%)]/10" : "bg-muted"}`}>
+                      <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${item.ativa ? "bg-[hsl(0,72%,51%)]/10" : "bg-muted"}`}>
                         <RepeatIcon className={`h-4 w-4 ${item.ativa ? "text-[hsl(0,72%,51%)]" : "text-muted-foreground"}`} />
                       </div>
-                      <span className={`font-medium ${item.ativa ? "text-card-foreground" : "text-muted-foreground line-through"}`}>{item.descricao}</span>
-                    </div>
+                    </button>
+                    <span className={`font-medium ${item.ativa ? "text-card-foreground" : "text-muted-foreground line-through"}`}>
+                      {item.descricao}
+                    </span>
                     <span className="text-sm font-semibold text-[hsl(0,72%,51%)]">{formatCurrency(item.valor)}</span>
                     <span className="flex items-center gap-1 text-sm text-muted-foreground">
                       <CalendarDays className="h-3.5 w-3.5" />
@@ -408,14 +429,23 @@ function DespesasFixasPage() {
                         Mensal
                       </span>
                     )}
-                    <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">{item.categoria_nome || "-"}</span>
+                    <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
+                      {item.categoria_nome || "-"}
+                    </span>
                     <span className="text-sm text-muted-foreground">{item.fornecedor_nome || "-"}</span>
-                    <span className="text-sm text-muted-foreground">{item.forma_pagamento || "-"}</span>
                     <div className="flex items-center justify-end gap-1">
-                      <button type="button" onClick={() => openEdit(item)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground opacity-0 group-hover:opacity-100">
+                      <button
+                        type="button"
+                        onClick={() => openEdit(item)}
+                        className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground opacity-0 transition-all hover:bg-muted hover:text-foreground group-hover:opacity-100"
+                      >
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
-                      <button type="button" onClick={() => setDeleteConfirm(item)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive opacity-0 group-hover:opacity-100">
+                      <button
+                        type="button"
+                        onClick={() => setDeleteConfirm(item)}
+                        className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground opacity-0 transition-all hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100"
+                      >
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
@@ -427,36 +457,64 @@ function DespesasFixasPage() {
         </main>
       </div>
 
-      {/* Dialog */}
-      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-lg">
+      {/* Dialog de criação / edição */}
+      <Dialog open={dialogOpen} onOpenChange={(open) => { if (!saving) setDialogOpen(open) }}>
+        <DialogContent className="max-w-lg" onInteractOutside={(e) => { if (saving) e.preventDefault() }}>
           <DialogHeader>
-            <DialogTitle>{editingItem ? "Editar Despesa Fixa" : "Nova Despesa Fixa"}</DialogTitle>
-            <DialogDescription>{editingItem ? "Atualize os dados da despesa fixa." : "Cadastre uma nova despesa recorrente mensal."}</DialogDescription>
+            <DialogTitle>{editingId !== null ? "Editar Despesa Fixa" : "Nova Despesa Fixa"}</DialogTitle>
+            <DialogDescription>
+              {editingId !== null ? "Atualize os dados da despesa fixa." : "Cadastre uma nova despesa recorrente mensal."}
+            </DialogDescription>
           </DialogHeader>
-          <div className="max-h-[70vh] overflow-y-auto space-y-4 py-2">
+
+          <div className="max-h-[65vh] overflow-y-auto space-y-4 pr-1 py-2">
+            {saveError && (
+              <div className="rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                {saveError}
+              </div>
+            )}
+
             <div className="space-y-2">
-              <Label htmlFor="descricao">Descricao</Label>
-              <Input id="descricao" placeholder="Ex: Aluguel, Internet, Academia..." value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} />
+              <Label htmlFor="descricao">Descricao *</Label>
+              <Input
+                id="descricao"
+                placeholder="Ex: Aluguel, Internet, Academia..."
+                value={form.descricao}
+                onChange={(e) => setForm((f) => ({ ...f, descricao: e.target.value }))}
+              />
             </div>
+
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="valor">Valor</Label>
-                <Input id="valor" type="text" placeholder="0,00" value={form.valor} onChange={(e) => setForm({ ...form, valor: handleCurrencyInput(e.target.value) })} />
+                <Input
+                  id="valor"
+                  type="text"
+                  placeholder="0,00"
+                  value={form.valor}
+                  onChange={(e) => setForm((f) => ({ ...f, valor: handleCurrencyInput(e.target.value) }))}
+                />
               </div>
               <div className="space-y-2">
                 <Label htmlFor="dia_vencimento">Dia de Vencimento</Label>
-                <Input id="dia_vencimento" type="number" min={1} max={31} placeholder="Ex: 5" value={form.dia_vencimento} onChange={(e) => setForm({ ...form, dia_vencimento: e.target.value })} />
+                <Input
+                  id="dia_vencimento"
+                  type="number"
+                  min={1}
+                  max={31}
+                  placeholder="Ex: 5"
+                  value={form.dia_vencimento}
+                  onChange={(e) => setForm((f) => ({ ...f, dia_vencimento: e.target.value }))}
+                />
               </div>
             </div>
 
-            {/* Tipo de recorrencia */}
             <div className="space-y-2">
               <Label>Tipo de Recorrencia</Label>
               <div className="grid grid-cols-2 gap-3">
                 <button
                   type="button"
-                  onClick={() => setForm({ ...form, tipo_recorrencia: "mensal", total_parcelas: "0", parcela_atual: "1" })}
+                  onClick={() => setForm((f) => ({ ...f, tipo_recorrencia: "mensal", total_parcelas: "0", parcela_atual: "1" }))}
                   className={`flex flex-col items-center justify-center gap-1 rounded-lg border p-3 text-sm font-medium transition-colors ${form.tipo_recorrencia === "mensal" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-primary/50 hover:bg-muted"}`}
                 >
                   <RepeatIcon className="h-5 w-5" />
@@ -465,7 +523,7 @@ function DespesasFixasPage() {
                 </button>
                 <button
                   type="button"
-                  onClick={() => setForm({ ...form, tipo_recorrencia: "parcelado" })}
+                  onClick={() => setForm((f) => ({ ...f, tipo_recorrencia: "parcelado" }))}
                   className={`flex flex-col items-center justify-center gap-1 rounded-lg border p-3 text-sm font-medium transition-colors ${form.tipo_recorrencia === "parcelado" ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:border-primary/50 hover:bg-muted"}`}
                 >
                   <CalendarDays className="h-5 w-5" />
@@ -475,7 +533,6 @@ function DespesasFixasPage() {
               </div>
             </div>
 
-            {/* Parcelas — apenas quando parcelado */}
             {form.tipo_recorrencia === "parcelado" && (
               <div className="grid grid-cols-2 gap-4 rounded-lg border border-primary/20 bg-primary/5 p-4">
                 <div className="space-y-2">
@@ -487,9 +544,8 @@ function DespesasFixasPage() {
                     max={360}
                     placeholder="Ex: 12"
                     value={form.total_parcelas}
-                    onChange={(e) => setForm({ ...form, total_parcelas: e.target.value })}
+                    onChange={(e) => setForm((f) => ({ ...f, total_parcelas: e.target.value }))}
                   />
-                  <p className="text-xs text-muted-foreground">Quantas vezes / meses no total</p>
                 </div>
                 <div className="space-y-2">
                   <Label htmlFor="parcela_atual">Parcela Atual</Label>
@@ -497,75 +553,102 @@ function DespesasFixasPage() {
                     id="parcela_atual"
                     type="number"
                     min={1}
-                    max={Number(form.total_parcelas) || 360}
                     placeholder="Ex: 1"
                     value={form.parcela_atual}
-                    onChange={(e) => setForm({ ...form, parcela_atual: e.target.value })}
+                    onChange={(e) => setForm((f) => ({ ...f, parcela_atual: e.target.value }))}
                   />
-                  <p className="text-xs text-muted-foreground">Parcela em que esta no momento</p>
                 </div>
-                {Number(form.total_parcelas) > 0 && Number(form.parcela_atual) > 0 && (
-                  <div className="col-span-2 flex items-center gap-2 rounded-md bg-background px-3 py-2 text-sm text-muted-foreground">
-                    <CalendarDays className="h-4 w-4 shrink-0 text-primary" />
-                    <span>
-                      Parcela <strong className="text-foreground">{form.parcela_atual}</strong> de <strong className="text-foreground">{form.total_parcelas}</strong> — restam <strong className="text-foreground">{Math.max(0, Number(form.total_parcelas) - Number(form.parcela_atual) + 1)}</strong> {Number(form.total_parcelas) - Number(form.parcela_atual) + 1 === 1 ? "mes" : "meses"}
-                    </span>
-                  </div>
-                )}
               </div>
             )}
+
             <div className="space-y-2">
               <Label htmlFor="fornecedor">Fornecedor</Label>
-              <select id="fornecedor" value={form.fornecedor_id} onChange={(e) => setForm({ ...form, fornecedor_id: e.target.value })} className={selectClass}>
+              <select
+                id="fornecedor"
+                value={form.fornecedor_id}
+                onChange={(e) => setForm((f) => ({ ...f, fornecedor_id: e.target.value }))}
+                className={selectClass}
+              >
                 <option value="">Selecione...</option>
-                {fornecedoresLista.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                {fornecedoresLista.map((fn) => <option key={fn.id} value={fn.id}>{fn.nome}</option>)}
               </select>
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="conta_bancaria">Conta Bancaria</Label>
-              <select id="conta_bancaria" value={form.conta_bancaria_id} onChange={(e) => setForm({ ...form, conta_bancaria_id: e.target.value })} className={selectClass}>
+              <select
+                id="conta_bancaria"
+                value={form.conta_bancaria_id}
+                onChange={(e) => setForm((f) => ({ ...f, conta_bancaria_id: e.target.value }))}
+                className={selectClass}
+              >
                 <option value="">Selecione...</option>
                 {contasBancarias.map((cb) => <option key={cb.id} value={cb.id}>{cb.nome} ({cb.tipo})</option>)}
               </select>
             </div>
+
             <div className="space-y-2">
               <Label htmlFor="categoria">Categoria</Label>
-              <select id="categoria" value={form.categoria_id} onChange={(e) => setForm({ ...form, categoria_id: e.target.value, subcategoria_id: "", subcategoria_filho_id: "" })} className={selectClass}>
+              <select
+                id="categoria"
+                value={form.categoria_id}
+                onChange={(e) => setForm((f) => ({ ...f, categoria_id: e.target.value, subcategoria_id: "", subcategoria_filho_id: "" }))}
+                className={selectClass}
+              >
                 <option value="">Selecione...</option>
                 {despesaCategorias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
               </select>
             </div>
+
             {subcategoriasDisponiveis.length > 0 && (
               <div className="space-y-2">
                 <Label htmlFor="subcategoria">Subcategoria</Label>
-                <select id="subcategoria" value={form.subcategoria_id} onChange={(e) => setForm({ ...form, subcategoria_id: e.target.value, subcategoria_filho_id: "" })} className={selectClass}>
+                <select
+                  id="subcategoria"
+                  value={form.subcategoria_id}
+                  onChange={(e) => setForm((f) => ({ ...f, subcategoria_id: e.target.value, subcategoria_filho_id: "" }))}
+                  className={selectClass}
+                >
                   <option value="">Selecione...</option>
                   {subcategoriasDisponiveis.map((s) => <option key={s.id} value={s.id}>{s.nome}</option>)}
                 </select>
               </div>
             )}
+
             {filhosDisponiveis.length > 0 && (
               <div className="space-y-2">
                 <Label htmlFor="subcategoriaFilho">Subcategoria Filho</Label>
-                <select id="subcategoriaFilho" value={form.subcategoria_filho_id} onChange={(e) => setForm({ ...form, subcategoria_filho_id: e.target.value })} className={selectClass}>
+                <select
+                  id="subcategoriaFilho"
+                  value={form.subcategoria_filho_id}
+                  onChange={(e) => setForm((f) => ({ ...f, subcategoria_filho_id: e.target.value }))}
+                  className={selectClass}
+                >
                   <option value="">Selecione...</option>
-                  {filhosDisponiveis.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                  {filhosDisponiveis.map((fi) => <option key={fi.id} value={fi.id}>{fi.nome}</option>)}
                 </select>
               </div>
             )}
+
             <div className="space-y-2">
               <Label htmlFor="forma_pagamento">Forma de Pagamento</Label>
-              <select id="forma_pagamento" value={form.forma_pagamento} onChange={(e) => setForm({ ...form, forma_pagamento: e.target.value })} className={selectClass}>
+              <select
+                id="forma_pagamento"
+                value={form.forma_pagamento}
+                onChange={(e) => setForm((f) => ({ ...f, forma_pagamento: e.target.value }))}
+                className={selectClass}
+              >
                 <option value="">Selecione...</option>
                 {FORMAS_PAGAMENTO.map((fp) => <option key={fp} value={fp}>{fp}</option>)}
               </select>
             </div>
+
             <div className="flex items-center gap-3 rounded-lg border border-border bg-muted/50 px-4 py-3">
               <input
                 type="checkbox"
                 id="ativa"
                 checked={form.ativa}
-                onChange={(e) => setForm({ ...form, ativa: e.target.checked })}
+                onChange={(e) => setForm((f) => ({ ...f, ativa: e.target.checked }))}
                 className="h-4 w-4 rounded border-border accent-primary"
               />
               <Label htmlFor="ativa" className="cursor-pointer">
@@ -573,30 +656,44 @@ function DespesasFixasPage() {
               </Label>
             </div>
           </div>
+
           <DialogFooter>
-            <button type="button" onClick={() => setDialogOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted">
+            <button
+              type="button"
+              onClick={() => setDialogOpen(false)}
+              disabled={saving}
+              className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted disabled:opacity-50"
+            >
               Cancelar
             </button>
-            <button type="button" onClick={handleSave} disabled={saving} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50">
+            <button
+              type="button"
+              onClick={handleSave}
+              disabled={saving}
+              className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50"
+            >
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
-              {editingItem ? "Salvar" : "Adicionar"}
+              {editingId !== null ? "Salvar" : "Adicionar"}
             </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
-      {/* Delete */}
+      {/* Confirmacao de exclusao */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir despesa fixa</AlertDialogTitle>
+            <AlertDialogTitle>Excluir Despesa Fixa</AlertDialogTitle>
             <AlertDialogDescription>
-              {"Tem certeza que deseja excluir "}{deleteConfirm?.descricao}{"? Esta acao nao pode ser desfeita."}
+              Tem certeza que deseja excluir <strong>{deleteConfirm?.descricao}</strong>? Esta acao nao pode ser desfeita.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => deleteConfirm && handleDelete(deleteConfirm)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction
+              onClick={() => deleteConfirm && handleDelete(deleteConfirm)}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
               Excluir
             </AlertDialogAction>
           </AlertDialogFooter>
