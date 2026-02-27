@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation"
 import { Suspense } from "react"
 import useSWR from "swr"
 import { createClient } from "@/lib/supabase/client"
+import { getActiveTenantId } from "@/hooks/use-tenant"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
 import {
@@ -73,13 +74,19 @@ function getPeriodoDates(periodo: PeriodoFiltro, custom: { from: string; to: str
 
 async function fetchContas(): Promise<ContaBancaria[]> {
   const supabase = createClient()
-  const { data } = await supabase.from("contas_bancarias").select("id,nome").order("nome")
+  const tid = getActiveTenantId()
+  let q = supabase.from("contas_bancarias").select("id,nome").order("nome")
+  if (tid) q = q.eq("tenant_id", tid)
+  const { data } = await q
   return (data || []).map((r) => ({ id: r.id, nome: r.nome }))
 }
 
 async function fetchCategorias(): Promise<Categoria[]> {
   const supabase = createClient()
-  const { data } = await supabase.from("categorias").select("id,nome,tipo,cor").order("nome")
+  const tid = getActiveTenantId()
+  let q = supabase.from("categorias").select("id,nome,tipo,cor").order("nome")
+  if (tid) q = q.eq("tenant_id", tid)
+  const { data } = await q
   return (data || []).map((r) => ({ id: r.id, nome: r.nome, tipo: r.tipo, cor: r.cor || "#7A8FA6" }))
 }
 
@@ -89,6 +96,7 @@ async function fetchLancamentos(filters: {
   contaId: string; categoriaId: string; search: string
 }): Promise<Lancamento[]> {
   const supabase = createClient()
+  const tid = getActiveTenantId()
   const { from, to } = getPeriodoDates(filters.periodo, { from: filters.customFrom, to: filters.customTo })
 
   let q = supabase
@@ -98,6 +106,7 @@ async function fetchLancamentos(filters: {
     .order("id", { ascending: false })
     .limit(200)
 
+  if (tid) q = q.eq("tenant_id", tid)
   if (from) q = q.gte("data", from)
   if (to) q = q.lte("data", to)
   if (filters.tipo !== "todos") q = q.eq("tipo", filters.tipo)
@@ -203,7 +212,8 @@ function TransacoesPage() {
     setSaving(true)
     try {
       const supabase = createClient()
-      const payload = {
+      const tid = getActiveTenantId()
+      const payload: Record<string, unknown> = {
         descricao: form.descricao,
         valor: parseFloat(form.valor) || 0,
         tipo: form.tipo,
@@ -213,6 +223,7 @@ function TransacoesPage() {
         forma_pagamento: form.forma_pagamento || null,
         status: form.status,
       }
+      if (tid) payload.tenant_id = tid
       if (editingItem) {
         await supabase.from("lancamentos").update(payload).eq("id", editingItem.id)
       } else {

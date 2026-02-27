@@ -37,6 +37,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createClient } from "@/lib/supabase/client"
+import { getActiveTenantId } from "@/hooks/use-tenant"
 import useSWR from "swr"
 
 interface Fornecedor {
@@ -51,7 +52,10 @@ interface Fornecedor {
 
 async function fetchFornecedores(): Promise<Fornecedor[]> {
   const supabase = createClient()
-  const { data, error } = await supabase.from("fornecedores").select("*").order("nome")
+  const tid = getActiveTenantId()
+  let q = supabase.from("fornecedores").select("*").order("nome")
+  if (tid) q = q.eq("tenant_id", tid)
+  const { data, error } = await q
   if (error) throw error
   return (data || []).map((r) => ({
     id: r.id,
@@ -171,14 +175,12 @@ function FornecedoresPage() {
     setSaving(true)
     try {
       const supabase = createClient()
-      const payload = {
-        nome: form.nome,
-        documento: form.documento,
-        email: form.email,
-        telefone: form.telefone,
-        cnpj: form.cnpj,
-        tipo_pessoa: form.tipo_pessoa,
+      const tid = getActiveTenantId()
+      const payload: Record<string, unknown> = {
+        nome: form.nome, documento: form.documento, email: form.email,
+        telefone: form.telefone, cnpj: form.cnpj, tipo_pessoa: form.tipo_pessoa,
       }
+      if (tid) payload.tenant_id = tid
       if (editingItem) {
         await supabase.from("fornecedores").update(payload).eq("id", editingItem.id)
       } else {

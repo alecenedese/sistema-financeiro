@@ -19,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createClient } from "@/lib/supabase/client"
+import { getActiveTenantId } from "@/hooks/use-tenant"
 import useSWR from "swr"
 
 interface ContaBancaria {
@@ -48,7 +49,10 @@ function formatDate(s: string) {
 
 async function fetchContas(): Promise<ContaBancaria[]> {
   const supabase = createClient()
-  const { data, error } = await supabase.from("contas_bancarias").select("*").order("id")
+  const tid = getActiveTenantId()
+  let q = supabase.from("contas_bancarias").select("*").order("id")
+  if (tid) q = q.eq("tenant_id", tid)
+  const { data, error } = await q
   if (error) throw error
   return (data || []).map((r) => ({
     id: r.id, nome: r.nome, tipo: r.tipo, saldo: Number(r.saldo), cor: r.cor,
@@ -69,12 +73,15 @@ async function fetchExtrato(contaId: number, filtro: FiltroExtrato): Promise<Ext
   } else if (filtro === "mes") {
     from = toISOLocal(new Date(today.getFullYear(), today.getMonth(), 1))
   }
-  const { data } = await supabase
+  const tid = getActiveTenantId()
+  let eq = supabase
     .from("lancamentos")
     .select("id,descricao,valor,tipo,data,status")
     .eq("conta_bancaria_id", contaId)
     .gte("data", from).lte("data", to)
     .order("data", { ascending: false }).limit(100)
+  if (tid) eq = eq.eq("tenant_id", tid)
+  const { data } = await eq
   return (data || []).map((r) => ({ id: r.id, descricao: r.descricao, valor: Number(r.valor), tipo: r.tipo, data: r.data, status: r.status || "confirmado" }))
 }
 
@@ -131,15 +138,18 @@ function ContasBancariasPage() {
     setSaving(true)
     try {
       const supabase = createClient()
+      const tid = getActiveTenantId()
       if (editingConta) {
         await supabase.from("contas_bancarias").update({
           nome: form.nome, tipo: form.tipo, agencia: form.agencia, conta: form.conta, saldo: parseFloat(form.saldo) || 0,
         }).eq("id", editingConta.id)
       } else {
-        await supabase.from("contas_bancarias").insert({
+        const payload: Record<string, unknown> = {
           nome: form.nome, tipo: form.tipo, agencia: form.agencia, conta: form.conta,
           saldo: parseFloat(form.saldo) || 0, cor: COLORS[contas.length % COLORS.length],
-        })
+        }
+        if (tid) payload.tenant_id = tid
+        await supabase.from("contas_bancarias").insert(payload)
       }
       await mutate(); setDialogOpen(false)
     } finally { setSaving(false) }

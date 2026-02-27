@@ -11,6 +11,7 @@ import {
   Tags, Plus, ChevronDown, ChevronRight, Pencil, Trash2, Loader2,
   X, ArrowRight, ReceiptText, CalendarClock, FileText, BarChart3
 } from "lucide-react"
+import { getActiveTenantId } from "@/hooks/use-tenant"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
@@ -77,11 +78,12 @@ function formatDate(s: string) {
 
 async function fetchCategorias(): Promise<Categoria[]> {
   const supabase = createClient()
-  const [{ data: cats }, { data: subs }, { data: filhos }] = await Promise.all([
-    supabase.from("categorias").select("*").order("nome"),
-    supabase.from("subcategorias").select("*").order("nome"),
-    supabase.from("subcategorias_filhos").select("*").order("nome"),
-  ])
+  const tid = getActiveTenantId()
+  let catQ = supabase.from("categorias").select("*").order("nome")
+  let subQ = supabase.from("subcategorias").select("*").order("nome")
+  let filhoQ = supabase.from("subcategorias_filhos").select("*").order("nome")
+  if (tid) { catQ = catQ.eq("tenant_id", tid); subQ = subQ.eq("tenant_id", tid); filhoQ = filhoQ.eq("tenant_id", tid) }
+  const [{ data: cats }, { data: subs }, { data: filhos }] = await Promise.all([catQ, subQ, filhoQ])
 
   const filhosBySub: Record<number, SubcategoriaFilho[]> = {}
   for (const f of filhos || []) {
@@ -98,11 +100,12 @@ async function fetchCategorias(): Promise<Categoria[]> {
 
 async function fetchDrillItems(categoriaId: number): Promise<DrillItem[]> {
   const supabase = createClient()
-  const [{ data: lancs }, { data: fixas }, { data: contas }] = await Promise.all([
-    supabase.from("lancamentos").select("id,descricao,valor,data,tipo,status").eq("categoria_id", categoriaId).order("data", { ascending: false }).limit(50),
-    supabase.from("despesas_fixas").select("id,descricao,valor,ativa").eq("categoria_id", categoriaId).order("descricao"),
-    supabase.from("contas_a_pagar").select("id,descricao,valor,data_vencimento,status").eq("categoria_id", categoriaId).order("data_vencimento", { ascending: false }).limit(30),
-  ])
+  const tid = getActiveTenantId()
+  let lancQ = supabase.from("lancamentos").select("id,descricao,valor,data,tipo,status").eq("categoria_id", categoriaId).order("data", { ascending: false }).limit(50)
+  let fixaQ = supabase.from("despesas_fixas").select("id,descricao,valor,ativa").eq("categoria_id", categoriaId).order("descricao")
+  let contaQ = supabase.from("contas_a_pagar").select("id,descricao,valor,data_vencimento,status").eq("categoria_id", categoriaId).order("data_vencimento", { ascending: false }).limit(30)
+  if (tid) { lancQ = lancQ.eq("tenant_id", tid); fixaQ = fixaQ.eq("tenant_id", tid); contaQ = contaQ.eq("tenant_id", tid) }
+  const [{ data: lancs }, { data: fixas }, { data: contas }] = await Promise.all([lancQ, fixaQ, contaQ])
   const items: DrillItem[] = []
   for (const l of lancs || []) items.push({ id: l.id, descricao: l.descricao, valor: Number(l.valor), data: l.data, tipo: l.tipo, status: l.status, origem: "lancamento" })
   for (const f of fixas || []) items.push({ id: f.id, descricao: f.descricao, valor: Number(f.valor), data: "", tipo: "despesa", status: f.ativa ? "ativa" : "inativa", origem: "despesa_fixa" })
@@ -202,7 +205,9 @@ function CategoriasPage() {
     setSaving(true)
     try {
       const supabase = createClient()
-      const payload = { nome: formNome, tipo: formTipo, grupo_dre: formGrupoDre || null }
+      const tid = getActiveTenantId()
+      const payload: Record<string, unknown> = { nome: formNome, tipo: formTipo, grupo_dre: formGrupoDre || null }
+      if (tid) payload.tenant_id = tid
       if (editingCat) {
         await supabase.from("categorias").update(payload).eq("id", editingCat.id)
       } else {
@@ -227,8 +232,14 @@ function CategoriasPage() {
     setSaving(true)
     try {
       const supabase = createClient()
-      if (editingSub) await supabase.from("subcategorias").update({ nome: formNome }).eq("id", editingSub.sub.id)
-      else await supabase.from("subcategorias").insert({ nome: formNome, categoria_id: parentCatId })
+      const tid = getActiveTenantId()
+      if (editingSub) {
+        await supabase.from("subcategorias").update({ nome: formNome }).eq("id", editingSub.sub.id)
+      } else {
+        const p: Record<string, unknown> = { nome: formNome, categoria_id: parentCatId }
+        if (tid) p.tenant_id = tid
+        await supabase.from("subcategorias").insert(p)
+      }
       await mutate(); setDialogOpen(false)
     } finally { setSaving(false) }
   }
@@ -245,8 +256,14 @@ function CategoriasPage() {
     setSaving(true)
     try {
       const supabase = createClient()
-      if (editingFilho) await supabase.from("subcategorias_filhos").update({ nome: formNome }).eq("id", editingFilho.filho.id)
-      else await supabase.from("subcategorias_filhos").insert({ nome: formNome, subcategoria_id: parentSubId })
+      const tid = getActiveTenantId()
+      if (editingFilho) {
+        await supabase.from("subcategorias_filhos").update({ nome: formNome }).eq("id", editingFilho.filho.id)
+      } else {
+        const p: Record<string, unknown> = { nome: formNome, subcategoria_id: parentSubId }
+        if (tid) p.tenant_id = tid
+        await supabase.from("subcategorias_filhos").insert(p)
+      }
       await mutate(); setDialogOpen(false)
     } finally { setSaving(false) }
   }

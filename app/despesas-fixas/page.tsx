@@ -38,6 +38,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createClient } from "@/lib/supabase/client"
+import { getActiveTenantId } from "@/hooks/use-tenant"
 import { handleCurrencyInput, parseBRL, formatBRL } from "@/lib/currency-input"
 import useSWR from "swr"
 
@@ -71,10 +72,13 @@ const FORMAS_PAGAMENTO = ["PIX", "Boleto", "Cartao de Credito", "Cartao de Debit
 
 async function fetchDespesas(): Promise<DespesaFixa[]> {
   const supabase = createClient()
-  const { data, error } = await supabase
+  const tid = getActiveTenantId()
+  let q = supabase
     .from("despesas_fixas")
     .select(`*, categorias(nome), fornecedores(nome), contas_bancarias(nome, tipo)`)
     .order("dia_vencimento", { ascending: true })
+  if (tid) q = q.eq("tenant_id", tid)
+  const { data, error } = await q
   if (error) throw error
   return (data || []).map((r: Record<string, unknown>) => ({
     id: r.id as number,
@@ -221,8 +225,9 @@ function DespesasFixasPage() {
     setSaving(true)
     try {
       const supabase = createClient()
+      const tid = getActiveTenantId()
       const isParcelado = form.tipo_recorrencia === "parcelado"
-      const payload = {
+      const payload: Record<string, unknown> = {
         descricao: form.descricao,
         valor: parseBRL(form.valor),
         dia_vencimento: Number(form.dia_vencimento) || 1,
@@ -237,6 +242,7 @@ function DespesasFixasPage() {
         conta_bancaria_id: form.conta_bancaria_id ? Number(form.conta_bancaria_id) : null,
         forma_pagamento: form.forma_pagamento || null,
       }
+      if (tid) payload.tenant_id = tid
       if (editingItem) {
         await supabase.from("despesas_fixas").update(payload).eq("id", editingItem.id)
       } else {

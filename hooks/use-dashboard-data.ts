@@ -205,24 +205,29 @@ async function fetchCategoryCharts(): Promise<{ expenses: CategoryPoint[]; incom
 
 // ─── hooks públicos ───────────────────────────────────────────────────────────
 
+function tenantKey(base: string) {
+  const tid = getActiveTenantId()
+  return tid ? `${base}-t${tid}` : base
+}
+
 export function useSummary() {
-  return useSWR("dashboard-summary", fetchSummary, { revalidateOnFocus: false })
+  return useSWR(tenantKey("dashboard-summary"), fetchSummary, { revalidateOnFocus: false })
 }
 
 export function useRecentTx() {
-  return useSWR("dashboard-recent-tx", fetchRecentTx, { revalidateOnFocus: false })
+  return useSWR(tenantKey("dashboard-recent-tx"), fetchRecentTx, { revalidateOnFocus: false })
 }
 
 export function useAccounts() {
-  return useSWR("dashboard-accounts", fetchAccounts, { revalidateOnFocus: false })
+  return useSWR(tenantKey("dashboard-accounts"), fetchAccounts, { revalidateOnFocus: false })
 }
 
 export function useMonthly() {
-  return useSWR("dashboard-monthly", fetchMonthly, { revalidateOnFocus: false })
+  return useSWR(tenantKey("dashboard-monthly"), fetchMonthly, { revalidateOnFocus: false })
 }
 
 export function useCategoryCharts() {
-  return useSWR("dashboard-category-charts", fetchCategoryCharts, { revalidateOnFocus: false })
+  return useSWR(tenantKey("dashboard-category-charts"), fetchCategoryCharts, { revalidateOnFocus: false })
 }
 
 export { fmt }
