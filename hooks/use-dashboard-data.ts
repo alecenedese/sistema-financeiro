@@ -1,11 +1,8 @@
 "use client"
 
 import { createClient } from "@/lib/supabase/client"
-import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
+import { useTenant } from "@/hooks/use-tenant"
 import useSWR from "swr"
-import { useMemo } from "react"
-
-const supabase = createClient()
 
 function fmt(v: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v)
@@ -61,8 +58,8 @@ function colorForIndex(i: number) {
 
 // ─── fetchers ─────────────────────────────────────────────────────────────────
 
-async function fetchSummary(): Promise<SummaryData> {
-  const tid = getActiveTenantId()
+async function fetchSummary([, tid]: [string, number | null]): Promise<SummaryData> {
+  const supabase = createClient()
   const now = new Date()
   const mesAtual = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
 
@@ -84,17 +81,16 @@ async function fetchSummary(): Promise<SummaryData> {
     if (r.forma_pagamento === "Cartao de Credito") cartao += Number(r.valor)
   }
 
-  // saldo = soma de todas as contas
-  let cq = supabase.from("contas_bancarias").select("saldo_atual")
+  let cq = supabase.from("contas_bancarias").select("saldo")
   if (tid) cq = cq.eq("tenant_id", tid)
   const { data: contas } = await cq
-  const saldo = (contas || []).reduce((acc, c) => acc + Number(c.saldo_atual ?? 0), 0)
+  const saldo = (contas || []).reduce((acc: number, c: Record<string, unknown>) => acc + Number(c.saldo ?? 0), 0)
 
   return { saldo, receitas, despesas, cartao }
 }
 
-async function fetchRecentTx(): Promise<RecentTx[]> {
-  const tid = getActiveTenantId()
+async function fetchRecentTx([, tid]: [string, number | null]): Promise<RecentTx[]> {
+  const supabase = createClient()
   let q = supabase
     .from("lancamentos")
     .select("id, descricao, valor, tipo, data, categorias(nome), forma_pagamento")
@@ -115,21 +111,21 @@ async function fetchRecentTx(): Promise<RecentTx[]> {
   }))
 }
 
-async function fetchAccounts(): Promise<AccountRow[]> {
-  const tid = getActiveTenantId()
-  let q = supabase.from("contas_bancarias").select("id, nome, tipo, saldo_atual").order("nome")
+async function fetchAccounts([, tid]: [string, number | null]): Promise<AccountRow[]> {
+  const supabase = createClient()
+  let q = supabase.from("contas_bancarias").select("id, nome, tipo, saldo").order("nome")
   if (tid) q = q.eq("tenant_id", tid)
   const { data } = await q
   return (data || []).map((r: Record<string, unknown>) => ({
     id: r.id as number,
     nome: r.nome as string,
     tipo: r.tipo as string,
-    saldo_atual: Number(r.saldo_atual ?? 0),
+    saldo_atual: Number(r.saldo ?? 0),
   }))
 }
 
-async function fetchMonthly(): Promise<MonthlyPoint[]> {
-  const tid = getActiveTenantId()
+async function fetchMonthly([, tid]: [string, number | null]): Promise<MonthlyPoint[]> {
+  const supabase = createClient()
   const now = new Date()
   const points: MonthlyPoint[] = []
 
@@ -156,8 +152,8 @@ async function fetchMonthly(): Promise<MonthlyPoint[]> {
   return points
 }
 
-async function fetchCategoryCharts(): Promise<{ expenses: CategoryPoint[]; incomes: CategoryPoint[] }> {
-  const tid = getActiveTenantId()
+async function fetchCategoryCharts([, tid]: [string, number | null]): Promise<{ expenses: CategoryPoint[]; incomes: CategoryPoint[] }> {
+  const supabase = createClient()
   const now = new Date()
   const mesAtual = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`
 
@@ -206,29 +202,37 @@ async function fetchCategoryCharts(): Promise<{ expenses: CategoryPoint[]; incom
 // ─── hooks públicos ───────────────────────────────────────────────────────────
 // As keys são arrays para que o SWR reaja quando o tenant muda
 
+// Cada fetcher recebe [key, tid] — tid=null significa admin (sem filtro de tenant)
+type TidKey = [string, number | null]
+
 export function useSummary() {
   const { tenant } = useTenant()
-  return useSWR(["dashboard-summary", tenant?.id ?? null], fetchSummary, { revalidateOnFocus: false })
+  const key: TidKey = ["dashboard-summary", tenant?.id ?? null]
+  return useSWR(key, fetchSummary, { revalidateOnFocus: false })
 }
 
 export function useRecentTx() {
   const { tenant } = useTenant()
-  return useSWR(["dashboard-recent-tx", tenant?.id ?? null], fetchRecentTx, { revalidateOnFocus: false })
+  const key: TidKey = ["dashboard-recent-tx", tenant?.id ?? null]
+  return useSWR(key, fetchRecentTx, { revalidateOnFocus: false })
 }
 
 export function useAccounts() {
   const { tenant } = useTenant()
-  return useSWR(["dashboard-accounts", tenant?.id ?? null], fetchAccounts, { revalidateOnFocus: false })
+  const key: TidKey = ["dashboard-accounts", tenant?.id ?? null]
+  return useSWR(key, fetchAccounts, { revalidateOnFocus: false })
 }
 
 export function useMonthly() {
   const { tenant } = useTenant()
-  return useSWR(["dashboard-monthly", tenant?.id ?? null], fetchMonthly, { revalidateOnFocus: false })
+  const key: TidKey = ["dashboard-monthly", tenant?.id ?? null]
+  return useSWR(key, fetchMonthly, { revalidateOnFocus: false })
 }
 
 export function useCategoryCharts() {
   const { tenant } = useTenant()
-  return useSWR(["dashboard-category-charts", tenant?.id ?? null], fetchCategoryCharts, { revalidateOnFocus: false })
+  const key: TidKey = ["dashboard-category-charts", tenant?.id ?? null]
+  return useSWR(key, fetchCategoryCharts, { revalidateOnFocus: false })
 }
 
 export { fmt }

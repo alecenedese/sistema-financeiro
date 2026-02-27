@@ -2,7 +2,7 @@
 
 import useSWR from "swr"
 import { createClient } from "@/lib/supabase/client"
-import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
+import { useTenant } from "@/hooks/use-tenant"
 
 interface BudgetItem {
   category: string
@@ -18,9 +18,8 @@ function formatCurrency(value: number) {
   }).format(value)
 }
 
-async function fetchBudgetData(): Promise<BudgetItem[]> {
+async function fetchBudgetData([, tid]: [string, number | null]): Promise<BudgetItem[]> {
   const supabase = createClient()
-  const tid = getActiveTenantId()
 
   const now = new Date()
   const from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`
@@ -63,7 +62,8 @@ async function fetchBudgetData(): Promise<BudgetItem[]> {
 
 export function BudgetCard() {
   const { tenant } = useTenant()
-  const swrKey = tenant ? `budget-card-t${tenant.id}` : null
+  // null como segundo elemento = admin (sem filtro de tenant), SWR executa normalmente
+  const swrKey: [string, number | null] = ["budget-card", tenant?.id ?? null]
 
   const { data: items, isLoading } = useSWR(swrKey, fetchBudgetData, {
     revalidateOnFocus: false,
