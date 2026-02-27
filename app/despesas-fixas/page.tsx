@@ -164,17 +164,19 @@ function DespesasFixasPage() {
 
   const searchParams = useSearchParams()
   const router = useRouter()
-  const novoProcessado = useRef(false)
 
+  // Abre o dialog uma única vez via ?novo=1, sem re-render em loop
+  const novoParam = searchParams.get("novo")
   useEffect(() => {
-    if (searchParams.get("novo") === "1" && !novoProcessado.current) {
-      novoProcessado.current = true
+    if (novoParam === "1") {
+      // Limpa a URL imediatamente (sem aguardar o re-render do searchParams)
+      window.history.replaceState(null, "", "/despesas-fixas")
       setEditingItem(null)
       setForm(emptyForm)
       setDialogOpen(true)
-      router.replace("/despesas-fixas")
     }
-  }, [searchParams, router])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []) // roda só na montagem — o novoParam já está capturado no closure
 
   const despesaCategorias = useMemo(
     () => (hierarchy?.categorias || []).filter((c) => c.tipo === "Despesa"),
