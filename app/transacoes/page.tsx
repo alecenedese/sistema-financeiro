@@ -476,9 +476,12 @@ function TransacoesPage() {
                   <option>Dinheiro</option>
                   <option>Pix</option>
                   <option>Cartao de Debito</option>
+                  <option>Debito em Conta</option>
                   <option>Cartao de Credito</option>
                   <option>Boleto</option>
+                  <option>Transferencia</option>
                   <option>TED / DOC</option>
+                  <option>Cheque</option>
                 </select>
               </div>
               <div className="space-y-2">

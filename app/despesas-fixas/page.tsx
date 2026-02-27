@@ -14,7 +14,7 @@ import {
   AlertTriangle,
   CalendarDays,
 } from "lucide-react"
-import { useState, useEffect, useCallback, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo, useRef } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { Suspense } from "react"
 import {
@@ -68,7 +68,7 @@ interface SubcategoriaFilhoRow { id: number; nome: string; subcategoria_id: numb
 interface FornecedorRow { id: number; nome: string }
 interface ContaBancariaRow { id: number; nome: string; tipo: string }
 
-const FORMAS_PAGAMENTO = ["PIX", "Boleto", "Cartao de Credito", "Cartao de Debito", "Transferencia", "Dinheiro", "Cheque"]
+const FORMAS_PAGAMENTO = ["PIX", "Boleto", "Cartao de Credito", "Cartao de Debito", "Debito em Conta", "Transferencia", "Dinheiro", "Cheque"]
 
 async function fetchDespesas(): Promise<DespesaFixa[]> {
   const supabase = createClient()
@@ -164,10 +164,14 @@ function DespesasFixasPage() {
 
   const searchParams = useSearchParams()
   const router = useRouter()
+  const novoProcessado = useRef(false)
 
   useEffect(() => {
-    if (searchParams.get("novo") === "1") {
-      openNew()
+    if (searchParams.get("novo") === "1" && !novoProcessado.current) {
+      novoProcessado.current = true
+      setEditingItem(null)
+      setForm(emptyForm)
+      setDialogOpen(true)
       router.replace("/despesas-fixas")
     }
   }, [searchParams, router])

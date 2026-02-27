@@ -1,30 +1,20 @@
 "use client"
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useMemo, useRef } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { Suspense } from "react"
 import useSWR from "swr"
 import { createClient } from "@/lib/supabase/client"
+import { getActiveTenantId } from "@/hooks/use-tenant"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
-import { FileUp, Plus, TrendingUp, Clock, CheckCircle2, AlertTriangle, Pencil, Trash2, Loader2 } from "lucide-react"
+import { FileUp, Plus, TrendingUp, Clock, CheckCircle2, AlertTriangle, Pencil, Trash2, Loader2, Search, X, ChevronDown } from "lucide-react"
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
 import {
-  AlertDialog,
-  AlertDialogContent,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogAction,
-  AlertDialogCancel,
+  AlertDialog, AlertDialogContent, AlertDialogHeader, AlertDialogTitle,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogAction, AlertDialogCancel,
 } from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -33,7 +23,6 @@ import { handleCurrencyInput, parseBRL, formatBRL } from "@/lib/currency-input"
 interface CategoriaRow { id: number; nome: string; tipo: string }
 interface SubcategoriaRow { id: number; nome: string; categoria_id: number }
 interface SubcategoriaFilhoRow { id: number; nome: string; subcategoria_id: number }
-
 interface ContaBancariaRow { id: number; nome: string; tipo: string }
 interface ClienteRow { id: number; nome: string }
 
@@ -57,22 +46,19 @@ interface ContaReceber {
   cliente_nome: string
 }
 
+const FORMAS_PAGAMENTO = ["PIX", "Boleto", "Cartao de Credito", "Cartao de Debito", "Debito em Conta", "Transferencia", "Dinheiro", "Cheque"]
+const selectClass = "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+
 async function fetchContas(): Promise<ContaReceber[]> {
   const supabase = createClient()
-  const { data, error } = await supabase
+  const tid = getActiveTenantId()
+  let q = supabase
     .from("contas_receber")
-    .select(`
-      *,
-      categorias(nome),
-      subcategorias(nome),
-      subcategorias_filhos(nome),
-      contas_bancarias(nome, tipo),
-      clientes(nome)
-    `)
+    .select(`*, categorias(nome), subcategorias(nome), subcategorias_filhos(nome), contas_bancarias(nome, tipo), clientes(nome)`)
     .order("vencimento", { ascending: true })
-
+  if (tid) q = q.eq("tenant_id", tid)
+  const { data, error } = await q
   if (error) throw error
-
   return (data || []).map((row: Record<string, unknown>) => ({
     id: row.id as number,
     descricao: row.descricao as string,
@@ -89,69 +75,74 @@ async function fetchContas(): Promise<ContaReceber[]> {
     categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
     subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
     filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
-    conta_bancaria_nome: (row.contas_bancarias as Record<string, string> | null)?.nome
-      ? `${(row.contas_bancarias as Record<string, string>).nome} (${(row.contas_bancarias as Record<string, string>).tipo})`
-      : "",
+    conta_bancaria_nome: (row.contas_bancarias as Record<string, string> | null)?.nome || "",
     cliente_nome: (row.clientes as Record<string, string> | null)?.nome || "",
   }))
 }
 
-interface CategoriaHierarchy {
-  categorias: CategoriaRow[]
-  subcategorias: SubcategoriaRow[]
-  filhos: SubcategoriaFilhoRow[]
-}
-
-async function fetchHierarchy(): Promise<CategoriaHierarchy> {
+async function fetchHierarchy() {
   const supabase = createClient()
-  const [catRes, subRes, filhoRes] = await Promise.all([
-    supabase.from("categorias").select("id, nome, tipo").order("nome"),
-    supabase.from("subcategorias").select("id, nome, categoria_id").order("nome"),
-    supabase.from("subcategorias_filhos").select("id, nome, subcategoria_id").order("nome"),
-  ])
+  const tid = getActiveTenantId()
+  let catQ = supabase.from("categorias").select("id, nome, tipo").order("nome")
+  let subQ = supabase.from("subcategorias").select("id, nome, categoria_id").order("nome")
+  let filhoQ = supabase.from("subcategorias_filhos").select("id, nome, subcategoria_id").order("nome")
+  if (tid) { catQ = catQ.eq("tenant_id", tid); subQ = subQ.eq("tenant_id", tid); filhoQ = filhoQ.eq("tenant_id", tid) }
+  const [catRes, subRes, filhoRes] = await Promise.all([catQ, subQ, filhoQ])
   return {
-    categorias: catRes.data || [],
-    subcategorias: subRes.data || [],
-    filhos: filhoRes.data || [],
+    categorias: (catRes.data || []) as CategoriaRow[],
+    subcategorias: (subRes.data || []) as SubcategoriaRow[],
+    filhos: (filhoRes.data || []) as SubcategoriaFilhoRow[],
   }
 }
 
 async function fetchContasBancarias(): Promise<ContaBancariaRow[]> {
   const supabase = createClient()
-  const { data } = await supabase.from("contas_bancarias").select("id, nome, tipo").order("nome")
+  const tid = getActiveTenantId()
+  let q = supabase.from("contas_bancarias").select("id, nome, tipo").order("nome")
+  if (tid) q = q.eq("tenant_id", tid)
+  const { data } = await q
   return data || []
 }
 
 async function fetchClientes(): Promise<ClienteRow[]> {
   const supabase = createClient()
-  const { data } = await supabase.from("clientes").select("id, nome").order("nome")
+  const tid = getActiveTenantId()
+  let q = supabase.from("clientes").select("id, nome").order("nome")
+  if (tid) q = q.eq("tenant_id", tid)
+  const { data } = await q
   return data || []
 }
 
-function formatCurrency(value: number) {
-  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(value)
+function formatCurrency(v: number) {
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v)
 }
 
-function formatDateDisplay(dateStr: string) {
-  const [y, m, d] = dateStr.split("-")
-  return `${d}/${m}/${y}`
+function formatDateDisplay(d: string) {
+  if (!d) return "-"
+  const [y, m, day] = d.split("-")
+  return `${day}/${m}/${y}`
 }
 
-const FORMAS_PAGAMENTO = ["PIX", "Boleto", "Cartao de Credito", "Cartao de Debito", "Transferencia", "Dinheiro", "Cheque"]
-
-const emptyForm = { descricao: "", valor: "", vencimento: "", cliente_id: "", categoria_id: "", subcategoria_id: "", subcategoria_filho_id: "", conta_bancaria_id: "", status: "pendente", forma_pagamento: "" }
+const emptyForm = {
+  descricao: "", valor: "", vencimento: "", cliente_id: "",
+  categoria_id: "", subcategoria_id: "", subcategoria_filho_id: "",
+  conta_bancaria_id: "", status: "pendente", forma_pagamento: "",
+}
 
 export default function ContasAReceberPageWrapper() {
   return <Suspense><ContasAReceberPage /></Suspense>
 }
 
 function ContasAReceberPage() {
-  const { data: contas, error, isLoading, mutate } = useSWR("contas_receber", fetchContas)
+  const { data: contas = [], error, isLoading, mutate } = useSWR("contas_receber", fetchContas)
   const { data: hierarchy } = useSWR("hierarchy_receber", fetchHierarchy)
   const { data: contasBancarias = [] } = useSWR("contas_bancarias_receber", fetchContasBancarias)
   const { data: clientesLista = [] } = useSWR("clientes_receber", fetchClientes)
 
   const [filterStatus, setFilterStatus] = useState<"Todos" | "Pendente" | "Recebido" | "Vencido">("Todos")
+  const [filterCategoriaId, setFilterCategoriaId] = useState("")
+  const [filterSubcategoriaId, setFilterSubcategoriaId] = useState("")
+  const [search, setSearch] = useState("")
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingConta, setEditingConta] = useState<ContaReceber | null>(null)
   const [deleteConfirm, setDeleteConfirm] = useState<ContaReceber | null>(null)
@@ -160,9 +151,11 @@ function ContasAReceberPage() {
 
   const searchParams = useSearchParams()
   const router = useRouter()
+  const novoProcessado = useRef(false)
 
   useEffect(() => {
-    if (searchParams.get("novo") === "1") {
+    if (searchParams.get("novo") === "1" && !novoProcessado.current) {
+      novoProcessado.current = true
       setEditingConta(null)
       setForm(emptyForm)
       setDialogOpen(true)
@@ -170,30 +163,53 @@ function ContasAReceberPage() {
     }
   }, [searchParams, router])
 
-  const allContas = contas || []
-  const filtered = filterStatus === "Todos"
-    ? allContas
-    : allContas.filter((c) => c.status === filterStatus.toLowerCase())
-
-  const totalPendente = allContas.filter((c) => c.status === "pendente").reduce((a, c) => a + c.valor, 0)
-  const totalRecebido = allContas.filter((c) => c.status === "recebido").reduce((a, c) => a + c.valor, 0)
-  const totalVencido = allContas.filter((c) => c.status === "vencido").reduce((a, c) => a + c.valor, 0)
-  const qtdPendente = allContas.filter((c) => c.status === "pendente").length
-
   const receitaCategorias = useMemo(
     () => (hierarchy?.categorias || []).filter((c) => c.tipo === "Receita"),
     [hierarchy]
   )
-
-  const subcategoriasDisponiveis = useMemo(
+  const subcategoriasDaCategoria = useMemo(
+    () => (hierarchy?.subcategorias || []).filter((s) => s.categoria_id === Number(filterCategoriaId)),
+    [hierarchy, filterCategoriaId]
+  )
+  const subcategoriasForm = useMemo(
     () => (hierarchy?.subcategorias || []).filter((s) => s.categoria_id === Number(form.categoria_id)),
     [hierarchy, form.categoria_id]
   )
-
-  const filhosDisponiveis = useMemo(
+  const filhosForm = useMemo(
     () => (hierarchy?.filhos || []).filter((f) => f.subcategoria_id === Number(form.subcategoria_id)),
     [hierarchy, form.subcategoria_id]
   )
+
+  const filtered = useMemo(() => {
+    return contas.filter((c) => {
+      if (filterStatus !== "Todos" && c.status !== filterStatus.toLowerCase()) return false
+      if (filterCategoriaId && String(c.categoria_id) !== filterCategoriaId) return false
+      if (filterSubcategoriaId && String(c.subcategoria_id) !== filterSubcategoriaId) return false
+      if (search) {
+        const q = search.toLowerCase()
+        if (
+          !c.descricao.toLowerCase().includes(q) &&
+          !c.cliente_nome.toLowerCase().includes(q) &&
+          !c.categoria_nome.toLowerCase().includes(q)
+        ) return false
+      }
+      return true
+    })
+  }, [contas, filterStatus, filterCategoriaId, filterSubcategoriaId, search])
+
+  const totalPendente = contas.filter((c) => c.status === "pendente").reduce((a, c) => a + c.valor, 0)
+  const totalRecebido = contas.filter((c) => c.status === "recebido").reduce((a, c) => a + c.valor, 0)
+  const totalVencido = contas.filter((c) => c.status === "vencido").reduce((a, c) => a + c.valor, 0)
+  const qtdPendente = contas.filter((c) => c.status === "pendente").length
+
+  const hasFilter = filterStatus !== "Todos" || filterCategoriaId || filterSubcategoriaId || search
+
+  function clearFilters() {
+    setFilterStatus("Todos")
+    setFilterCategoriaId("")
+    setFilterSubcategoriaId("")
+    setSearch("")
+  }
 
   function openNew() {
     setEditingConta(null)
@@ -223,11 +239,12 @@ function ContasAReceberPage() {
     setSaving(true)
     try {
       const supabase = createClient()
+      const tid = getActiveTenantId()
       const selectedCliente = clientesLista.find((c) => c.id === Number(form.cliente_id))
-      const payload = {
+      const payload: Record<string, unknown> = {
         descricao: form.descricao,
         valor: parseBRL(form.valor),
-        vencimento: form.vencimento || "2026-02-28",
+        vencimento: form.vencimento || new Date().toISOString().split("T")[0],
         cliente: selectedCliente?.nome || "",
         cliente_id: form.cliente_id ? Number(form.cliente_id) : null,
         categoria_id: form.categoria_id ? Number(form.categoria_id) : null,
@@ -237,6 +254,7 @@ function ContasAReceberPage() {
         status: form.status,
         forma_pagamento: form.forma_pagamento || null,
       }
+      if (tid) payload.tenant_id = tid
       if (editingConta) {
         await supabase.from("contas_receber").update(payload).eq("id", editingConta.id)
       } else {
@@ -268,48 +286,39 @@ function ContasAReceberPage() {
         <PageHeader title="Contas a Receber" />
         <main className="flex-1 overflow-y-auto p-6">
           <div className="mx-auto max-w-7xl space-y-6">
+
             {/* Summary Cards */}
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <div className="flex items-center gap-4 rounded-xl border border-border bg-card p-5 shadow-sm">
-                <div className="flex-1">
-                  <p className="text-sm text-muted-foreground">Total Pendente</p>
-                  <p className="mt-1 text-xl font-bold text-[hsl(38,92%,50%)]">{formatCurrency(totalPendente)}</p>
+              {[
+                { label: "Total Pendente", value: formatCurrency(totalPendente), color: "hsl(38,92%,50%)", icon: Clock },
+                { label: "Total Recebido", value: formatCurrency(totalRecebido), color: "hsl(142,71%,40%)", icon: CheckCircle2 },
+                { label: "Total Vencido", value: formatCurrency(totalVencido), color: "hsl(0,72%,51%)", icon: AlertTriangle },
+                { label: "Contas Pendentes", value: String(qtdPendente), color: "hsl(216,60%,22%)", icon: TrendingUp },
+              ].map(({ label, value, color, icon: Icon }) => (
+                <div key={label} className="flex items-center gap-4 rounded-xl border border-border bg-card p-5 shadow-sm">
+                  <div className="flex-1">
+                    <p className="text-sm text-muted-foreground">{label}</p>
+                    <p className="mt-1 text-xl font-bold" style={{ color }}>{value}</p>
+                  </div>
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: color }}>
+                    <Icon className="h-6 w-6 text-white" />
+                  </div>
                 </div>
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[hsl(38,92%,50%)]">
-                  <Clock className="h-6 w-6 text-white" />
-                </div>
-              </div>
-              <div className="flex items-center gap-4 rounded-xl border border-border bg-card p-5 shadow-sm">
-                <div className="flex-1">
-                  <p className="text-sm text-muted-foreground">Total Recebido</p>
-                  <p className="mt-1 text-xl font-bold text-[hsl(142,71%,40%)]">{formatCurrency(totalRecebido)}</p>
-                </div>
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[hsl(142,71%,40%)]">
-                  <CheckCircle2 className="h-6 w-6 text-white" />
-                </div>
-              </div>
-              <div className="flex items-center gap-4 rounded-xl border border-border bg-card p-5 shadow-sm">
-                <div className="flex-1">
-                  <p className="text-sm text-muted-foreground">Total Vencido</p>
-                  <p className="mt-1 text-xl font-bold text-[hsl(0,72%,51%)]">{formatCurrency(totalVencido)}</p>
-                </div>
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[hsl(0,72%,51%)]">
-                  <AlertTriangle className="h-6 w-6 text-white" />
-                </div>
-              </div>
-              <div className="flex items-center gap-4 rounded-xl border border-border bg-card p-5 shadow-sm">
-                <div className="flex-1">
-                  <p className="text-sm text-muted-foreground">Contas Pendentes</p>
-                  <p className="mt-1 text-xl font-bold text-card-foreground">{qtdPendente}</p>
-                </div>
-                <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[hsl(216,60%,22%)]">
-                  <TrendingUp className="h-6 w-6 text-white" />
-                </div>
-              </div>
+              ))}
             </div>
 
-            {/* Filters */}
-            <div className="flex items-center justify-between">
+            {/* Filters bar */}
+            <div className="flex flex-wrap items-center gap-3">
+              <div className="relative min-w-[200px] flex-1">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                <Input
+                  placeholder="Buscar por descricao, cliente..."
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="pl-10"
+                />
+              </div>
+
               <div className="flex items-center rounded-lg border border-border bg-card">
                 {(["Todos", "Pendente", "Recebido", "Vencido"] as const).map((s) => (
                   <button key={s} type="button" onClick={() => setFilterStatus(s)}
@@ -317,28 +326,61 @@ function ContasAReceberPage() {
                   >{s}</button>
                 ))}
               </div>
-              <button type="button" onClick={openNew} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
+
+              <div className="relative">
+                <select
+                  value={filterCategoriaId}
+                  onChange={(e) => { setFilterCategoriaId(e.target.value); setFilterSubcategoriaId("") }}
+                  className="h-10 appearance-none rounded-lg border border-border bg-card pl-3 pr-8 text-sm text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">Todas categorias</option>
+                  {receitaCategorias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              </div>
+
+              {filterCategoriaId && subcategoriasDaCategoria.length > 0 && (
+                <div className="relative">
+                  <select
+                    value={filterSubcategoriaId}
+                    onChange={(e) => setFilterSubcategoriaId(e.target.value)}
+                    className="h-10 appearance-none rounded-lg border border-border bg-card pl-3 pr-8 text-sm text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="">Todas subcategorias</option>
+                    {subcategoriasDaCategoria.map((s) => <option key={s.id} value={s.id}>{s.nome}</option>)}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                </div>
+              )}
+
+              {hasFilter && (
+                <button type="button" onClick={clearFilters}
+                  className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted">
+                  <X className="h-3.5 w-3.5" /> Limpar
+                </button>
+              )}
+
+              <button type="button" onClick={openNew}
+                className="ml-auto flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
                 <Plus className="h-4 w-4" />
                 Nova Conta a Receber
               </button>
             </div>
 
-            {/* Loading */}
             {isLoading && (
               <div className="flex items-center justify-center py-12">
                 <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                <span className="ml-2 text-sm text-muted-foreground">Carregando contas...</span>
+                <span className="ml-2 text-sm text-muted-foreground">Carregando...</span>
               </div>
             )}
 
             {error && (
               <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center">
-                <p className="text-sm text-destructive">Erro ao carregar contas. Tente novamente.</p>
+                <p className="text-sm text-destructive">Erro ao carregar contas.</p>
                 <button type="button" onClick={() => mutate()} className="mt-2 text-sm font-medium text-primary hover:underline">Recarregar</button>
               </div>
             )}
 
-            {/* Table */}
             {!isLoading && !error && (
               <div className="rounded-xl border border-border bg-card shadow-sm">
                 <div className="grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto_auto] gap-4 border-b border-border px-5 py-3 text-xs font-semibold uppercase text-muted-foreground">
@@ -351,61 +393,52 @@ function ContasAReceberPage() {
                   <span className="text-right">Valor</span>
                   <span className="text-right">Acoes</span>
                 </div>
-                {filtered.map((conta) => (
+                {filtered.length === 0 ? (
+                  <div className="px-5 py-10 text-center text-sm text-muted-foreground">
+                    {hasFilter ? "Nenhuma conta encontrada com os filtros atuais." : "Nenhuma conta a receber cadastrada."}
+                  </div>
+                ) : filtered.map((conta) => (
                   <div key={conta.id} className="group grid grid-cols-[1fr_auto_auto_auto_auto_auto_auto_auto] items-center gap-4 border-b border-border px-5 py-3.5 last:border-b-0 transition-colors hover:bg-muted/50">
                     <div className="flex items-center gap-3">
-                      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
-                        conta.status === "vencido" ? "bg-[hsl(0,72%,51%)]/10" : conta.status === "recebido" ? "bg-[hsl(142,71%,40%)]/10" : "bg-[hsl(38,92%,50%)]/10"
-                      }`}>
-                        <FileUp className={`h-5 w-5 ${
-                          conta.status === "vencido" ? "text-[hsl(0,72%,51%)]" : conta.status === "recebido" ? "text-[hsl(142,71%,40%)]" : "text-[hsl(38,92%,50%)]"
-                        }`} />
+                      <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${conta.status === "vencido" ? "bg-[hsl(0,72%,51%)]/10" : conta.status === "recebido" ? "bg-[hsl(142,71%,40%)]/10" : "bg-[hsl(38,92%,50%)]/10"}`}>
+                        <FileUp className={`h-5 w-5 ${conta.status === "vencido" ? "text-[hsl(0,72%,51%)]" : conta.status === "recebido" ? "text-[hsl(142,71%,40%)]" : "text-[hsl(38,92%,50%)]"}`} />
                       </div>
                       <span className="text-sm font-medium text-card-foreground">{conta.descricao}</span>
                     </div>
                     <span className="text-sm text-muted-foreground">{conta.cliente_nome || conta.cliente || "-"}</span>
                     <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">
-                      {[conta.categoria_nome, conta.subcategoria_nome, conta.filho_nome].filter(Boolean).join(" > ")}
+                      {[conta.categoria_nome, conta.subcategoria_nome, conta.filho_nome].filter(Boolean).join(" > ") || "-"}
                     </span>
                     <span className="text-sm text-muted-foreground">{conta.conta_bancaria_nome || "-"}</span>
                     <span className="text-sm text-muted-foreground">{formatDateDisplay(conta.vencimento)}</span>
-                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                      conta.status === "recebido"
-                        ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)]"
-                        : conta.status === "vencido"
-                          ? "bg-[hsl(0,72%,51%)]/10 text-[hsl(0,72%,51%)]"
-                          : "bg-[hsl(38,92%,50%)]/10 text-[hsl(38,92%,50%)]"
-                    }`}>
+                    <span className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${conta.status === "recebido" ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)]" : conta.status === "vencido" ? "bg-[hsl(0,72%,51%)]/10 text-[hsl(0,72%,51%)]" : "bg-[hsl(38,92%,50%)]/10 text-[hsl(38,92%,50%)]"}`}>
                       {conta.status === "recebido" ? "Recebido" : conta.status === "vencido" ? "Vencido" : "Pendente"}
                     </span>
                     <span className="text-right text-sm font-semibold text-[hsl(142,71%,40%)]">+ {formatCurrency(conta.valor)}</span>
                     <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                      <button type="button" onClick={() => openEdit(conta)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                      <button type="button" onClick={() => openEdit(conta)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
                         <Pencil className="h-3.5 w-3.5" />
                       </button>
-                      <button type="button" onClick={() => setDeleteConfirm(conta)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive">
+                      <button type="button" onClick={() => setDeleteConfirm(conta)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>
                   </div>
                 ))}
-                {filtered.length === 0 && (
-                  <div className="px-5 py-8 text-center text-sm text-muted-foreground">Nenhuma conta encontrada.</div>
-                )}
               </div>
             )}
           </div>
         </main>
       </div>
 
-      {/* Dialog - Novo/Editar */}
+      {/* Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent>
+        <DialogContent className="max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingConta ? "Editar Conta a Receber" : "Nova Conta a Receber"}</DialogTitle>
             <DialogDescription>{editingConta ? "Atualize os dados da conta." : "Preencha os dados para registrar uma nova conta a receber."}</DialogDescription>
           </DialogHeader>
-          <div className="space-y-4 py-2">
+          <div className="max-h-[70vh] overflow-y-auto space-y-4 py-2 pr-1">
             <div className="space-y-2">
               <Label htmlFor="descricao">Descricao</Label>
               <Input id="descricao" placeholder="Ex: Consultoria, Projeto..." value={form.descricao} onChange={(e) => setForm({ ...form, descricao: e.target.value })} />
@@ -421,67 +454,65 @@ function ContasAReceberPage() {
               </div>
             </div>
             <div className="space-y-2">
+              <Label htmlFor="status">Status</Label>
+              <select id="status" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className={selectClass}>
+                <option value="pendente">Pendente</option>
+                <option value="recebido">Recebido</option>
+                <option value="vencido">Vencido</option>
+              </select>
+            </div>
+            <div className="space-y-2">
               <Label htmlFor="cliente">Cliente</Label>
-              <select id="cliente" value={form.cliente_id} onChange={(e) => setForm({ ...form, cliente_id: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+              <select id="cliente" value={form.cliente_id} onChange={(e) => setForm({ ...form, cliente_id: e.target.value })} className={selectClass}>
                 <option value="">Selecione...</option>
                 {clientesLista.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
               </select>
             </div>
             <div className="space-y-2">
+              <Label htmlFor="categoria">Categoria</Label>
+              <select id="categoria" value={form.categoria_id} onChange={(e) => setForm({ ...form, categoria_id: e.target.value, subcategoria_id: "", subcategoria_filho_id: "" })} className={selectClass}>
+                <option value="">Selecione...</option>
+                {receitaCategorias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+              </select>
+            </div>
+            {subcategoriasForm.length > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="subcategoria">Subcategoria</Label>
+                <select id="subcategoria" value={form.subcategoria_id} onChange={(e) => setForm({ ...form, subcategoria_id: e.target.value, subcategoria_filho_id: "" })} className={selectClass}>
+                  <option value="">Selecione...</option>
+                  {subcategoriasForm.map((s) => <option key={s.id} value={s.id}>{s.nome}</option>)}
+                </select>
+              </div>
+            )}
+            {filhosForm.length > 0 && (
+              <div className="space-y-2">
+                <Label htmlFor="filho">Subcategoria Filho</Label>
+                <select id="filho" value={form.subcategoria_filho_id} onChange={(e) => setForm({ ...form, subcategoria_filho_id: e.target.value })} className={selectClass}>
+                  <option value="">Selecione...</option>
+                  {filhosForm.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                </select>
+              </div>
+            )}
+            <div className="space-y-2">
               <Label htmlFor="conta_bancaria">Conta Bancaria</Label>
-              <select id="conta_bancaria" value={form.conta_bancaria_id} onChange={(e) => setForm({ ...form, conta_bancaria_id: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+              <select id="conta_bancaria" value={form.conta_bancaria_id} onChange={(e) => setForm({ ...form, conta_bancaria_id: e.target.value })} className={selectClass}>
                 <option value="">Selecione...</option>
                 {contasBancarias.map((cb) => <option key={cb.id} value={cb.id}>{cb.nome} ({cb.tipo})</option>)}
               </select>
             </div>
             <div className="space-y-2">
-              <Label htmlFor="categoria">Categoria</Label>
-              <select id="categoria" value={form.categoria_id} onChange={(e) => setForm({ ...form, categoria_id: e.target.value, subcategoria_id: "", subcategoria_filho_id: "" })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+              <Label htmlFor="forma_pagamento">Forma de Pagamento</Label>
+              <select id="forma_pagamento" value={form.forma_pagamento} onChange={(e) => setForm({ ...form, forma_pagamento: e.target.value })} className={selectClass}>
                 <option value="">Selecione...</option>
-                {receitaCategorias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                {FORMAS_PAGAMENTO.map((fp) => <option key={fp} value={fp}>{fp}</option>)}
               </select>
-            </div>
-            {subcategoriasDisponiveis.length > 0 && (
-              <div className="space-y-2">
-                <Label htmlFor="subcategoria">Subcategoria</Label>
-                <select id="subcategoria" value={form.subcategoria_id} onChange={(e) => setForm({ ...form, subcategoria_id: e.target.value, subcategoria_filho_id: "" })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                  <option value="">Selecione...</option>
-                  {subcategoriasDisponiveis.map((s) => <option key={s.id} value={s.id}>{s.nome}</option>)}
-                </select>
-              </div>
-            )}
-            {filhosDisponiveis.length > 0 && (
-              <div className="space-y-2">
-                <Label htmlFor="subcategoriaFilho">Subcategoria Filho</Label>
-                <select id="subcategoriaFilho" value={form.subcategoria_filho_id} onChange={(e) => setForm({ ...form, subcategoria_filho_id: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                  <option value="">Selecione...</option>
-                  {filhosDisponiveis.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
-                </select>
-              </div>
-            )}
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="forma_pagamento">Forma de Pagamento</Label>
-                <select id="forma_pagamento" value={form.forma_pagamento} onChange={(e) => setForm({ ...form, forma_pagamento: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                  <option value="">Selecione...</option>
-                  {FORMAS_PAGAMENTO.map((fp) => <option key={fp} value={fp}>{fp}</option>)}
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="status">Status</Label>
-                <select id="status" value={form.status} onChange={(e) => setForm({ ...form, status: e.target.value })} className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
-                  <option value="pendente">Pendente</option>
-                  <option value="recebido">Recebido</option>
-                  <option value="vencido">Vencido</option>
-                </select>
-              </div>
             </div>
           </div>
           <DialogFooter>
-            <button type="button" onClick={() => setDialogOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-muted">
+            <button type="button" onClick={() => setDialogOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">
               Cancelar
             </button>
-            <button type="button" disabled={saving} onClick={handleSave} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50">
+            <button type="button" onClick={handleSave} disabled={saving} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               {editingConta ? "Salvar" : "Adicionar"}
             </button>
@@ -489,18 +520,17 @@ function ContasAReceberPage() {
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation */}
       <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Excluir conta a receber</AlertDialogTitle>
             <AlertDialogDescription>
-              Tem certeza que deseja excluir &quot;{deleteConfirm?.descricao}&quot;? Esta acao nao pode ser desfeita.
+              {"Tem certeza que deseja excluir "}{deleteConfirm?.descricao}{"? Esta acao nao pode ser desfeita."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={() => deleteConfirm && handleDelete(deleteConfirm)} disabled={saving} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+            <AlertDialogAction onClick={() => deleteConfirm && handleDelete(deleteConfirm)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Excluir"}
             </AlertDialogAction>
           </AlertDialogFooter>
