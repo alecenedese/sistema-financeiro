@@ -1,7 +1,7 @@
 "use client"
 
 import { createClient } from "@/lib/supabase/client"
-import { getActiveTenantId } from "@/hooks/use-tenant"
+import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
 import useSWR from "swr"
 import { useMemo } from "react"
 
@@ -204,30 +204,31 @@ async function fetchCategoryCharts(): Promise<{ expenses: CategoryPoint[]; incom
 }
 
 // ─── hooks públicos ───────────────────────────────────────────────────────────
-
-function tenantKey(base: string) {
-  const tid = getActiveTenantId()
-  return tid ? `${base}-t${tid}` : base
-}
+// As keys são arrays para que o SWR reaja quando o tenant muda
 
 export function useSummary() {
-  return useSWR(tenantKey("dashboard-summary"), fetchSummary, { revalidateOnFocus: false })
+  const { tenant } = useTenant()
+  return useSWR(["dashboard-summary", tenant?.id ?? null], fetchSummary, { revalidateOnFocus: false })
 }
 
 export function useRecentTx() {
-  return useSWR(tenantKey("dashboard-recent-tx"), fetchRecentTx, { revalidateOnFocus: false })
+  const { tenant } = useTenant()
+  return useSWR(["dashboard-recent-tx", tenant?.id ?? null], fetchRecentTx, { revalidateOnFocus: false })
 }
 
 export function useAccounts() {
-  return useSWR(tenantKey("dashboard-accounts"), fetchAccounts, { revalidateOnFocus: false })
+  const { tenant } = useTenant()
+  return useSWR(["dashboard-accounts", tenant?.id ?? null], fetchAccounts, { revalidateOnFocus: false })
 }
 
 export function useMonthly() {
-  return useSWR(tenantKey("dashboard-monthly"), fetchMonthly, { revalidateOnFocus: false })
+  const { tenant } = useTenant()
+  return useSWR(["dashboard-monthly", tenant?.id ?? null], fetchMonthly, { revalidateOnFocus: false })
 }
 
 export function useCategoryCharts() {
-  return useSWR(tenantKey("dashboard-category-charts"), fetchCategoryCharts, { revalidateOnFocus: false })
+  const { tenant } = useTenant()
+  return useSWR(["dashboard-category-charts", tenant?.id ?? null], fetchCategoryCharts, { revalidateOnFocus: false })
 }
 
 export { fmt }

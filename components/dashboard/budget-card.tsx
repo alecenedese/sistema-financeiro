@@ -2,7 +2,7 @@
 
 import useSWR from "swr"
 import { createClient } from "@/lib/supabase/client"
-import { getActiveTenantId } from "@/hooks/use-tenant"
+import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
 
 interface BudgetItem {
   category: string
@@ -61,13 +61,11 @@ async function fetchBudgetData(): Promise<BudgetItem[]> {
     }))
 }
 
-function tenantKey() {
-  const tid = getActiveTenantId()
-  return tid ? `budget-card-t${tid}` : "budget-card"
-}
-
 export function BudgetCard() {
-  const { data: items, isLoading } = useSWR(tenantKey(), fetchBudgetData, {
+  const { tenant } = useTenant()
+  const swrKey = tenant ? `budget-card-t${tenant.id}` : null
+
+  const { data: items, isLoading } = useSWR(swrKey, fetchBudgetData, {
     revalidateOnFocus: false,
   })
 
