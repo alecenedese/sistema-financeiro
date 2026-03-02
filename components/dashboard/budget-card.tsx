@@ -1,37 +1,14 @@
 "use client"
 
-const budgetItems = [
-  {
-    category: "Moradia",
-    spent: 1290,
-    budget: 1500,
-    color: "#1B3A5C",
-  },
-  {
-    category: "Transporte",
-    spent: 1110,
-    budget: 1200,
-    color: "#2C5F8A",
-  },
-  {
-    category: "Alimentacao",
-    spent: 920,
-    budget: 1000,
-    color: "#7A8FA6",
-  },
-  {
-    category: "Saude",
-    spent: 350,
-    budget: 500,
-    color: "#A8B8C8",
-  },
-  {
-    category: "Lazer",
-    spent: 220,
-    budget: 400,
-    color: "#C4CFD9",
-  },
-]
+import useSWR from "swr"
+import { createClient } from "@/lib/supabase/client"
+import { useTenant } from "@/hooks/use-tenant"
+
+interface BudgetItem {
+  category: string
+  spent: number
+  color: string
+}
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("pt-BR", {
@@ -41,67 +18,126 @@ function formatCurrency(value: number) {
   }).format(value)
 }
 
+async function fetchBudgetData([, tid]: [string, number | null]): Promise<BudgetItem[]> {
+  const supabase = createClient()
+
+  const now = new Date()
+  const from = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`
+  const lastDay = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate()
+  const to = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${lastDay}`
+
+  let q = supabase
+    .from("lancamentos")
+    .select("valor, tipo, categorias(id, nome, cor)")
+    .eq("tipo", "despesa")
+    .eq("status", "confirmado")
+    .gte("data", from)
+    .lte("data", to)
+
+  if (tid) q = q.eq("tenant_id", tid)
+
+  const { data } = await q
+
+  if (!data || data.length === 0) return []
+
+  // Agrupa gastos por categoria
+  const map: Record<string, { nome: string; cor: string; spent: number }> = {}
+  for (const row of data) {
+    const cat = row.categorias as { id: number; nome: string; cor: string } | null
+    if (!cat) continue
+    const key = String(cat.id)
+    if (!map[key]) map[key] = { nome: cat.nome, cor: cat.cor || "#7A8FA6", spent: 0 }
+    map[key].spent += Number(row.valor)
+  }
+
+  return Object.values(map)
+    .sort((a, b) => b.spent - a.spent)
+    .slice(0, 6)
+    .map((item) => ({
+      category: item.nome,
+      spent: item.spent,
+      color: item.cor,
+    }))
+}
+
 export function BudgetCard() {
-  const totalSpent = budgetItems.reduce((acc, item) => acc + item.spent, 0)
-  const totalBudget = budgetItems.reduce((acc, item) => acc + item.budget, 0)
-  const totalPercent = Math.round((totalSpent / totalBudget) * 100)
+  const { tenant } = useTenant()
+  // null como segundo elemento = admin (sem filtro de tenant), SWR executa normalmente
+  const swrKey: [string, number | null] = ["budget-card", tenant?.id ?? null]
+
+  const { data: items, isLoading } = useSWR(swrKey, fetchBudgetData, {
+    revalidateOnFocus: false,
+  })
+
+  const budgetItems = items ?? []
+  const totalSpent = budgetItems.reduce((acc, i) => acc + i.spent, 0)
 
   return (
     <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
         <h3 className="text-base font-semibold text-card-foreground">Orcamento</h3>
         <span className="text-xs text-muted-foreground">
-          {formatCurrency(totalSpent)} de {formatCurrency(totalBudget)}
+          {isLoading ? "..." : `${formatCurrency(totalSpent)} este mes`}
         </span>
       </div>
 
-      {/* Total progress */}
-      <div className="mb-6">
-        <div className="mb-1.5 flex items-center justify-between">
-          <span className="text-sm font-medium text-card-foreground">Total</span>
-          <span className="text-sm font-semibold text-card-foreground">{totalPercent}%</span>
-        </div>
-        <div className="h-2.5 overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full rounded-full bg-primary transition-all"
-            style={{ width: `${totalPercent}%` }}
-          />
-        </div>
-      </div>
-
-      {/* Category budgets */}
-      <div className="space-y-4">
-        {budgetItems.map((item) => {
-          const percent = Math.round((item.spent / item.budget) * 100)
-          return (
-            <div key={item.category}>
-              <div className="mb-1.5 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <div
-                    className="h-2.5 w-2.5 rounded-sm"
-                    style={{ backgroundColor: item.color }}
-                  />
-                  <span className="text-sm text-muted-foreground">
-                    {item.category}
-                  </span>
-                </div>
-                <span className="text-xs text-muted-foreground">
-                  {formatCurrency(item.spent)} / {formatCurrency(item.budget)}
-                </span>
-              </div>
-              <div className="h-2 overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full transition-all"
-                  style={{
-                    width: `${Math.min(percent, 100)}%`,
-                    backgroundColor: item.color,
-                  }}
-                />
-              </div>
+      {isLoading && (
+        <div className="space-y-4">
+          {[1, 2, 3, 4].map((i) => (
+            <div key={i} className="space-y-1.5">
+              <div className="h-3 w-32 animate-pulse rounded bg-muted" />
+              <div className="h-2 w-full animate-pulse rounded-full bg-muted" />
             </div>
-          )
-        })}
-      </div>
+          ))}
+        </div>
+      )}
+
+      {!isLoading && budgetItems.length === 0 && (
+        <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
+          Nenhum gasto registrado este mes.
+        </div>
+      )}
+
+      {!isLoading && budgetItems.length > 0 && (
+        <>
+          {/* Barra total */}
+          <div className="mb-6">
+            <div className="mb-1.5 flex items-center justify-between">
+              <span className="text-sm font-medium text-card-foreground">Total em despesas</span>
+              <span className="text-sm font-semibold text-card-foreground">{formatCurrency(totalSpent)}</span>
+            </div>
+            <div className="h-2.5 overflow-hidden rounded-full bg-muted">
+              <div className="h-full w-full rounded-full bg-primary" />
+            </div>
+          </div>
+
+          {/* Por categoria */}
+          <div className="space-y-4">
+            {budgetItems.map((item) => {
+              const pct = totalSpent > 0 ? Math.round((item.spent / totalSpent) * 100) : 0
+              return (
+                <div key={item.category}>
+                  <div className="mb-1.5 flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div className="h-2.5 w-2.5 rounded-sm" style={{ backgroundColor: item.color }} />
+                      <span className="text-sm text-muted-foreground">{item.category}</span>
+                    </div>
+                    <span className="text-xs text-muted-foreground">
+                      {formatCurrency(item.spent)} &middot; {pct}%
+                    </span>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-muted">
+                    <div
+                      className="h-full rounded-full transition-all"
+                      style={{ width: `${Math.min(pct, 100)}%`, backgroundColor: item.color }}
+                    />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
+      )}
     </div>
   )
 }

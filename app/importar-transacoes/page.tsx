@@ -94,8 +94,6 @@ interface ImportHistoryItem {
 
 // ---------- Supabase ----------
 
-const supabase = createClient()
-
 interface CategoriaHierarchy {
   categorias: CategoriaRow[]
   subcategorias: SubcategoriaRow[]
@@ -103,6 +101,7 @@ interface CategoriaHierarchy {
 }
 
 async function fetchHierarchy(): Promise<CategoriaHierarchy> {
+  const supabase = createClient()
   const [catRes, subRes, filhoRes] = await Promise.all([
     supabase.from("categorias").select("id, nome, tipo").order("nome"),
     supabase.from("subcategorias").select("id, nome, categoria_id").order("nome"),
@@ -116,21 +115,55 @@ async function fetchHierarchy(): Promise<CategoriaHierarchy> {
 }
 
 async function fetchContasBancarias(): Promise<ContaBancariaRow[]> {
+  const supabase = createClient()
   const { data } = await supabase.from("contas_bancarias").select("id, nome, tipo").order("nome")
   return data || []
 }
 
 async function fetchFornecedores(): Promise<FornecedorRow[]> {
+  const supabase = createClient()
   const { data } = await supabase.from("fornecedores").select("id, nome").order("nome")
   return data || []
 }
 
 async function fetchClientes(): Promise<ClienteRow[]> {
+  const supabase = createClient()
   const { data } = await supabase.from("clientes").select("id, nome").order("nome")
   return data || []
 }
 
+interface DespesaFixaRow {
+  id: number
+  descricao: string
+  valor: number
+  categoria_id: number | null
+  subcategoria_id: number | null
+  subcategoria_filho_id: number | null
+  fornecedor_id: number | null
+  conta_bancaria_id: number | null
+  forma_pagamento: string
+  ativa: boolean
+}
+
+async function fetchDespesasFixas(): Promise<DespesaFixaRow[]> {
+  const supabase = createClient()
+  const { data } = await supabase.from("despesas_fixas").select("*").eq("ativa", true)
+  return (data || []).map((r) => ({
+    id: r.id,
+    descricao: r.descricao,
+    valor: Number(r.valor),
+    categoria_id: r.categoria_id,
+    subcategoria_id: r.subcategoria_id,
+    subcategoria_filho_id: r.subcategoria_filho_id,
+    fornecedor_id: r.fornecedor_id,
+    conta_bancaria_id: r.conta_bancaria_id,
+    forma_pagamento: r.forma_pagamento || "",
+    ativa: r.ativa,
+  }))
+}
+
 async function fetchRules(): Promise<MappingRule[]> {
+  const supabase = createClient()
   const { data, error } = await supabase
     .from("mapping_rules")
     .select(`
@@ -280,6 +313,7 @@ export default function ImportarTransacoesPage() {
   const { data: contasBancarias = [] } = useSWR("contas_bancarias_importar", fetchContasBancarias)
   const { data: fornecedoresLista = [] } = useSWR("fornecedores_importar", fetchFornecedores)
   const { data: clientesLista = [] } = useSWR("clientes_importar", fetchClientes)
+  const { data: despesasFixas = [] } = useSWR("despesas_fixas_importar", fetchDespesasFixas)
 
   // State
   const [selectedContaBancariaId, setSelectedContaBancariaId] = useState<string>("")
@@ -343,10 +377,12 @@ export default function ImportarTransacoesPage() {
   const selectedEntradas = selectedTxs.filter((t) => t.amount > 0).reduce((a, t) => a + t.amount, 0)
   const selectedSaidas = selectedTxs.filter((t) => t.amount < 0).reduce((a, t) => a + Math.abs(t.amount), 0)
 
-  // Auto-match a transaction against saved rules
+  // Auto-match a transaction against saved rules and despesas fixas
   const applyRules = useCallback(
     (tx: OFXTransaction): { categoria_id: number | null; subcategoria_id: number | null; subcategoria_filho_id: number | null; fornecedor_id: number | null; cliente_id: number | null; clienteFornecedor: string } => {
       const memoUpper = tx.memo.toUpperCase()
+
+      // First try mapping rules
       for (const rule of allRules) {
         if (memoUpper.includes(rule.keyword.toUpperCase())) {
           return {
@@ -359,15 +395,40 @@ export default function ImportarTransacoesPage() {
           }
         }
       }
+
+      // Then try despesas fixas auto-match (only for debits)
+      if (tx.amount < 0) {
+        for (const df of despesasFixas) {
+          const descUpper = df.descricao.toUpperCase()
+          // Check if memo contains key words from the despesa fixa description
+          const words = descUpper.split(/\s+/).filter((w) => w.length >= 4)
+          if (words.some((w) => memoUpper.includes(w))) {
+            const fornNome = df.fornecedor_id ? fornecedoresLista.find((f) => f.id === df.fornecedor_id)?.nome || "" : ""
+            return {
+              categoria_id: df.categoria_id,
+              subcategoria_id: df.subcategoria_id,
+              subcategoria_filho_id: df.subcategoria_filho_id,
+              fornecedor_id: df.fornecedor_id,
+              cliente_id: null,
+              clienteFornecedor: fornNome || extractClienteFornecedor(tx.memo),
+            }
+          }
+        }
+      }
+
       return { categoria_id: null, subcategoria_id: null, subcategoria_filho_id: null, fornecedor_id: null, cliente_id: null, clienteFornecedor: extractClienteFornecedor(tx.memo) }
     },
-    [allRules]
+    [allRules, despesasFixas, fornecedoresLista]
   )
 
   // Process file
   function processFile(file: File) {
     if (!file.name.toLowerCase().endsWith(".ofx")) {
       alert("Por favor selecione um arquivo .OFX")
+      return
+    }
+    if (!selectedContaBancariaId) {
+      alert("Selecione uma conta bancaria antes de importar o extrato.")
       return
     }
     setFileName(file.name)
@@ -530,6 +591,7 @@ export default function ImportarTransacoesPage() {
 
   // Save rules from current mapping to Supabase
   async function saveNewRules() {
+    const supabase = createClient()
     const existingKeywords = new Set(allRules.map((r) => r.keyword.toUpperCase()))
     const newRuleInserts: { keyword: string; categoria_id: number | null; subcategoria_id: number | null; subcategoria_filho_id: number | null; fornecedor_id: number | null; cliente_id: number | null; cliente_fornecedor: string }[] = []
 
@@ -561,6 +623,7 @@ export default function ImportarTransacoesPage() {
 
   // Confirm import - save transactions to contas_pagar/contas_receber
   async function confirmImport() {
+    const supabase = createClient()
     setSaving(true)
     try {
       await saveNewRules()
@@ -649,6 +712,27 @@ export default function ImportarTransacoesPage() {
         await supabase.from("contas_receber").insert(receitasToInsert)
       }
 
+      // Update bank account balance based on selected transactions net
+      if (contaBancariaId) {
+        const netAmount = selected.reduce((acc, tx) => {
+          if (tx.isSplit && tx.splits && tx.splits.length > 0) {
+            return acc + tx.splits.reduce((a, s) => a + (tx.amount < 0 ? -Math.abs(s.valor) : s.valor), 0)
+          }
+          return acc + tx.amount
+        }, 0)
+        if (netAmount !== 0) {
+          const { data: contaData } = await supabase
+            .from("contas_bancarias")
+            .select("saldo")
+            .eq("id", contaBancariaId)
+            .single()
+          if (contaData) {
+            const novoSaldo = Number(contaData.saldo) + netAmount
+            await supabase.from("contas_bancarias").update({ saldo: novoSaldo }).eq("id", contaBancariaId)
+          }
+        }
+      }
+
       const newEntry: ImportHistoryItem = {
         id: Date.now(),
         arquivo: fileName,
@@ -675,6 +759,7 @@ export default function ImportarTransacoesPage() {
   }
 
   async function deleteRule(id: number) {
+    const supabase = createClient()
     await supabase.from("mapping_rules").delete().eq("id", id)
     await mutateRules()
   }
@@ -772,13 +857,23 @@ export default function ImportarTransacoesPage() {
             {/* ==================== STEP: UPLOAD ==================== */}
             {step === "upload" && (
               <>
+                {/* Warning: no bank account */}
+                {!selectedContaBancariaId && (
+                  <div className="flex items-center gap-3 rounded-lg border border-[hsl(0,72%,51%)]/30 bg-[hsl(0,72%,51%)]/5 px-4 py-3">
+                    <AlertCircle className="h-5 w-5 shrink-0 text-[hsl(0,72%,51%)]" />
+                    <p className="text-sm text-[hsl(0,72%,51%)]">
+                      <strong>Atenção:</strong> Selecione uma conta bancaria acima antes de importar o extrato. Sem a conta selecionada, a importacao sera bloqueada.
+                    </p>
+                  </div>
+                )}
+
                 {/* Upload Area */}
                 <div
                   onDragOver={handleDragOver}
                   onDragLeave={handleDragLeave}
                   onDrop={handleDrop}
                   className={`flex flex-col items-center justify-center rounded-xl border-2 border-dashed bg-card p-12 text-center shadow-sm transition-colors ${
-                    isDragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
+                    isDragging ? "border-primary bg-primary/5" : !selectedContaBancariaId ? "border-border opacity-50 cursor-not-allowed" : "border-border hover:border-primary/50"
                   }`}
                 >
                   <div className={`flex h-14 w-14 items-center justify-center rounded-full ${isDragging ? "bg-primary/20" : "bg-primary/10"}`}>
