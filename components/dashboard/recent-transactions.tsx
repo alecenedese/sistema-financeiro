@@ -41,13 +41,14 @@ export function RecentTransactions() {
               className="flex items-center gap-3 rounded-lg px-2 py-3 transition-colors hover:bg-muted"
             >
               <div
-                className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg"
-                style={{ backgroundColor: `${tx.cor}22` }}
+                className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg ${
+                  tx.tipo === "receber" ? "bg-[hsl(142,71%,40%)]/10" : "bg-[hsl(0,72%,51%)]/10"
+                }`}
               >
-                {tx.tipo === "receita" ? (
-                  <ArrowUpRight className="h-5 w-5" style={{ color: "hsl(142,71%,40%)" }} />
+                {tx.tipo === "receber" ? (
+                  <ArrowUpRight className="h-5 w-5 text-[hsl(142,71%,40%)]" />
                 ) : (
-                  <ArrowDownLeft className="h-5 w-5" style={{ color: "hsl(0,72%,51%)" }} />
+                  <ArrowDownLeft className="h-5 w-5 text-[hsl(0,72%,51%)]" />
                 )}
               </div>
               <div className="flex-1 min-w-0">
@@ -58,10 +59,10 @@ export function RecentTransactions() {
               </div>
               <span
                 className={`text-sm font-semibold ${
-                  tx.tipo === "receita" ? "text-[hsl(142,71%,45%)]" : "text-[hsl(0,72%,51%)]"
+                  tx.tipo === "receber" ? "text-[hsl(142,71%,45%)]" : "text-[hsl(0,72%,51%)]"
                 }`}
               >
-                {tx.tipo === "receita" ? "+" : "-"} {fmt(tx.valor)}
+                {tx.tipo === "receber" ? "+" : "-"} {fmt(tx.valor)}
               </span>
             </div>
           ))}

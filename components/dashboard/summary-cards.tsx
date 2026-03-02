@@ -1,6 +1,4 @@
-"use client"
-
-import { Landmark, TrendingUp, TrendingDown, CreditCard } from "lucide-react"
+import { Landmark, TrendingUp, TrendingDown, Clock } from "lucide-react"
 import { useSummary, fmt } from "@/hooks/use-dashboard-data"
 
 function Skeleton() {
@@ -30,10 +28,10 @@ export function SummaryCards() {
       iconBg: "bg-[hsl(0,72%,51%)]",
     },
     {
-      label: "Cartao de Credito",
-      value: data ? fmt(data.cartao) : null,
-      icon: CreditCard,
-      iconBg: "bg-[hsl(216,20%,60%)]",
+      label: "A Vencer no Mes",
+      value: data ? fmt(data.pendente) : null,
+      icon: Clock,
+      iconBg: "bg-[hsl(38,92%,50%)]",
     },
   ]
 
