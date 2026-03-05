@@ -434,68 +434,82 @@ export default function ImportarTransacoesPage() {
 
   // Process file — suporta OFX, CSV e XLS/XLSX
   async function processFile(file: File) {
-    const ext = file.name.toLowerCase().split(".").pop() ?? ""
-    const supported = ["ofx", "csv", "xls", "xlsx"]
-    if (!supported.includes(ext)) {
-      alert("Por favor selecione um arquivo .OFX, .CSV, .XLS ou .XLSX")
-      return
-    }
-    if (!selectedContaBancariaId) {
-      alert("Selecione uma conta bancaria antes de importar o extrato.")
-      return
-    }
-    setFileName(file.name)
-
-    let txs: OFXTransaction[] = []
-    let parsedOFX: OFXData | null = null
-
-    if (ext === "ofx") {
-      const content = await readFileAsText(file)
-      parsedOFX = parseOFX(content)
-      txs = parsedOFX.transactions
-    } else if (ext === "csv") {
-      // Tenta UTF-8 primeiro, depois ISO-8859-1 se nao encontrar separador
-      let content = await readFileAsText(file, "UTF-8")
-      console.log("[v0] CSV UTF-8 primeiras 200 chars:", JSON.stringify(content.slice(0, 200)))
-      // Se UTF-8 nao decodificou o cabecalho corretamente (sem ;), tenta ISO
-      if (!content.includes(";") && !content.includes(",")) {
-        content = await readFileAsText(file, "ISO-8859-1")
-        console.log("[v0] CSV ISO-8859-1 primeiras 200 chars:", JSON.stringify(content.slice(0, 200)))
+    try {
+      const ext = file.name.toLowerCase().split(".").pop() ?? ""
+      const supported = ["ofx", "csv", "xls", "xlsx"]
+      if (!supported.includes(ext)) {
+        alert("Por favor selecione um arquivo .OFX, .CSV, .XLS ou .XLSX")
+        return
       }
-      const rows = parseCSV(content)
-      console.log("[v0] CSV rows parsed:", rows.length, rows[0])
-      txs = spreadsheetToOFXTransactions(rows)
-      console.log("[v0] CSV txs:", txs.length, txs[0])
-    } else {
-      const buffer = await file.arrayBuffer()
-      const rows = await parseXLSX(buffer)
-      txs = spreadsheetToOFXTransactions(rows)
-    }
+      if (!selectedContaBancariaId) {
+        alert("Selecione uma conta bancaria antes de importar o extrato.")
+        return
+      }
+      setFileName(file.name)
+      console.log("[v0] processFile: ext =", ext, "file =", file.name)
 
-    setOfxData(parsedOFX)
-    const rows: TransactionRow[] = txs
-      .filter((tx) => tx.amount !== 0)
-      .map((tx) => {
-        const matched = applyRules(tx)
-        // Para CSV/XLS: pré-preenche fornecedor/cliente do campo FORNECEDOR da planilha
-        const extra = tx as OFXTransaction & { _fornecedor?: string }
-        const clienteFornecedor = matched.clienteFornecedor !== extractClienteFornecedor(tx.memo) && matched.clienteFornecedor
-          ? matched.clienteFornecedor
-          : extra._fornecedor || extractClienteFornecedor(tx.memo)
-        return {
-          ...tx,
-          categoria_id: matched.categoria_id,
-          subcategoria_id: matched.subcategoria_id,
-          subcategoria_filho_id: matched.subcategoria_filho_id,
-          fornecedor_id: matched.fornecedor_id,
-          cliente_id: matched.cliente_id,
-          clienteFornecedor,
-          selected: true,
+      let txs: OFXTransaction[] = []
+      let parsedOFX: OFXData | null = null
+
+      if (ext === "ofx") {
+        const content = await readFileAsText(file, "ISO-8859-1")
+        parsedOFX = parseOFX(content)
+        txs = parsedOFX.transactions
+      } else if (ext === "csv") {
+        // Lê como UTF-8 primeiro
+        let content = await readFileAsText(file, "UTF-8")
+        const firstLine = content.split("\n")[0] || ""
+        console.log("[v0] CSV first line (UTF-8):", JSON.stringify(firstLine))
+
+        // Se não encontrou separador, tenta ISO-8859-1
+        if (!firstLine.includes(";") && !firstLine.includes(",")) {
+          content = await readFileAsText(file, "ISO-8859-1")
+          const firstLineISO = content.split("\n")[0] || ""
+          console.log("[v0] CSV first line (ISO):", JSON.stringify(firstLineISO))
         }
-      })
-    setTransactions(rows)
-    setSelectAll(true)
-    setStep("review")
+
+        const parsed = parseCSV(content)
+        console.log("[v0] parseCSV retornou", parsed.length, "linhas. Primeira:", JSON.stringify(parsed[0]))
+        txs = spreadsheetToOFXTransactions(parsed)
+        console.log("[v0] spreadsheetToOFXTransactions retornou", txs.length, "txs. Primeira:", JSON.stringify(txs[0]))
+      } else {
+        const buffer = await file.arrayBuffer()
+        const rows = await parseXLSX(buffer)
+        txs = spreadsheetToOFXTransactions(rows)
+      }
+
+      console.log("[v0] Total txs antes do filtro:", txs.length)
+      console.log("[v0] Amounts:", txs.map(t => t.amount))
+
+      setOfxData(parsedOFX)
+      const rows: TransactionRow[] = txs
+        .map((tx) => {
+          const matched = applyRules(tx)
+          const extra = tx as OFXTransaction & { _fornecedor?: string }
+          const clienteFornecedor = matched.clienteFornecedor !== extractClienteFornecedor(tx.memo) && matched.clienteFornecedor
+            ? matched.clienteFornecedor
+            : extra._fornecedor || extractClienteFornecedor(tx.memo)
+          return {
+            ...tx,
+            categoria_id: matched.categoria_id,
+            subcategoria_id: matched.subcategoria_id,
+            subcategoria_filho_id: matched.subcategoria_filho_id,
+            fornecedor_id: matched.fornecedor_id,
+            cliente_id: matched.cliente_id,
+            clienteFornecedor,
+            selected: tx.amount !== 0,
+          }
+        })
+        .filter((tx) => tx.amount !== 0)
+
+      console.log("[v0] Total rows apos filtro:", rows.length)
+      setTransactions(rows)
+      setSelectAll(true)
+      setStep("review")
+    } catch (err) {
+      console.error("[v0] ERRO processFile:", err)
+      alert("Erro ao processar arquivo: " + (err instanceof Error ? err.message : String(err)))
+    }
   }
 
   function readFileAsText(file: File, encoding = "UTF-8"): Promise<string> {
@@ -510,8 +524,8 @@ export default function ImportarTransacoesPage() {
   // Drag events
   function handleDragOver(e: DragEvent) { e.preventDefault(); setIsDragging(true) }
   function handleDragLeave() { setIsDragging(false) }
-  function handleDrop(e: DragEvent) { e.preventDefault(); setIsDragging(false); const file = e.dataTransfer.files?.[0]; if (file) processFile(file) }
-  function handleFileChange(e: ChangeEvent<HTMLInputElement>) { const file = e.target.files?.[0]; if (file) processFile(file) }
+  function handleDrop(e: DragEvent) { e.preventDefault(); setIsDragging(false); const file = e.dataTransfer.files?.[0]; if (file) processFile(file).catch(err => console.error("[v0] handleDrop error:", err)) }
+  function handleFileChange(e: ChangeEvent<HTMLInputElement>) { const file = e.target.files?.[0]; if (file) processFile(file).catch(err => console.error("[v0] handleFileChange error:", err)) }
 
   // Update transaction fields
   function updateTx(idx: number, field: keyof TransactionRow, value: string | boolean | number | null) {
