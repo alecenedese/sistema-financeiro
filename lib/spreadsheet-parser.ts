@@ -82,29 +82,35 @@ function splitLine(line: string, sep: string): string[] {
  */
 function mapHeaders(headers: string[]): Record<string, number> {
   const map: Record<string, number> = {}
-  const normalize = (s: string) =>
-    s
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .replace(/[^a-z0-9\s]/g, "")
-      .trim()
+  const normalize = (s: string) => {
+    try {
+      return s
+        .toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")   // remove diacríticos
+        .replace(/[^a-z0-9\s]/g, " ")       // substitui especiais por espaço
+        .replace(/\s+/g, " ")
+        .trim()
+    } catch {
+      return s.toLowerCase().replace(/[^a-z0-9]/g, " ").trim()
+    }
+  }
 
   const aliases: Record<string, string[]> = {
     data:           ["data", "date", "dt"],
-    descricao:      ["descricao", "descri", "historico", "memo", "description"],
+    descricao:      ["descr", "histor", "memo", "description"],
     valor:          ["valor", "value", "amount", "vlr"],
     fornecedor:     ["fornecedor", "cliente", "supplier", "vendor", "favorecido"],
-    formaPagamento: ["forma pagto", "forma pag", "f pgto", "fpgto", "pagamento", "payment"],
-    planoConta:     ["plano de conta", "plano conta", "categoria", "category", "conta"],
-    banco:          ["banco", "bank", "conta bancaria"],
+    formaPagamento: ["forma", "pgto", "pagamento", "payment", "f pgto"],
+    planoConta:     ["plano", "categoria", "category", "conta"],
+    banco:          ["banco", "bank"],
   }
 
   headers.forEach((h, i) => {
     const norm = normalize(h)
     for (const [key, values] of Object.entries(aliases)) {
-      if (values.some((v) => norm.includes(v))) {
-        if (!(key in map)) map[key] = i
+      if (!(key in map) && values.some((v) => norm.includes(v))) {
+        map[key] = i
       }
     }
   })
@@ -115,14 +121,23 @@ function mapHeaders(headers: string[]): Record<string, number> {
  * Parseia texto CSV/TSV e retorna lista de transações
  */
 export function parseCSV(content: string): ParsedSpreadsheetTransaction[] {
-  // Remove BOM se presente
-  const text = content.replace(/^\uFEFF/, "").replace(/\r/g, "")
+  // Remove BOM UTF-8, UTF-16, e caracteres de controle no início
+  const text = content
+    .replace(/^\uFEFF/, "")   // BOM UTF-8
+    .replace(/^\uFFFE/, "")   // BOM UTF-16 LE
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+
   const lines = text.split("\n").filter((l) => l.trim())
   if (lines.length < 2) return []
 
   const sep = detectSeparator(lines[0])
   const headers = splitLine(lines[0], sep)
   const idx = mapHeaders(headers)
+
+  console.log("[v0] CSV separator:", sep)
+  console.log("[v0] CSV headers raw:", headers)
+  console.log("[v0] CSV header map:", idx)
 
   const results: ParsedSpreadsheetTransaction[] = []
 

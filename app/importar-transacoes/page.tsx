@@ -454,9 +454,18 @@ export default function ImportarTransacoesPage() {
       parsedOFX = parseOFX(content)
       txs = parsedOFX.transactions
     } else if (ext === "csv") {
-      const content = await readFileAsText(file)
+      // Tenta UTF-8 primeiro, depois ISO-8859-1 se nao encontrar separador
+      let content = await readFileAsText(file, "UTF-8")
+      console.log("[v0] CSV UTF-8 primeiras 200 chars:", JSON.stringify(content.slice(0, 200)))
+      // Se UTF-8 nao decodificou o cabecalho corretamente (sem ;), tenta ISO
+      if (!content.includes(";") && !content.includes(",")) {
+        content = await readFileAsText(file, "ISO-8859-1")
+        console.log("[v0] CSV ISO-8859-1 primeiras 200 chars:", JSON.stringify(content.slice(0, 200)))
+      }
       const rows = parseCSV(content)
+      console.log("[v0] CSV rows parsed:", rows.length, rows[0])
       txs = spreadsheetToOFXTransactions(rows)
+      console.log("[v0] CSV txs:", txs.length, txs[0])
     } else {
       const buffer = await file.arrayBuffer()
       const rows = await parseXLSX(buffer)
@@ -489,12 +498,12 @@ export default function ImportarTransacoesPage() {
     setStep("review")
   }
 
-  function readFileAsText(file: File): Promise<string> {
+  function readFileAsText(file: File, encoding = "UTF-8"): Promise<string> {
     return new Promise((resolve, reject) => {
       const reader = new FileReader()
       reader.onload = (e) => resolve(e.target?.result as string)
       reader.onerror = reject
-      reader.readAsText(file, "ISO-8859-1")
+      reader.readAsText(file, encoding)
     })
   }
 
