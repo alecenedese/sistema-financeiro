@@ -130,7 +130,7 @@ function ContasBancariasPage() {
   function openNew() { setEditingConta(null); setForm(emptyForm); setDialogOpen(true) }
   function openEdit(c: ContaBancaria) {
     setEditingConta(c)
-    setForm({ nome: c.nome, tipo: c.tipo, agencia: c.agencia, conta: c.conta, saldo: c.saldo.toString() })
+    setForm({ nome: c.nome, tipo: c.tipo, agencia: c.agencia, conta: c.conta, saldo: (c.saldo_inicial ?? c.saldo).toString() })
     setDialogOpen(true)
   }
 
@@ -141,10 +141,14 @@ function ContasBancariasPage() {
       const supabase = createClient()
       const tid = getActiveTenantId()
       if (editingConta) {
-        // Edição: NUNCA altera saldo nem saldo_inicial — só dados cadastrais
+        // Edição: permite alterar saldo_inicial — o trigger fn_recalcular_saldo recalcula saldo automaticamente
+        const novoSaldoInicial = parseFloat(form.saldo) || 0
         await supabase.from("contas_bancarias").update({
           nome: form.nome, tipo: form.tipo, agencia: form.agencia, conta: form.conta,
+          saldo_inicial: novoSaldoInicial,
         }).eq("id", editingConta.id)
+        // Recalcula saldo com base no novo saldo_inicial
+        await supabase.rpc("fn_recalcular_saldo", { p_conta_id: editingConta.id })
       } else {
         // Novo: saldo_inicial e saldo recebem o valor informado (base para o trigger)
         const saldoInicial = parseFloat(form.saldo) || 0
@@ -417,9 +421,11 @@ function ContasBancariasPage() {
               <div className="space-y-2"><Label htmlFor="agencia">Agencia</Label><Input id="agencia" placeholder="0001" value={form.agencia} onChange={(e) => setForm({ ...form, agencia: e.target.value })} /></div>
               <div className="space-y-2"><Label htmlFor="conta_num">Conta</Label><Input id="conta_num" placeholder="12345-6" value={form.conta} onChange={(e) => setForm({ ...form, conta: e.target.value })} /></div>
             </div>
-            {!editingConta && (
-              <div className="space-y-2"><Label htmlFor="saldo">Saldo Inicial</Label><Input id="saldo" type="number" step="0.01" placeholder="0.00" value={form.saldo} onChange={(e) => setForm({ ...form, saldo: e.target.value })} /></div>
-            )}
+            <div className="space-y-2">
+              <Label htmlFor="saldo">{editingConta ? "Saldo Inicial" : "Saldo Inicial"}</Label>
+              <Input id="saldo" type="number" step="0.01" placeholder="0.00" value={form.saldo} onChange={(e) => setForm({ ...form, saldo: e.target.value })} />
+              {editingConta && <p className="text-xs text-muted-foreground">O saldo atual sera recalculado automaticamente com base neste valor mais os lancamentos.</p>}
+            </div>
           </div>
           <DialogFooter>
             <button type="button" onClick={() => setDialogOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">Cancelar</button>
