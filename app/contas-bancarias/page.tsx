@@ -23,7 +23,7 @@ import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
 import useSWR from "swr"
 
 interface ContaBancaria {
-  id: number; nome: string; tipo: string; saldo: number; cor: string
+  id: number; nome: string; tipo: string; saldo: number; saldo_inicial: number; cor: string
   agencia: string; conta: string; entradas: number; saidas: number
 }
 interface Extrato {
@@ -54,7 +54,7 @@ async function fetchContas(tid: number | null): Promise<ContaBancaria[]> {
   const { data, error } = await q
   if (error) throw error
   return (data || []).map((r) => ({
-    id: r.id, nome: r.nome, tipo: r.tipo, saldo: Number(r.saldo), cor: r.cor,
+    id: r.id, nome: r.nome, tipo: r.tipo, saldo: Number(r.saldo), saldo_inicial: Number(r.saldo_inicial ?? 0), cor: r.cor,
     agencia: r.agencia, conta: r.conta, entradas: Number(r.entradas), saidas: Number(r.saidas),
   }))
 }
@@ -141,14 +141,25 @@ function ContasBancariasPage() {
       const supabase = createClient()
       const tid = getActiveTenantId()
       if (editingConta) {
-        // Edição: permite alterar saldo_inicial — o trigger fn_recalcular_saldo recalcula saldo automaticamente
         const novoSaldoInicial = parseFloat(form.saldo) || 0
+        const supabase2 = createClient()
+
+        // 1. Atualiza dados cadastrais + saldo_inicial
         await supabase.from("contas_bancarias").update({
           nome: form.nome, tipo: form.tipo, agencia: form.agencia, conta: form.conta,
           saldo_inicial: novoSaldoInicial,
         }).eq("id", editingConta.id)
-        // Recalcula saldo com base no novo saldo_inicial
-        await supabase.rpc("fn_recalcular_saldo", { p_conta_id: editingConta.id })
+
+        // 2. Recalcula saldo = saldo_inicial + entradas_recebidas - saidas_pagas
+        const [{ data: entradas }, { data: saidas }] = await Promise.all([
+          supabase2.from("contas_receber").select("valor").eq("conta_bancaria_id", editingConta.id).eq("status", "recebido"),
+          supabase2.from("contas_pagar").select("valor").eq("conta_bancaria_id", editingConta.id).eq("status", "pago"),
+        ])
+        const totalEntradas = (entradas || []).reduce((a, r) => a + Number(r.valor), 0)
+        const totalSaidas   = (saidas   || []).reduce((a, r) => a + Number(r.valor), 0)
+        const novoSaldo = novoSaldoInicial + totalEntradas - totalSaidas
+
+        await supabase.from("contas_bancarias").update({ saldo: novoSaldo }).eq("id", editingConta.id)
       } else {
         // Novo: saldo_inicial e saldo recebem o valor informado (base para o trigger)
         const saldoInicial = parseFloat(form.saldo) || 0

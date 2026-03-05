@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
 import { parseOFX, type OFXTransaction, type OFXData } from "@/lib/ofx-parser"
+import { parseCSV, parseXLSX, spreadsheetToOFXTransactions } from "@/lib/spreadsheet-parser"
 import { useTenant } from "@/hooks/use-tenant"
 import { handleCurrencyInput, parseBRL, formatBRL } from "@/lib/currency-input"
 import {
@@ -431,27 +432,50 @@ export default function ImportarTransacoesPage() {
     [allRules, despesasFixas, fornecedoresLista]
   )
 
-  // Process file
-  function processFile(file: File) {
-    if (!file.name.toLowerCase().endsWith(".ofx")) {
-      alert("Por favor selecione um arquivo .OFX")
-      return
-    }
-    if (!selectedContaBancariaId) {
-      alert("Selecione uma conta bancaria antes de importar o extrato.")
-      return
-    }
-    setFileName(file.name)
-    const reader = new FileReader()
-    reader.onload = (e) => {
-      const content = e.target?.result as string
-      const parsed = parseOFX(content)
-      setOfxData(parsed)
+  // Process file — suporta OFX, CSV e XLS/XLSX
+  async function processFile(file: File) {
+    try {
+      const ext = file.name.toLowerCase().split(".").pop() ?? ""
+      const supported = ["ofx", "csv", "xls", "xlsx"]
+      if (!supported.includes(ext)) {
+        alert("Por favor selecione um arquivo .OFX, .CSV, .XLS ou .XLSX")
+        return
+      }
+      if (!selectedContaBancariaId) {
+        alert("Selecione uma conta bancaria antes de importar o extrato.")
+        return
+      }
+      setFileName(file.name)
 
-      const rows: TransactionRow[] = parsed.transactions
-        .filter((tx) => tx.amount !== 0)
+      let txs: OFXTransaction[] = []
+      let parsedOFX: OFXData | null = null
+
+      if (ext === "ofx") {
+        const content = await readFileAsText(file, "ISO-8859-1")
+        parsedOFX = parseOFX(content)
+        txs = parsedOFX.transactions
+      } else if (ext === "csv") {
+        let content = await readFileAsText(file, "UTF-8")
+        const firstLine = content.split("\n")[0] || ""
+        if (!firstLine.includes(";") && !firstLine.includes(",")) {
+          content = await readFileAsText(file, "ISO-8859-1")
+        }
+        const parsed = parseCSV(content)
+        txs = spreadsheetToOFXTransactions(parsed)
+      } else {
+        const buffer = await file.arrayBuffer()
+        const rows = await parseXLSX(buffer)
+        txs = spreadsheetToOFXTransactions(rows)
+      }
+
+      setOfxData(parsedOFX)
+      const rows: TransactionRow[] = txs
         .map((tx) => {
           const matched = applyRules(tx)
+          const extra = tx as OFXTransaction & { _fornecedor?: string }
+          const clienteFornecedor = matched.clienteFornecedor !== extractClienteFornecedor(tx.memo) && matched.clienteFornecedor
+            ? matched.clienteFornecedor
+            : extra._fornecedor || extractClienteFornecedor(tx.memo)
           return {
             ...tx,
             categoria_id: matched.categoria_id,
@@ -459,22 +483,44 @@ export default function ImportarTransacoesPage() {
             subcategoria_filho_id: matched.subcategoria_filho_id,
             fornecedor_id: matched.fornecedor_id,
             cliente_id: matched.cliente_id,
-            clienteFornecedor: matched.clienteFornecedor,
-            selected: true,
+            clienteFornecedor,
+            selected: tx.amount !== 0,
           }
         })
+        .filter((tx) => tx.amount !== 0)
+
       setTransactions(rows)
       setSelectAll(true)
       setStep("review")
+    } catch (err) {
+      console.error("[v0] ERRO processFile:", err)
+      alert("Erro ao processar arquivo: " + (err instanceof Error ? err.message : String(err)))
     }
-    reader.readAsText(file, "ISO-8859-1")
+  }
+
+  function readFileAsText(file: File, encoding = "UTF-8"): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader()
+      reader.onload = (e) => resolve(e.target?.result as string)
+      reader.onerror = reject
+      reader.readAsText(file, encoding)
+    })
   }
 
   // Drag events
   function handleDragOver(e: DragEvent) { e.preventDefault(); setIsDragging(true) }
   function handleDragLeave() { setIsDragging(false) }
-  function handleDrop(e: DragEvent) { e.preventDefault(); setIsDragging(false); const file = e.dataTransfer.files?.[0]; if (file) processFile(file) }
-  function handleFileChange(e: ChangeEvent<HTMLInputElement>) { const file = e.target.files?.[0]; if (file) processFile(file) }
+  function handleDrop(e: DragEvent) {
+    e.preventDefault()
+    setIsDragging(false)
+    const file = e.dataTransfer.files?.[0]
+    if (file) processFile(file).catch(() => {})
+  }
+  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (file) processFile(file).catch(() => {})
+    if (e.target) e.target.value = ""
+  }
 
   // Update transaction fields
   function updateTx(idx: number, field: keyof TransactionRow, value: string | boolean | number | null) {
@@ -871,27 +917,32 @@ export default function ImportarTransacoesPage() {
                     <Upload className="h-7 w-7 text-primary" />
                   </div>
                   <p className="mt-4 text-base font-semibold text-card-foreground">
-                    Arraste seu arquivo .OFX aqui ou clique para selecionar
+                    Arraste seu arquivo aqui ou clique para selecionar
                   </p>
                   <p className="mt-1 text-sm text-muted-foreground">
-                    O arquivo sera analisado e as transacoes serao automaticamente classificadas com base nas regras salvas
+                    Formatos suportados: <span className="font-medium text-foreground">.OFX</span>, <span className="font-medium text-foreground">.CSV</span>, <span className="font-medium text-foreground">.XLS</span>, <span className="font-medium text-foreground">.XLSX</span>
+                  </p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Colunas esperadas no CSV/Excel: DATA · DESCRICAO · VALOR · FORNECEDOR · F. PGTO · PLANO DE CONTA · BANCO
                   </p>
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".ofx"
+                    accept=".ofx,.csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     onChange={handleFileChange}
                     className="hidden"
                     id="ofx-upload"
                   />
-                  <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    className="mt-4 flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
-                  >
-                    <Upload className="h-4 w-4" />
-                    Selecionar Arquivo .OFX
-                  </button>
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => fileInputRef.current?.click()}
+                      className="flex items-center gap-2 rounded-lg bg-primary px-5 py-2.5 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+                    >
+                      <Upload className="h-4 w-4" />
+                      Selecionar Arquivo
+                    </button>
+                  </div>
                 </div>
 
                 {/* Rules Management */}
@@ -949,7 +1000,7 @@ export default function ImportarTransacoesPage() {
             )}
 
             {/* ==================== STEP: REVIEW ==================== */}
-            {step === "review" && ofxData && (
+            {step === "review" && transactions.length > 0 && (
               <>
                 {/* File info bar */}
                 <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
@@ -958,9 +1009,9 @@ export default function ImportarTransacoesPage() {
                       <Landmark className="h-6 w-6 text-primary" />
                     </div>
                     <div>
-                      <p className="font-semibold text-card-foreground">{ofxData.bankName}</p>
+                      <p className="font-semibold text-card-foreground">{ofxData?.bankName ?? "Importacao CSV/Excel"}</p>
                       <p className="text-xs text-muted-foreground">
-                        Conta: {ofxData.accountId} &middot; Periodo: {ofxData.startDate} a {ofxData.endDate} &middot; {fileName}
+                        {ofxData ? <>Conta: {ofxData.accountId} &middot; Periodo: {ofxData.startDate} a {ofxData.endDate} &middot;</> : null} {fileName}
                       </p>
                     </div>
                   </div>
