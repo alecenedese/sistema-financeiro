@@ -148,10 +148,6 @@ export function parseCSV(content: string): ParsedSpreadsheetTransaction[] {
   const headers = splitLine(lines[0], sep)
   const idx = mapHeaders(headers)
 
-  console.log("[v0] CSV separator:", sep)
-  console.log("[v0] CSV headers raw:", headers)
-  console.log("[v0] CSV header map:", idx)
-
   const results: ParsedSpreadsheetTransaction[] = []
 
   for (let i = 1; i < lines.length; i++) {

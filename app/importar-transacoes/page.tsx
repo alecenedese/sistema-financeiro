@@ -446,7 +446,6 @@ export default function ImportarTransacoesPage() {
         return
       }
       setFileName(file.name)
-      console.log("[v0] processFile: ext =", ext, "file =", file.name)
 
       let txs: OFXTransaction[] = []
       let parsedOFX: OFXData | null = null
@@ -456,30 +455,18 @@ export default function ImportarTransacoesPage() {
         parsedOFX = parseOFX(content)
         txs = parsedOFX.transactions
       } else if (ext === "csv") {
-        // Lê como UTF-8 primeiro
         let content = await readFileAsText(file, "UTF-8")
         const firstLine = content.split("\n")[0] || ""
-        console.log("[v0] CSV first line (UTF-8):", JSON.stringify(firstLine))
-
-        // Se não encontrou separador, tenta ISO-8859-1
         if (!firstLine.includes(";") && !firstLine.includes(",")) {
           content = await readFileAsText(file, "ISO-8859-1")
-          const firstLineISO = content.split("\n")[0] || ""
-          console.log("[v0] CSV first line (ISO):", JSON.stringify(firstLineISO))
         }
-
         const parsed = parseCSV(content)
-        console.log("[v0] parseCSV retornou", parsed.length, "linhas. Primeira:", JSON.stringify(parsed[0]))
         txs = spreadsheetToOFXTransactions(parsed)
-        console.log("[v0] spreadsheetToOFXTransactions retornou", txs.length, "txs. Primeira:", JSON.stringify(txs[0]))
       } else {
         const buffer = await file.arrayBuffer()
         const rows = await parseXLSX(buffer)
         txs = spreadsheetToOFXTransactions(rows)
       }
-
-      console.log("[v0] Total txs antes do filtro:", txs.length)
-      console.log("[v0] Amounts:", txs.map(t => t.amount))
 
       setOfxData(parsedOFX)
       const rows: TransactionRow[] = txs
@@ -502,7 +489,6 @@ export default function ImportarTransacoesPage() {
         })
         .filter((tx) => tx.amount !== 0)
 
-      console.log("[v0] Total rows apos filtro:", rows.length)
       setTransactions(rows)
       setSelectAll(true)
       setStep("review")
@@ -528,16 +514,11 @@ export default function ImportarTransacoesPage() {
     e.preventDefault()
     setIsDragging(false)
     const file = e.dataTransfer.files?.[0]
-    console.log("[v0] handleDrop file:", file?.name, file?.type, file?.size)
-    if (file) processFile(file).catch(err => console.error("[v0] handleDrop error:", err))
+    if (file) processFile(file).catch(() => {})
   }
   function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
-    console.log("[v0] handleFileChange file:", file?.name, file?.type, file?.size)
-    if (file) {
-      processFile(file).catch(err => console.error("[v0] handleFileChange error:", err))
-    }
-    // Reset input para permitir reselecionar o mesmo arquivo
+    if (file) processFile(file).catch(() => {})
     if (e.target) e.target.value = ""
   }
 
@@ -1019,7 +1000,7 @@ export default function ImportarTransacoesPage() {
             )}
 
             {/* ==================== STEP: REVIEW ==================== */}
-            {step === "review" && ofxData && (
+            {step === "review" && transactions.length > 0 && (
               <>
                 {/* File info bar */}
                 <div className="flex flex-col gap-4 rounded-xl border border-border bg-card p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between">
@@ -1028,9 +1009,9 @@ export default function ImportarTransacoesPage() {
                       <Landmark className="h-6 w-6 text-primary" />
                     </div>
                     <div>
-                      <p className="font-semibold text-card-foreground">{ofxData.bankName}</p>
+                      <p className="font-semibold text-card-foreground">{ofxData?.bankName ?? "Importacao CSV/Excel"}</p>
                       <p className="text-xs text-muted-foreground">
-                        Conta: {ofxData.accountId} &middot; Periodo: {ofxData.startDate} a {ofxData.endDate} &middot; {fileName}
+                        {ofxData ? <>Conta: {ofxData.accountId} &middot; Periodo: {ofxData.startDate} a {ofxData.endDate} &middot;</> : null} {fileName}
                       </p>
                     </div>
                   </div>
