@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation"
 import { Suspense } from "react"
 import useSWR from "swr"
 import { createClient } from "@/lib/supabase/client"
-import { getActiveTenantId } from "@/hooks/use-tenant"
+import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
 import { FileDown, Plus, TrendingDown, Clock, CheckCircle2, AlertTriangle, Pencil, Trash2, Loader2, Search, X, ChevronDown } from "lucide-react"
@@ -49,9 +49,8 @@ interface ContaPagar {
 const FORMAS_PAGAMENTO = ["PIX", "Boleto", "Cartao de Credito", "Cartao de Debito", "Debito em Conta", "Transferencia", "Dinheiro", "Cheque"]
 const selectClass = "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 
-async function fetchContas(): Promise<ContaPagar[]> {
+async function fetchContas([, tid]: [string, number | null]): Promise<ContaPagar[]> {
   const supabase = createClient()
-  const tid = getActiveTenantId()
   let q = supabase
     .from("contas_pagar")
     .select(`*, categorias(nome), subcategorias(nome), subcategorias_filhos(nome), contas_bancarias(nome, tipo), fornecedores(nome)`)
@@ -80,9 +79,8 @@ async function fetchContas(): Promise<ContaPagar[]> {
   }))
 }
 
-async function fetchHierarchy() {
+async function fetchHierarchy(tid: number | null) {
   const supabase = createClient()
-  const tid = getActiveTenantId()
   let catQ = supabase.from("categorias").select("id, nome, tipo").order("nome")
   let subQ = supabase.from("subcategorias").select("id, nome, categoria_id").order("nome")
   let filhoQ = supabase.from("subcategorias_filhos").select("id, nome, subcategoria_id").order("nome")
@@ -95,18 +93,16 @@ async function fetchHierarchy() {
   }
 }
 
-async function fetchContasBancarias(): Promise<ContaBancariaRow[]> {
+async function fetchContasBancarias(tid: number | null): Promise<ContaBancariaRow[]> {
   const supabase = createClient()
-  const tid = getActiveTenantId()
   let q = supabase.from("contas_bancarias").select("id, nome, tipo").order("nome")
   if (tid) q = q.eq("tenant_id", tid)
   const { data } = await q
   return data || []
 }
 
-async function fetchFornecedores(): Promise<FornecedorRow[]> {
+async function fetchFornecedores(tid: number | null): Promise<FornecedorRow[]> {
   const supabase = createClient()
-  const tid = getActiveTenantId()
   let q = supabase.from("fornecedores").select("id, nome").order("nome")
   if (tid) q = q.eq("tenant_id", tid)
   const { data } = await q
@@ -134,10 +130,12 @@ export default function ContasAPagarPageWrapper() {
 }
 
 function ContasAPagarPage() {
-  const { data: contas = [], error, isLoading, mutate } = useSWR("contas_pagar", fetchContas)
-  const { data: hierarchy } = useSWR("hierarchy_pagar", fetchHierarchy)
-  const { data: contasBancarias = [] } = useSWR("contas_bancarias_pagar", fetchContasBancarias)
-  const { data: fornecedoresLista = [] } = useSWR("fornecedores_pagar", fetchFornecedores)
+  const { tenant } = useTenant()
+  const tid = tenant?.id ?? null
+  const { data: contas = [], error, isLoading, mutate } = useSWR(["contas_pagar", tid], fetchContas)
+  const { data: hierarchy } = useSWR(["hierarchy_pagar", tid], ([, t]) => fetchHierarchy(t))
+  const { data: contasBancarias = [] } = useSWR(["contas_bancarias_pagar", tid], ([, t]) => fetchContasBancarias(t))
+  const { data: fornecedoresLista = [] } = useSWR(["fornecedores_pagar", tid], ([, t]) => fetchFornecedores(t))
 
   const [filterStatus, setFilterStatus] = useState<"Todos" | "Pendente" | "Pago" | "Vencido">("Todos")
   const [filterCategoriaId, setFilterCategoriaId] = useState("")

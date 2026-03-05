@@ -72,6 +72,8 @@ function mesRange(offset = 0) {
 
 type TidKey = [string, number | null]
 
+type TidKey = [string, number | null]
+
 // ─── fetchers ─────────────────────────────────────────────────────────────────
 
 async function fetchSummary([, tid]: TidKey): Promise<SummaryData> {
@@ -273,9 +275,15 @@ async function fetchCategoryCharts([, tid]: TidKey): Promise<{ expenses: Categor
 }
 
 // ─── hooks públicos ───────────────────────────────────────────────────────────
+// key sempre é array: ["nome", tid | null]
+// tid=null → admin sem filtro (vê tudo)
+// tid=número → cliente, filtra por tenant_id
 
 export function useSummary() {
   const { tenant } = useTenant()
+  // undefined = aguardando hidratação (não dispara fetch ainda)
+  // null = admin sem tenant selecionado (dispara sem filtro)
+  // number = cliente ou admin com tenant ativo (filtra)
   const key: TidKey = ["dashboard-summary", tenant?.id ?? null]
   return useSWR(key, fetchSummary, { revalidateOnFocus: false })
 }

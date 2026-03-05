@@ -6,6 +6,7 @@ import { createClient } from "@/lib/supabase/client"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
 import { parseOFX, type OFXTransaction, type OFXData } from "@/lib/ofx-parser"
+import { useTenant } from "@/hooks/use-tenant"
 import { handleCurrencyInput, parseBRL, formatBRL } from "@/lib/currency-input"
 import {
   Upload,
@@ -114,21 +115,27 @@ async function fetchHierarchy(): Promise<CategoriaHierarchy> {
   }
 }
 
-async function fetchContasBancarias(): Promise<ContaBancariaRow[]> {
+async function fetchContasBancarias(tid: number | null): Promise<ContaBancariaRow[]> {
   const supabase = createClient()
-  const { data } = await supabase.from("contas_bancarias").select("id, nome, tipo").order("nome")
+  let q = supabase.from("contas_bancarias").select("id, nome, tipo").order("nome")
+  if (tid) q = q.eq("tenant_id", tid)
+  const { data } = await q
   return data || []
 }
 
-async function fetchFornecedores(): Promise<FornecedorRow[]> {
+async function fetchFornecedores(tid: number | null): Promise<FornecedorRow[]> {
   const supabase = createClient()
-  const { data } = await supabase.from("fornecedores").select("id, nome").order("nome")
+  let q = supabase.from("fornecedores").select("id, nome").order("nome")
+  if (tid) q = q.eq("tenant_id", tid)
+  const { data } = await q
   return data || []
 }
 
-async function fetchClientes(): Promise<ClienteRow[]> {
+async function fetchClientes(tid: number | null): Promise<ClienteRow[]> {
   const supabase = createClient()
-  const { data } = await supabase.from("clientes").select("id, nome").order("nome")
+  let q = supabase.from("clientes").select("id, nome").order("nome")
+  if (tid) q = q.eq("tenant_id", tid)
+  const { data } = await q
   return data || []
 }
 
@@ -308,11 +315,14 @@ function InlineDropdown({
 // ---------- Main Page ----------
 
 export default function ImportarTransacoesPage() {
+  const { tenant } = useTenant()
+  const tid = tenant?.id ?? null
+
   const { data: hierarchy } = useSWR("hierarchy_importar", fetchHierarchy)
   const { data: rules, mutate: mutateRules } = useSWR("mapping_rules", fetchRules)
-  const { data: contasBancarias = [] } = useSWR("contas_bancarias_importar", fetchContasBancarias)
-  const { data: fornecedoresLista = [] } = useSWR("fornecedores_importar", fetchFornecedores)
-  const { data: clientesLista = [] } = useSWR("clientes_importar", fetchClientes)
+  const { data: contasBancarias = [] } = useSWR(["contas_bancarias_importar", tid], ([, t]) => fetchContasBancarias(t))
+  const { data: fornecedoresLista = [] } = useSWR(["fornecedores_importar", tid], ([, t]) => fetchFornecedores(t))
+  const { data: clientesLista = [] } = useSWR(["clientes_importar", tid], ([, t]) => fetchClientes(t))
   const { data: despesasFixas = [] } = useSWR("despesas_fixas_importar", fetchDespesasFixas)
 
   // State
@@ -638,7 +648,6 @@ export default function ImportarTransacoesPage() {
         const despesasToInsert = []
         for (const tx of despesas) {
           if (tx.isSplit && tx.splits && tx.splits.length > 0) {
-            // Insert each split as separate record
             for (const split of tx.splits) {
               despesasToInsert.push({
                 descricao: tx.memo,
@@ -651,10 +660,10 @@ export default function ImportarTransacoesPage() {
                 subcategoria_id: split.subcategoria_id,
                 subcategoria_filho_id: split.subcategoria_filho_id,
                 conta_bancaria_id: contaBancariaId,
+                tenant_id: tid,
               })
             }
           } else {
-            // Single record
             const fornNome = tx.fornecedor_id ? fornecedoresLista.find((f) => f.id === tx.fornecedor_id)?.nome || tx.clienteFornecedor : tx.clienteFornecedor
             despesasToInsert.push({
               descricao: tx.memo,
@@ -667,6 +676,7 @@ export default function ImportarTransacoesPage() {
               subcategoria_id: tx.subcategoria_id,
               subcategoria_filho_id: tx.subcategoria_filho_id,
               conta_bancaria_id: contaBancariaId,
+              tenant_id: tid,
             })
           }
         }
@@ -677,7 +687,6 @@ export default function ImportarTransacoesPage() {
         const receitasToInsert = []
         for (const tx of receitas) {
           if (tx.isSplit && tx.splits && tx.splits.length > 0) {
-            // Insert each split as separate record
             for (const split of tx.splits) {
               receitasToInsert.push({
                 descricao: tx.memo,
@@ -690,10 +699,10 @@ export default function ImportarTransacoesPage() {
                 subcategoria_id: split.subcategoria_id,
                 subcategoria_filho_id: split.subcategoria_filho_id,
                 conta_bancaria_id: contaBancariaId,
+                tenant_id: tid,
               })
             }
           } else {
-            // Single record
             const cliNome = tx.cliente_id ? clientesLista.find((c) => c.id === tx.cliente_id)?.nome || tx.clienteFornecedor : tx.clienteFornecedor
             receitasToInsert.push({
               descricao: tx.memo,
@@ -706,32 +715,14 @@ export default function ImportarTransacoesPage() {
               subcategoria_id: tx.subcategoria_id,
               subcategoria_filho_id: tx.subcategoria_filho_id,
               conta_bancaria_id: contaBancariaId,
+              tenant_id: tid,
             })
           }
         }
         await supabase.from("contas_receber").insert(receitasToInsert)
       }
 
-      // Update bank account balance based on selected transactions net
-      if (contaBancariaId) {
-        const netAmount = selected.reduce((acc, tx) => {
-          if (tx.isSplit && tx.splits && tx.splits.length > 0) {
-            return acc + tx.splits.reduce((a, s) => a + (tx.amount < 0 ? -Math.abs(s.valor) : s.valor), 0)
-          }
-          return acc + tx.amount
-        }, 0)
-        if (netAmount !== 0) {
-          const { data: contaData } = await supabase
-            .from("contas_bancarias")
-            .select("saldo")
-            .eq("id", contaBancariaId)
-            .single()
-          if (contaData) {
-            const novoSaldo = Number(contaData.saldo) + netAmount
-            await supabase.from("contas_bancarias").update({ saldo: novoSaldo }).eq("id", contaBancariaId)
-          }
-        }
-      }
+      // O trigger fn_recalcular_saldo no banco cuida do saldo automaticamente
 
       const newEntry: ImportHistoryItem = {
         id: Date.now(),
