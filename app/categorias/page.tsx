@@ -11,7 +11,7 @@ import {
   Tags, Plus, ChevronDown, ChevronRight, Pencil, Trash2, Loader2,
   X, ArrowRight, ReceiptText, CalendarClock, FileText, BarChart3
 } from "lucide-react"
-import { getActiveTenantId } from "@/hooks/use-tenant"
+import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
@@ -76,9 +76,8 @@ function formatDate(s: string) {
   return `${d}/${m}/${y}`
 }
 
-async function fetchCategorias(): Promise<Categoria[]> {
+async function fetchCategorias([, tid]: [string, number | null]): Promise<Categoria[]> {
   const supabase = createClient()
-  const tid = getActiveTenantId()
   let catQ = supabase.from("categorias").select("*").order("nome")
   let subQ = supabase.from("subcategorias").select("*").order("nome")
   let filhoQ = supabase.from("subcategorias_filhos").select("*").order("nome")
@@ -121,7 +120,9 @@ export default function CategoriasPageWrapper() {
 }
 
 function CategoriasPage() {
-  const { data: categorias, error, isLoading, mutate } = useSWR("categorias", fetchCategorias)
+  const { tenant } = useTenant()
+  const tid = tenant?.id ?? null
+  const { data: categorias, error, isLoading, mutate } = useSWR(["categorias", tid], fetchCategorias)
 
   const [expandedCats, setExpandedCats] = useState<Set<number>>(new Set())
   const [expandedSubs, setExpandedSubs] = useState<Set<number>>(new Set())

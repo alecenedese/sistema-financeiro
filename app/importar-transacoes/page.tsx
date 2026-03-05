@@ -101,13 +101,13 @@ interface CategoriaHierarchy {
   filhos: SubcategoriaFilhoRow[]
 }
 
-async function fetchHierarchy(): Promise<CategoriaHierarchy> {
+async function fetchHierarchy(tid: number | null): Promise<CategoriaHierarchy> {
   const supabase = createClient()
-  const [catRes, subRes, filhoRes] = await Promise.all([
-    supabase.from("categorias").select("id, nome, tipo").order("nome"),
-    supabase.from("subcategorias").select("id, nome, categoria_id").order("nome"),
-    supabase.from("subcategorias_filhos").select("id, nome, subcategoria_id").order("nome"),
-  ])
+  let catQ = supabase.from("categorias").select("id, nome, tipo").order("nome")
+  let subQ = supabase.from("subcategorias").select("id, nome, categoria_id").order("nome")
+  let filhoQ = supabase.from("subcategorias_filhos").select("id, nome, subcategoria_id").order("nome")
+  if (tid) { catQ = catQ.eq("tenant_id", tid); subQ = subQ.eq("tenant_id", tid); filhoQ = filhoQ.eq("tenant_id", tid) }
+  const [catRes, subRes, filhoRes] = await Promise.all([catQ, subQ, filhoQ])
   return {
     categorias: catRes.data || [],
     subcategorias: subRes.data || [],
@@ -318,7 +318,7 @@ export default function ImportarTransacoesPage() {
   const { tenant } = useTenant()
   const tid = tenant?.id ?? null
 
-  const { data: hierarchy } = useSWR("hierarchy_importar", fetchHierarchy)
+  const { data: hierarchy } = useSWR(["hierarchy_importar", tid], ([, t]) => fetchHierarchy(t as number | null))
   const { data: rules, mutate: mutateRules } = useSWR("mapping_rules", fetchRules)
   const { data: contasBancarias = [] } = useSWR(["contas_bancarias_importar", tid], ([, t]) => fetchContasBancarias(t))
   const { data: fornecedoresLista = [] } = useSWR(["fornecedores_importar", tid], ([, t]) => fetchFornecedores(t))

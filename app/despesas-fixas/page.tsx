@@ -99,9 +99,8 @@ async function fetchDespesas(): Promise<DespesaFixa[]> {
   }))
 }
 
-async function fetchHierarchy() {
+async function fetchHierarchy([, tid]: [string, number | null]) {
   const supabase = createClient()
-  const tid = getActiveTenantId()
   let catQ = supabase.from("categorias").select("id, nome, tipo").order("nome")
   let subQ = supabase.from("subcategorias").select("id, nome, categoria_id").order("nome")
   let filhoQ = supabase.from("subcategorias_filhos").select("id, nome, subcategoria_id").order("nome")
