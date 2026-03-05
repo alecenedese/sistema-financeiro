@@ -5,7 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation"
 import { Suspense } from "react"
 import useSWR from "swr"
 import { createClient } from "@/lib/supabase/client"
-import { getActiveTenantId } from "@/hooks/use-tenant"
+import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
 import {
@@ -72,18 +72,16 @@ function getPeriodoDates(periodo: PeriodoFiltro, custom: { from: string; to: str
   return { from: custom.from, to: custom.to }
 }
 
-async function fetchContas(): Promise<ContaBancaria[]> {
+async function fetchContas(tid: number | null): Promise<ContaBancaria[]> {
   const supabase = createClient()
-  const tid = getActiveTenantId()
   let q = supabase.from("contas_bancarias").select("id,nome").order("nome")
   if (tid) q = q.eq("tenant_id", tid)
   const { data } = await q
   return (data || []).map((r) => ({ id: r.id, nome: r.nome }))
 }
 
-async function fetchCategorias(): Promise<Categoria[]> {
+async function fetchCategorias([, tid]: [string, number | null]): Promise<Categoria[]> {
   const supabase = createClient()
-  const tid = getActiveTenantId()
   let q = supabase.from("categorias").select("id,nome,tipo,cor").order("nome")
   if (tid) q = q.eq("tenant_id", tid)
   const { data } = await q
@@ -148,6 +146,8 @@ export default function TransacoesPageWrapper() {
 }
 
 function TransacoesPage() {
+  const { tenant } = useTenant()
+  const tid = tenant?.id ?? null
   const [periodo, setPeriodo] = useState<PeriodoFiltro>("mes")
   const [customFrom, setCustomFrom] = useState("")
   const [customTo, setCustomTo] = useState("")
@@ -170,8 +170,8 @@ function TransacoesPage() {
   const swrKey = ["lancamentos", JSON.stringify(filters)]
 
   const { data: lancamentos = [], isLoading, mutate } = useSWR(swrKey, () => fetchLancamentos(filters), { keepPreviousData: true })
-  const { data: contas = [] } = useSWR("contas_select", fetchContas)
-  const { data: categorias = [] } = useSWR("categorias_select", fetchCategorias)
+  const { data: contas = [] } = useSWR(["contas_select", tid], ([, t]) => fetchContas(t as number | null))
+  const { data: categorias = [] } = useSWR(["categorias_select", tid], fetchCategorias)
 
   useEffect(() => {
     if (searchParams.get("novo") === "1") {
