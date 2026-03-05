@@ -176,11 +176,9 @@ export function AppSidebar() {
       </nav>
 
       {/* Active Tenant — só renderiza após montagem para evitar hydration mismatch */}
-      {mounted && tenant && (
-        <div className={cn(
-          "border-t border-[hsl(216,45%,22%)] px-3 py-3 transition-all duration-300",
-        )}>
-          {expanded ? (
+      <div suppressHydrationWarning className={cn("border-t border-[hsl(216,45%,22%)]", mounted && tenant ? "px-3 py-3" : "")}>
+        {mounted && tenant && (
+          expanded ? (
             <div className="flex items-center gap-2 rounded-lg border border-[hsl(142,71%,40%)]/30 bg-[hsl(142,71%,40%)]/10 px-3 py-2">
               <div className="flex-1 min-w-0">
                 <p className="truncate text-xs font-semibold text-[hsl(142,71%,55%)]">{tenant.nome}</p>
@@ -202,9 +200,9 @@ export function AppSidebar() {
             >
               <Shield className="h-4 w-4 text-[hsl(142,71%,55%)]" />
             </div>
-          )}
-        </div>
-      )}
+          )
+        )}
+      </div>
 
       {/* Expand/Collapse indicator */}
       <div className="flex items-center justify-center border-t border-[hsl(216,45%,22%)] py-3">

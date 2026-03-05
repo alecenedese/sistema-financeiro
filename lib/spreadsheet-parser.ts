@@ -8,20 +8,27 @@
 
 import type { OFXTransaction } from "./ofx-parser"
 
-// Limpa e converte "R$ 862,10" ou "-R$ 862,10" ou "- R$ 862,10" para número
+// Limpa e converte "R$ 862,10" ou "-R$ 862,10" ou "-R$862,10" para número
 function parseCurrencyBR(raw: string): number {
   if (!raw) return 0
-  // Extrai sinal antes de tudo
   const trimmed = raw.trim()
+  // Extrai sinal
   const negative = trimmed.startsWith("-")
-  const cleaned = trimmed
-    .replace(/^[-+]\s*/, "")    // remove sinal e espaço após
-    .replace(/R\$\s*/gi, "")    // remove R$
-    .replace(/\s/g, "")         // remove todos os espaços restantes
-    .replace(/\./g, "")         // separador de milhar
-    .replace(",", ".")          // decimal
-    .trim()
-  const num = parseFloat(cleaned)
+  // Remove tudo que não seja dígito, vírgula ou ponto
+  const digitsOnly = trimmed.replace(/[^0-9,\.]/g, "")
+  if (!digitsOnly) return 0
+  // Converte formato BR: 1.234,56 → 1234.56
+  let normalized: string
+  const lastComma = digitsOnly.lastIndexOf(",")
+  const lastDot = digitsOnly.lastIndexOf(".")
+  if (lastComma > lastDot) {
+    // vírgula é decimal: remove pontos (milhar) e troca vírgula por ponto
+    normalized = digitsOnly.replace(/\./g, "").replace(",", ".")
+  } else {
+    // ponto é decimal (já está correto) ou não tem decimal
+    normalized = digitsOnly.replace(/,/g, "")
+  }
+  const num = parseFloat(normalized)
   if (isNaN(num)) return 0
   return negative ? -num : num
 }
@@ -234,7 +241,7 @@ export async function parseXLSX(buffer: ArrayBuffer): Promise<ParsedSpreadsheetT
  */
 export function spreadsheetToOFXTransactions(rows: ParsedSpreadsheetTransaction[]): OFXTransaction[] {
   return rows
-    .filter((r) => r.valor !== 0)
+    .filter((r) => r.data || r.descricao)  // filtra só linhas completamente vazias
     .map((r, i) => {
       const dateRaw = toDateRaw(r.data)
       const amount = r.valor // já tem sinal
