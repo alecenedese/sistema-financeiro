@@ -469,19 +469,49 @@ export default function ImportarTransacoesPage() {
       }
 
       setOfxData(parsedOFX)
+
+      // Mapas para match por nome (case-insensitive, trim)
+      const fornecedorMap = new Map<string, number>()
+      for (const f of fornecedoresLista) {
+        fornecedorMap.set(f.nome.trim().toLowerCase(), f.id)
+      }
+      const categoriaMap = new Map<string, number>()
+      for (const c of (hierarchy?.categorias || [])) {
+        categoriaMap.set(c.nome.trim().toLowerCase(), c.id)
+      }
+
       const rows: TransactionRow[] = txs
         .map((tx) => {
+          const extra = tx as OFXTransaction & { _fornecedor?: string; _planoConta?: string }
+
+          // 1. Match fornecedor pelo nome do CSV
+          let fornecedor_id: number | null = null
+          let clienteFornecedor = ""
+          if (extra._fornecedor) {
+            const key = extra._fornecedor.trim().toLowerCase()
+            fornecedor_id = fornecedorMap.get(key) ?? null
+            clienteFornecedor = extra._fornecedor.trim()
+          }
+
+          // 2. Match categoria pelo plano de conta do CSV
+          let categoria_id: number | null = null
+          if (extra._planoConta) {
+            const key = extra._planoConta.trim().toLowerCase()
+            categoria_id = categoriaMap.get(key) ?? null
+          }
+
+          // 3. Aplica regras automaticas como fallback (se CSV nao mapeou)
           const matched = applyRules(tx)
-          const extra = tx as OFXTransaction & { _fornecedor?: string }
-          const clienteFornecedor = matched.clienteFornecedor !== extractClienteFornecedor(tx.memo) && matched.clienteFornecedor
-            ? matched.clienteFornecedor
-            : extra._fornecedor || extractClienteFornecedor(tx.memo)
+          if (!fornecedor_id && matched.fornecedor_id) fornecedor_id = matched.fornecedor_id
+          if (!clienteFornecedor) clienteFornecedor = matched.clienteFornecedor || extractClienteFornecedor(tx.memo)
+          if (!categoria_id && matched.categoria_id) categoria_id = matched.categoria_id
+
           return {
             ...tx,
-            categoria_id: matched.categoria_id,
+            categoria_id,
             subcategoria_id: matched.subcategoria_id,
             subcategoria_filho_id: matched.subcategoria_filho_id,
-            fornecedor_id: matched.fornecedor_id,
+            fornecedor_id,
             cliente_id: matched.cliente_id,
             clienteFornecedor,
             selected: tx.amount !== 0,
