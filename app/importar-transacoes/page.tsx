@@ -524,8 +524,22 @@ export default function ImportarTransacoesPage() {
   // Drag events
   function handleDragOver(e: DragEvent) { e.preventDefault(); setIsDragging(true) }
   function handleDragLeave() { setIsDragging(false) }
-  function handleDrop(e: DragEvent) { e.preventDefault(); setIsDragging(false); const file = e.dataTransfer.files?.[0]; if (file) processFile(file).catch(err => console.error("[v0] handleDrop error:", err)) }
-  function handleFileChange(e: ChangeEvent<HTMLInputElement>) { const file = e.target.files?.[0]; if (file) processFile(file).catch(err => console.error("[v0] handleFileChange error:", err)) }
+  function handleDrop(e: DragEvent) {
+    e.preventDefault()
+    setIsDragging(false)
+    const file = e.dataTransfer.files?.[0]
+    console.log("[v0] handleDrop file:", file?.name, file?.type, file?.size)
+    if (file) processFile(file).catch(err => console.error("[v0] handleDrop error:", err))
+  }
+  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    console.log("[v0] handleFileChange file:", file?.name, file?.type, file?.size)
+    if (file) {
+      processFile(file).catch(err => console.error("[v0] handleFileChange error:", err))
+    }
+    // Reset input para permitir reselecionar o mesmo arquivo
+    if (e.target) e.target.value = ""
+  }
 
   // Update transaction fields
   function updateTx(idx: number, field: keyof TransactionRow, value: string | boolean | number | null) {
@@ -933,7 +947,7 @@ export default function ImportarTransacoesPage() {
                   <input
                     ref={fileInputRef}
                     type="file"
-                    accept=".ofx,.csv,.xls,.xlsx"
+                    accept=".ofx,.csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                     onChange={handleFileChange}
                     className="hidden"
                     id="ofx-upload"
