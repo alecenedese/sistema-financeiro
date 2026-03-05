@@ -471,13 +471,26 @@ export default function ImportarTransacoesPage() {
       setOfxData(parsedOFX)
 
       // Mapas para match por nome (case-insensitive, trim)
-      const fornecedorMap = new Map<string, number>()
-      for (const f of fornecedoresLista) {
-        fornecedorMap.set(f.nome.trim().toLowerCase(), f.id)
-      }
-      const categoriaMap = new Map<string, number>()
-      for (const c of (hierarchy?.categorias || [])) {
-        categoriaMap.set(c.nome.trim().toLowerCase(), c.id)
+      // Match exato + parcial (contains) para maior flexibilidade
+      const fornecedorList = fornecedoresLista.map(f => ({ id: f.id, key: f.nome.trim().toLowerCase() }))
+      const categoriaList = (hierarchy?.categorias || []).map(c => ({ id: c.id, key: c.nome.trim().toLowerCase() }))
+
+      console.log("[v0] fornecedores carregados:", fornecedorList.length, fornecedorList.map(f => f.key))
+      console.log("[v0] categorias carregadas:", categoriaList.length, categoriaList.map(c => c.key))
+
+      function matchByName(list: { id: number; key: string }[], search: string): number | null {
+        const s = search.trim().toLowerCase()
+        if (!s) return null
+        // 1. Match exato
+        const exact = list.find(item => item.key === s)
+        if (exact) return exact.id
+        // 2. Search contem item (ex: "Compra de Prod Sicredi" contem "Compra de Prod")
+        const partial = list.find(item => s.includes(item.key))
+        if (partial) return partial.id
+        // 3. Item contem search
+        const reverse = list.find(item => item.key.includes(s))
+        if (reverse) return reverse.id
+        return null
       }
 
       const rows: TransactionRow[] = txs
@@ -488,16 +501,16 @@ export default function ImportarTransacoesPage() {
           let fornecedor_id: number | null = null
           let clienteFornecedor = ""
           if (extra._fornecedor) {
-            const key = extra._fornecedor.trim().toLowerCase()
-            fornecedor_id = fornecedorMap.get(key) ?? null
+            fornecedor_id = matchByName(fornecedorList, extra._fornecedor)
             clienteFornecedor = extra._fornecedor.trim()
+            console.log("[v0] match fornecedor:", extra._fornecedor, "->", fornecedor_id)
           }
 
           // 2. Match categoria pelo plano de conta do CSV
           let categoria_id: number | null = null
           if (extra._planoConta) {
-            const key = extra._planoConta.trim().toLowerCase()
-            categoria_id = categoriaMap.get(key) ?? null
+            categoria_id = matchByName(categoriaList, extra._planoConta)
+            console.log("[v0] match categoria:", extra._planoConta, "->", categoria_id)
           }
 
           // 3. Aplica regras automaticas como fallback (se CSV nao mapeou)
