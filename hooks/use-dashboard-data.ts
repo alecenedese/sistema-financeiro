@@ -311,27 +311,3 @@ export function useCategoryCharts() {
   const key: TidKey = ["dashboard-category-charts", tenant?.id ?? null]
   return useSWR(key, fetchCategoryCharts, { revalidateOnFocus: false })
 }
-
-export function useRecentTx() {
-  const { tenant } = useTenant()
-  const key: TidKey = ["dashboard-recent-tx", tenant?.id ?? null]
-  return useSWR(key, fetchRecentTx, { revalidateOnFocus: false })
-}
-
-export function useAccounts() {
-  const { tenant } = useTenant()
-  const key: TidKey = ["dashboard-accounts", tenant?.id ?? null]
-  return useSWR(key, fetchAccounts, { revalidateOnFocus: false })
-}
-
-export function useMonthly() {
-  const { tenant } = useTenant()
-  const key: TidKey = ["dashboard-monthly", tenant?.id ?? null]
-  return useSWR(key, fetchMonthly, { revalidateOnFocus: false })
-}
-
-export function useCategoryCharts() {
-  const { tenant } = useTenant()
-  const key: TidKey = ["dashboard-category-charts", tenant?.id ?? null]
-  return useSWR(key, fetchCategoryCharts, { revalidateOnFocus: false })
-}
