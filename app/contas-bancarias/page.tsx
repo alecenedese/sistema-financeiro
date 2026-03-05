@@ -141,13 +141,18 @@ function ContasBancariasPage() {
       const supabase = createClient()
       const tid = getActiveTenantId()
       if (editingConta) {
+        // Edição: NUNCA altera saldo nem saldo_inicial — só dados cadastrais
         await supabase.from("contas_bancarias").update({
-          nome: form.nome, tipo: form.tipo, agencia: form.agencia, conta: form.conta, saldo: parseFloat(form.saldo) || 0,
+          nome: form.nome, tipo: form.tipo, agencia: form.agencia, conta: form.conta,
         }).eq("id", editingConta.id)
       } else {
+        // Novo: saldo_inicial e saldo recebem o valor informado (base para o trigger)
+        const saldoInicial = parseFloat(form.saldo) || 0
         const payload: Record<string, unknown> = {
           nome: form.nome, tipo: form.tipo, agencia: form.agencia, conta: form.conta,
-          saldo: parseFloat(form.saldo) || 0, cor: COLORS[contas.length % COLORS.length],
+          saldo_inicial: saldoInicial,
+          saldo: saldoInicial,
+          cor: COLORS[contas.length % COLORS.length],
         }
         if (tid) payload.tenant_id = tid
         await supabase.from("contas_bancarias").insert(payload)
@@ -412,7 +417,9 @@ function ContasBancariasPage() {
               <div className="space-y-2"><Label htmlFor="agencia">Agencia</Label><Input id="agencia" placeholder="0001" value={form.agencia} onChange={(e) => setForm({ ...form, agencia: e.target.value })} /></div>
               <div className="space-y-2"><Label htmlFor="conta_num">Conta</Label><Input id="conta_num" placeholder="12345-6" value={form.conta} onChange={(e) => setForm({ ...form, conta: e.target.value })} /></div>
             </div>
-            <div className="space-y-2"><Label htmlFor="saldo">Saldo Inicial</Label><Input id="saldo" type="number" step="0.01" placeholder="0.00" value={form.saldo} onChange={(e) => setForm({ ...form, saldo: e.target.value })} /></div>
+            {!editingConta && (
+              <div className="space-y-2"><Label htmlFor="saldo">Saldo Inicial</Label><Input id="saldo" type="number" step="0.01" placeholder="0.00" value={form.saldo} onChange={(e) => setForm({ ...form, saldo: e.target.value })} /></div>
+            )}
           </div>
           <DialogFooter>
             <button type="button" onClick={() => setDialogOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">Cancelar</button>
