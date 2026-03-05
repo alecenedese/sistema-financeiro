@@ -62,7 +62,7 @@ export function AppSidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const menuRef = useRef<HTMLDivElement>(null)
-  const { tenant, clearTenant } = useTenant()
+  const { tenant, clearTenant, mounted } = useTenant()
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -175,8 +175,8 @@ export function AppSidebar() {
         })}
       </nav>
 
-      {/* Active Tenant */}
-      {tenant && (
+      {/* Active Tenant — só renderiza após montagem para evitar hydration mismatch */}
+      {mounted && tenant && (
         <div className={cn(
           "border-t border-[hsl(216,45%,22%)] px-3 py-3 transition-all duration-300",
         )}>

@@ -8,16 +8,22 @@
 
 import type { OFXTransaction } from "./ofx-parser"
 
-// Limpa e converte "R$ 862,10" ou "-R$ 862,10" para número
+// Limpa e converte "R$ 862,10" ou "-R$ 862,10" ou "- R$ 862,10" para número
 function parseCurrencyBR(raw: string): number {
   if (!raw) return 0
-  const cleaned = raw
-    .replace(/R\$\s*/gi, "")
-    .replace(/\./g, "")       // separador de milhar
-    .replace(",", ".")        // decimal
+  // Extrai sinal antes de tudo
+  const trimmed = raw.trim()
+  const negative = trimmed.startsWith("-")
+  const cleaned = trimmed
+    .replace(/^[-+]\s*/, "")    // remove sinal e espaço após
+    .replace(/R\$\s*/gi, "")    // remove R$
+    .replace(/\s/g, "")         // remove todos os espaços restantes
+    .replace(/\./g, "")         // separador de milhar
+    .replace(",", ".")          // decimal
     .trim()
   const num = parseFloat(cleaned)
-  return isNaN(num) ? 0 : num
+  if (isNaN(num)) return 0
+  return negative ? -num : num
 }
 
 // Converte DD/MM/YYYY → YYYYMMDD (formato dateRaw do OFX)

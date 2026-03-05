@@ -21,13 +21,18 @@ function readFromStorage(): ActiveTenant | null {
   }
 }
 
-// Hook reativo — usa o valor do localStorage como estado inicial
-// para evitar flash de "sem tenant" na hidratação
+// Hook reativo — inicia com null (SSR safe) e hidrata no useEffect
+// para evitar hydration mismatch
 export function useTenant() {
-  const [tenant, setTenantState] = useState<ActiveTenant | null>(() => readFromStorage())
+  const [tenant, setTenantState] = useState<ActiveTenant | null>(null)
+  const [mounted, setMounted] = useState(false)
 
-  // Sincroniza entre abas
   useEffect(() => {
+    // Hidrata do localStorage apenas no cliente após montagem
+    setTenantState(readFromStorage())
+    setMounted(true)
+
+    // Sincroniza entre abas
     function onStorage(e: StorageEvent) {
       if (e.key === STORAGE_KEY) {
         setTenantState(e.newValue ? JSON.parse(e.newValue) : null)
@@ -47,7 +52,7 @@ export function useTenant() {
 
   const clearTenant = useCallback(() => setTenant(null), [setTenant])
 
-  return { tenant, setTenant, clearTenant }
+  return { tenant, setTenant, clearTenant, mounted }
 }
 
 // Versão síncrona para fetchers fora de componentes
