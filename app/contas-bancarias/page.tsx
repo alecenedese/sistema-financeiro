@@ -19,7 +19,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createClient } from "@/lib/supabase/client"
-import { getActiveTenantId } from "@/hooks/use-tenant"
+import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
 import useSWR from "swr"
 
 interface ContaBancaria {
@@ -47,9 +47,8 @@ function formatDate(s: string) {
   return `${d}/${m}/${y}`
 }
 
-async function fetchContas(): Promise<ContaBancaria[]> {
+async function fetchContas(tid: number | null): Promise<ContaBancaria[]> {
   const supabase = createClient()
-  const tid = getActiveTenantId()
   let q = supabase.from("contas_bancarias").select("*").order("id")
   if (tid) q = q.eq("tenant_id", tid)
   const { data, error } = await q
@@ -92,7 +91,9 @@ export default function ContasBancariasPageWrapper() {
 }
 
 function ContasBancariasPage() {
-  const { data: contas = [], mutate, isLoading } = useSWR("contas_bancarias", fetchContas)
+  const { tenant } = useTenant()
+  const tid = tenant?.id ?? null
+  const { data: contas = [], mutate, isLoading } = useSWR(["contas_bancarias", tid], ([, t]) => fetchContas(t))
   const [showBalances, setShowBalances] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingConta, setEditingConta] = useState<ContaBancaria | null>(null)

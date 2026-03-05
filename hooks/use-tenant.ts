@@ -10,29 +10,39 @@ export interface ActiveTenant {
   cnpj: string
 }
 
-export function useTenant() {
-  const [tenant, setTenantState] = useState<ActiveTenant | null>(null)
+// Leitura síncrona — segura apenas no browser
+function readFromStorage(): ActiveTenant | null {
+  if (typeof window === "undefined") return null
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    return saved ? (JSON.parse(saved) as ActiveTenant) : null
+  } catch {
+    return null
+  }
+}
 
+// Hook reativo — usa o valor do localStorage como estado inicial
+// para evitar flash de "sem tenant" na hidratação
+export function useTenant() {
+  const [tenant, setTenantState] = useState<ActiveTenant | null>(() => readFromStorage())
+
+  // Sincroniza entre abas
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(STORAGE_KEY)
-      if (saved) setTenantState(JSON.parse(saved))
-    } catch {
-      // ignore
+    function onStorage(e: StorageEvent) {
+      if (e.key === STORAGE_KEY) {
+        setTenantState(e.newValue ? JSON.parse(e.newValue) : null)
+      }
     }
+    window.addEventListener("storage", onStorage)
+    return () => window.removeEventListener("storage", onStorage)
   }, [])
 
   const setTenant = useCallback((t: ActiveTenant | null) => {
     setTenantState(t)
     try {
-      if (t) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(t))
-      } else {
-        localStorage.removeItem(STORAGE_KEY)
-      }
-    } catch {
-      // ignore
-    }
+      if (t) localStorage.setItem(STORAGE_KEY, JSON.stringify(t))
+      else localStorage.removeItem(STORAGE_KEY)
+    } catch { /* ignore */ }
   }, [])
 
   const clearTenant = useCallback(() => setTenant(null), [setTenant])
@@ -40,16 +50,7 @@ export function useTenant() {
   return { tenant, setTenant, clearTenant }
 }
 
+// Versão síncrona para fetchers fora de componentes
 export function getActiveTenantId(): number | null {
-  if (typeof window === "undefined") return null
-  try {
-    const saved = localStorage.getItem(STORAGE_KEY)
-    if (saved) {
-      const parsed = JSON.parse(saved) as ActiveTenant
-      return parsed.id
-    }
-  } catch {
-    // ignore
-  }
-  return null
+  return readFromStorage()?.id ?? null
 }
