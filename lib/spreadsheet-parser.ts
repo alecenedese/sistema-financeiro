@@ -60,6 +60,44 @@ export interface ParsedSpreadsheetTransaction {
 }
 
 /**
+ * Parseia CSV e retorna dicionarios crus (chave = header normalizado)
+ * Util para importar categorias, fornecedores, etc.
+ */
+export function parseCSVRaw(content: string): Record<string, string>[] {
+  const text = content
+    .replace(/^\uFEFF/, "")
+    .replace(/^\uFFFE/, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+
+  const lines = text.split("\n").filter(l => l.trim())
+  if (lines.length < 2) return []
+
+  const sep = detectSeparator(lines[0])
+  const headers = splitLine(lines[0], sep)
+
+  const normalize = (s: string) => {
+    try {
+      return s.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim()
+    } catch { return s.toLowerCase().replace(/[^a-z0-9]/g, " ").trim() }
+  }
+
+  const normalizedHeaders = headers.map(h => normalize(h))
+  const results: Record<string, string>[] = []
+
+  for (let i = 1; i < lines.length; i++) {
+    const cols = splitLine(lines[i], sep)
+    if (cols.every(c => !c)) continue
+    const row: Record<string, string> = {}
+    normalizedHeaders.forEach((h, idx) => {
+      row[h] = cols[idx] ?? ""
+    })
+    results.push(row)
+  }
+  return results
+}
+
+/**
  * Detecta separador do CSV (ponto-e-vírgula ou vírgula)
  */
 function detectSeparator(line: string): string {

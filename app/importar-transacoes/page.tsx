@@ -475,9 +475,6 @@ export default function ImportarTransacoesPage() {
       const fornecedorList = fornecedoresLista.map(f => ({ id: f.id, key: f.nome.trim().toLowerCase() }))
       const categoriaList = (hierarchy?.categorias || []).map(c => ({ id: c.id, key: c.nome.trim().toLowerCase() }))
 
-      console.log("[v0] fornecedores carregados:", fornecedorList.length, fornecedorList.map(f => f.key))
-      console.log("[v0] categorias carregadas:", categoriaList.length, categoriaList.map(c => c.key))
-
       function matchByName(list: { id: number; key: string }[], search: string): number | null {
         const s = search.trim().toLowerCase()
         if (!s) return null
@@ -503,14 +500,12 @@ export default function ImportarTransacoesPage() {
           if (extra._fornecedor) {
             fornecedor_id = matchByName(fornecedorList, extra._fornecedor)
             clienteFornecedor = extra._fornecedor.trim()
-            console.log("[v0] match fornecedor:", extra._fornecedor, "->", fornecedor_id)
           }
 
           // 2. Match categoria pelo plano de conta do CSV
           let categoria_id: number | null = null
           if (extra._planoConta) {
             categoria_id = matchByName(categoriaList, extra._planoConta)
-            console.log("[v0] match categoria:", extra._planoConta, "->", categoria_id)
           }
 
           // 3. Aplica regras automaticas como fallback (se CSV nao mapeou)

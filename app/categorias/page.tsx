@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { Suspense } from "react"
 import useSWR from "swr"
@@ -9,8 +9,10 @@ import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
 import {
   Tags, Plus, ChevronDown, ChevronRight, Pencil, Trash2, Loader2,
-  X, ArrowRight, ReceiptText, CalendarClock, FileText, BarChart3
+  X, ArrowRight, ReceiptText, CalendarClock, FileText, BarChart3,
+  Upload, FileSpreadsheet, Check, AlertCircle
 } from "lucide-react"
+import { parseCSVRaw } from "@/lib/spreadsheet-parser"
 import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -150,6 +152,13 @@ function CategoriasPage() {
   const [drillItems, setDrillItems] = useState<DrillItem[]>([])
   const [drillLoading, setDrillLoading] = useState(false)
 
+  // Import state
+  const [importOpen, setImportOpen] = useState(false)
+  const [importRows, setImportRows] = useState<{ nome: string; tipo: string; subcategoria: string; subFilho: string; grupoDre: string }[]>([])
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState<{ created: number; skipped: number } | null>(null)
+  const importFileRef = React.useRef<HTMLInputElement>(null)
+
   const searchParams = useSearchParams()
   const router = useRouter()
 
@@ -269,6 +278,184 @@ function CategoriasPage() {
     } finally { setSaving(false) }
   }
 
+  // ---- Import CSV/XLS ----
+  function readFile(file: File, encoding: string): Promise<string> {
+    return new Promise((res, rej) => {
+      const r = new FileReader()
+      r.onload = e => res(e.target?.result as string)
+      r.onerror = rej
+      r.readAsText(file, encoding)
+    })
+  }
+
+  async function handleImportFile(file: File) {
+    try {
+      const ext = file.name.toLowerCase().split(".").pop() ?? ""
+      let rawRows: Record<string, string>[] = []
+
+      if (ext === "csv") {
+        let content = await readFile(file, "UTF-8")
+        const firstLine = content.split("\n")[0] || ""
+        if (!firstLine.includes(";") && !firstLine.includes(",")) {
+          content = await readFile(file, "ISO-8859-1")
+        }
+        rawRows = parseCSVRaw(content)
+      } else if (ext === "xls" || ext === "xlsx") {
+        const buffer = await file.arrayBuffer()
+        const XLSX = await import("xlsx")
+        const wb = XLSX.read(buffer, { type: "array" })
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        const jsonRows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" })
+        // Normaliza headers do XLS
+        rawRows = jsonRows.map(r => {
+          const norm: Record<string, string> = {}
+          for (const [key, val] of Object.entries(r)) {
+            const k = key.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim()
+            norm[k] = String(val)
+          }
+          return norm
+        })
+      } else {
+        alert("Formato nao suportado. Use CSV, XLS ou XLSX.")
+        return
+      }
+
+      // Mapeia colunas para campos esperados
+      const mapped = rawRows.map(row => mapImportRow(row)).filter(r => r.nome.trim())
+      setImportRows(mapped)
+      setImportResult(null)
+    } catch (err) {
+      alert("Erro ao ler arquivo: " + (err instanceof Error ? err.message : String(err)))
+    }
+  }
+
+  function mapImportRow(row: Record<string, string>): { nome: string; tipo: string; subcategoria: string; subFilho: string; grupoDre: string } {
+    let nome = "", tipo = "", subcategoria = "", subFilho = "", grupoDre = ""
+    for (const [key, val] of Object.entries(row)) {
+      const k = key.trim()
+      // Nome / Categoria (primeira coluna que contem "nome" ou "categ" mas NAO "sub")
+      if ((k.includes("nome") || (k.includes("categ") && !k.includes("sub"))) && !nome) nome = val.trim()
+      // Tipo
+      else if (k.includes("tipo") && !tipo) tipo = val.trim()
+      // Sub-filho (precisa vir antes de "sub" generico)
+      else if ((k.includes("sub") && k.includes("filho")) || k === "sub filho") subFilho = val.trim()
+      // Subcategoria
+      else if (k.includes("sub") && !subFilho) subcategoria = val.trim()
+      // Grupo DRE
+      else if (k.includes("grupo") || k.includes("dre")) grupoDre = val.trim()
+    }
+    return { nome, tipo: normalizeTipo(tipo), subcategoria, subFilho, grupoDre }
+  }
+
+  function normalizeTipo(t: string): string {
+    const lower = t.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()
+    if (lower.includes("receita") || lower.includes("entrada")) return "Receita"
+    if (lower.includes("despesa") || lower.includes("saida") || lower.includes("custo")) return "Despesa"
+    return "Despesa"
+  }
+
+  function matchGrupoDre(nome: string): string {
+    if (!nome) return ""
+    const lower = nome.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()
+    const match = GRUPOS_DRE.find(g => {
+      const gl = g.label.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()
+      return gl.includes(lower) || lower.includes(gl) || gl === lower
+    })
+    return match?.value || ""
+  }
+
+  async function handleImportSave() {
+    if (importRows.length === 0) return
+    setImporting(true)
+    try {
+      const supabase = createClient()
+      const tenantId = getActiveTenantId()
+      let created = 0
+      let skipped = 0
+
+      // Agrupar por categoria
+      const catMap = new Map<string, typeof importRows>()
+      for (const row of importRows) {
+        const key = row.nome.toLowerCase()
+        if (!catMap.has(key)) catMap.set(key, [])
+        catMap.get(key)!.push(row)
+      }
+
+      for (const [, rows] of catMap) {
+        const first = rows[0]
+        // Verifica se categoria ja existe
+        let catQuery = supabase.from("categorias").select("id").eq("nome", first.nome).limit(1)
+        if (tenantId) catQuery = catQuery.eq("tenant_id", tenantId)
+        const { data: existingCats } = await catQuery
+        let catId: number
+
+        if (existingCats && existingCats.length > 0) {
+          catId = existingCats[0].id
+          skipped++
+        } else {
+          const grupoDre = matchGrupoDre(first.grupoDre) || null
+          const payload: Record<string, unknown> = {
+            nome: first.nome,
+            tipo: first.tipo || "Despesa",
+            grupo_dre: grupoDre,
+            cor: COLORS[(categorias?.length || 0 + created) % COLORS.length],
+          }
+          if (tenantId) payload.tenant_id = tenantId
+          const { data: newCat } = await supabase.from("categorias").insert(payload).select("id").single()
+          if (!newCat) continue
+          catId = newCat.id
+          created++
+        }
+
+        // Processar subcategorias
+        const subMap = new Map<string, typeof rows>()
+        for (const row of rows) {
+          if (!row.subcategoria) continue
+          const key = row.subcategoria.toLowerCase()
+          if (!subMap.has(key)) subMap.set(key, [])
+          subMap.get(key)!.push(row)
+        }
+
+        for (const [, subRows] of subMap) {
+          const subFirst = subRows[0]
+          let subQuery = supabase.from("subcategorias").select("id").eq("nome", subFirst.subcategoria).eq("categoria_id", catId).limit(1)
+          if (tenantId) subQuery = subQuery.eq("tenant_id", tenantId)
+          const { data: existingSubs } = await subQuery
+          let subId: number
+
+          if (existingSubs && existingSubs.length > 0) {
+            subId = existingSubs[0].id
+          } else {
+            const subPayload: Record<string, unknown> = { nome: subFirst.subcategoria, categoria_id: catId }
+            if (tenantId) subPayload.tenant_id = tenantId
+            const { data: newSub } = await supabase.from("subcategorias").insert(subPayload).select("id").single()
+            if (!newSub) continue
+            subId = newSub.id
+          }
+
+          // Processar sub-filhos
+          for (const row of subRows) {
+            if (!row.subFilho) continue
+            let filhoQuery = supabase.from("subcategorias_filhos").select("id").eq("nome", row.subFilho).eq("subcategoria_id", subId).limit(1)
+            if (tenantId) filhoQuery = filhoQuery.eq("tenant_id", tenantId)
+            const { data: existingFilhos } = await filhoQuery
+            if (existingFilhos && existingFilhos.length > 0) continue
+            const filhoPayload: Record<string, unknown> = { nome: row.subFilho, subcategoria_id: subId }
+            if (tenantId) filhoPayload.tenant_id = tenantId
+            await supabase.from("subcategorias_filhos").insert(filhoPayload)
+          }
+        }
+      }
+
+      setImportResult({ created, skipped })
+      await mutate()
+    } catch (err) {
+      alert("Erro ao importar: " + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setImporting(false)
+    }
+  }
+
   async function handleDelete() {
     if (!deleteConfirm) return
     setSaving(true)
@@ -320,6 +507,9 @@ function CategoriasPage() {
                       </button>
                     ))}
                   </div>
+                  <button type="button" onClick={() => { setImportRows([]); setImportResult(null); setImportOpen(true) }} className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
+                    <Upload className="h-4 w-4" />Importar
+                  </button>
                   <button type="button" onClick={openNewCategoria} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
                     <Plus className="h-4 w-4" />Nova Categoria
                   </button>
@@ -577,6 +767,120 @@ function CategoriasPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Import Dialog */}
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5" />
+              Importar Categorias
+            </DialogTitle>
+            <DialogDescription>
+              Importe categorias a partir de um arquivo CSV ou Excel. Colunas esperadas: Nome, Tipo, Subcategoria, Sub-filho, Grupo do DRE.
+            </DialogDescription>
+          </DialogHeader>
+
+          {importRows.length === 0 && !importResult && (
+            <div className="space-y-4 py-4">
+              <div
+                onClick={() => importFileRef.current?.click()}
+                className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border p-10 text-center transition-colors hover:border-primary/50 hover:bg-primary/5"
+              >
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+                  <Upload className="h-7 w-7 text-primary" />
+                </div>
+                <p className="mt-4 text-sm font-semibold text-foreground">Clique para selecionar o arquivo</p>
+                <p className="mt-1 text-xs text-muted-foreground">Formatos: .CSV, .XLS, .XLSX</p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Colunas: <span className="font-medium text-foreground">Nome</span> | <span className="font-medium text-foreground">Tipo</span> | <span className="font-medium text-foreground">Subcategoria</span> | <span className="font-medium text-foreground">Sub-filho</span> | <span className="font-medium text-foreground">Grupo do DRE</span>
+                </p>
+              </div>
+              <input
+                ref={importFileRef}
+                type="file"
+                accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (file) handleImportFile(file)
+                  if (e.target) e.target.value = ""
+                }}
+              />
+            </div>
+          )}
+
+          {importRows.length > 0 && !importResult && (
+            <div className="space-y-4 py-2">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-foreground">
+                  {importRows.length} {importRows.length === 1 ? "linha encontrada" : "linhas encontradas"}
+                </p>
+                <button type="button" onClick={() => setImportRows([])} className="text-xs text-muted-foreground hover:text-foreground">
+                  Trocar arquivo
+                </button>
+              </div>
+              <div className="max-h-64 overflow-auto rounded-lg border border-border">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-muted">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Nome</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Tipo</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Subcategoria</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Sub-filho</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Grupo DRE</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importRows.map((row, i) => (
+                      <tr key={i} className="border-t border-border">
+                        <td className="px-3 py-2 font-medium text-foreground">{row.nome}</td>
+                        <td className="px-3 py-2">
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${row.tipo === "Receita" ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)]" : "bg-[hsl(0,72%,51%)]/10 text-[hsl(0,72%,51%)]"}`}>
+                            {row.tipo}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 text-muted-foreground">{row.subcategoria || "-"}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{row.subFilho || "-"}</td>
+                        <td className="px-3 py-2 text-muted-foreground text-xs">{row.grupoDre || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <DialogFooter>
+                <button type="button" onClick={() => setImportOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">
+                  Cancelar
+                </button>
+                <button type="button" onClick={handleImportSave} disabled={importing} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+                  {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  {importing ? "Importando..." : `Importar ${importRows.length} categorias`}
+                </button>
+              </DialogFooter>
+            </div>
+          )}
+
+          {importResult && (
+            <div className="space-y-4 py-4">
+              <div className="flex flex-col items-center gap-3 rounded-xl bg-[hsl(142,71%,40%)]/5 p-6">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[hsl(142,71%,40%)]/10">
+                  <Check className="h-6 w-6 text-[hsl(142,71%,40%)]" />
+                </div>
+                <p className="text-sm font-semibold text-foreground">Importacao concluida</p>
+                <div className="flex gap-4 text-sm text-muted-foreground">
+                  <span><strong className="text-foreground">{importResult.created}</strong> categorias criadas</span>
+                  {importResult.skipped > 0 && <span><strong className="text-foreground">{importResult.skipped}</strong> ja existentes</span>}
+                </div>
+              </div>
+              <DialogFooter>
+                <button type="button" onClick={() => setImportOpen(false)} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+                  Fechar
+                </button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
