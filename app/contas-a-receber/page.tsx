@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client"
 import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
-import { FileUp, Plus, TrendingUp, Clock, CheckCircle2, AlertTriangle, Pencil, Trash2, Loader2, Search, X, ChevronDown } from "lucide-react"
+import { FileUp, Plus, TrendingUp, Clock, CheckCircle2, AlertTriangle, Pencil, Trash2, Loader2, Search, X, ChevronDown, Calendar, ChevronLeft, ChevronRight } from "lucide-react"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
@@ -137,9 +137,14 @@ function ContasAReceberPage() {
   const { data: contasBancarias = [] } = useSWR(["contas_bancarias_receber", tid], ([, t]) => fetchContasBancarias(t))
   const { data: clientesLista = [] } = useSWR(["clientes_receber", tid], ([, t]) => fetchClientes(t))
 
-  const [filterStatus, setFilterStatus] = useState<"Todos" | "Pendente" | "Recebido" | "Vencido">("Todos")
+  const [filterStatus, setFilterStatus] = useState<"Todos" | "Pendente" | "Recebido" | "Vencido" | "Vencem Hoje" | "A Vencer">("Todos")
   const [filterCategoriaId, setFilterCategoriaId] = useState("")
   const [filterSubcategoriaId, setFilterSubcategoriaId] = useState("")
+  const [filterPeriodo, setFilterPeriodo] = useState<"mes_atual" | "7dias" | "personalizado" | "todos">("mes_atual")
+  const [customDateFrom, setCustomDateFrom] = useState("")
+  const [customDateTo, setCustomDateTo] = useState("")
+  const [page, setPage] = useState(1)
+  const PAGE_SIZE = 50
   const [search, setSearch] = useState("")
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingConta, setEditingConta] = useState<ContaReceber | null>(null)
@@ -178,11 +183,54 @@ function ContasAReceberPage() {
     [hierarchy, form.subcategoria_id]
   )
 
+  // Date range helpers
+  const dateRange = useMemo(() => {
+    const today = new Date()
+    if (filterPeriodo === "mes_atual") {
+      const first = new Date(today.getFullYear(), today.getMonth(), 1)
+      const last = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+      return { from: first.toISOString().split("T")[0], to: last.toISOString().split("T")[0] }
+    }
+    if (filterPeriodo === "7dias") {
+      const from = new Date(today)
+      from.setDate(from.getDate() - 7)
+      return { from: from.toISOString().split("T")[0], to: today.toISOString().split("T")[0] }
+    }
+    if (filterPeriodo === "personalizado" && customDateFrom && customDateTo) {
+      return { from: customDateFrom, to: customDateTo }
+    }
+    return null
+  }, [filterPeriodo, customDateFrom, customDateTo])
+
+  const today = useMemo(() => new Date().toISOString().split("T")[0], [])
+
+  const periodFiltered = useMemo(() => {
+    return contas.filter((c) => {
+      if (dateRange && c.vencimento) {
+        if (c.vencimento < dateRange.from || c.vencimento > dateRange.to) return false
+      }
+      return true
+    })
+  }, [contas, dateRange])
+
+  const totalVencido = useMemo(() => periodFiltered.filter((c) => c.status === "vencido").reduce((a, c) => a + c.valor, 0), [periodFiltered])
+  const totalVencemHoje = useMemo(() => periodFiltered.filter((c) => c.status === "pendente" && c.vencimento === today).reduce((a, c) => a + c.valor, 0), [periodFiltered, today])
+  const totalAVencer = useMemo(() => periodFiltered.filter((c) => c.status === "pendente" && c.vencimento > today).reduce((a, c) => a + c.valor, 0), [periodFiltered, today])
+  const totalRecebido = useMemo(() => periodFiltered.filter((c) => c.status === "recebido").reduce((a, c) => a + c.valor, 0), [periodFiltered])
+  const totalGeral = totalVencido + totalVencemHoje + totalAVencer + totalRecebido
+
   const filtered = useMemo(() => {
     return contas.filter((c) => {
-      if (filterStatus !== "Todos" && c.status !== filterStatus.toLowerCase()) return false
+      if (filterStatus === "Vencido" && c.status !== "vencido") return false
+      if (filterStatus === "Vencem Hoje" && !(c.status === "pendente" && c.vencimento === today)) return false
+      if (filterStatus === "A Vencer" && !(c.status === "pendente" && c.vencimento > today)) return false
+      if (filterStatus === "Recebido" && c.status !== "recebido") return false
+      if (filterStatus === "Pendente" && c.status !== "pendente") return false
       if (filterCategoriaId && String(c.categoria_id) !== filterCategoriaId) return false
       if (filterSubcategoriaId && String(c.subcategoria_id) !== filterSubcategoriaId) return false
+      if (dateRange && c.vencimento) {
+        if (c.vencimento < dateRange.from || c.vencimento > dateRange.to) return false
+      }
       if (search) {
         const q = search.toLowerCase()
         if (
@@ -193,20 +241,27 @@ function ContasAReceberPage() {
       }
       return true
     })
-  }, [contas, filterStatus, filterCategoriaId, filterSubcategoriaId, search])
+  }, [contas, filterStatus, filterCategoriaId, filterSubcategoriaId, search, dateRange, today])
 
-  const totalPendente = contas.filter((c) => c.status === "pendente").reduce((a, c) => a + c.valor, 0)
-  const totalRecebido = contas.filter((c) => c.status === "recebido").reduce((a, c) => a + c.valor, 0)
-  const totalVencido = contas.filter((c) => c.status === "vencido").reduce((a, c) => a + c.valor, 0)
-  const qtdPendente = contas.filter((c) => c.status === "pendente").length
+  // Pagination
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
+  const paginatedFiltered = useMemo(() => {
+    const start = (page - 1) * PAGE_SIZE
+    return filtered.slice(start, start + PAGE_SIZE)
+  }, [filtered, page])
 
-  const hasFilter = filterStatus !== "Todos" || filterCategoriaId || filterSubcategoriaId || search
+  useEffect(() => { setPage(1) }, [filterStatus, filterCategoriaId, filterSubcategoriaId, search, filterPeriodo, customDateFrom, customDateTo])
+
+  const hasFilter = filterStatus !== "Todos" || filterCategoriaId || filterSubcategoriaId || search || filterPeriodo !== "mes_atual"
 
   function clearFilters() {
     setFilterStatus("Todos")
     setFilterCategoriaId("")
     setFilterSubcategoriaId("")
     setSearch("")
+    setFilterPeriodo("mes_atual")
+    setCustomDateFrom("")
+    setCustomDateTo("")
   }
 
   function openNew() {
@@ -285,24 +340,60 @@ function ContasAReceberPage() {
         <main className="flex-1 overflow-y-auto p-6">
           <div className="mx-auto max-w-7xl space-y-6">
 
-            {/* Summary Cards */}
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              {[
-                { label: "Total Pendente", value: formatCurrency(totalPendente), color: "hsl(38,92%,50%)", icon: Clock },
-                { label: "Total Recebido", value: formatCurrency(totalRecebido), color: "hsl(142,71%,40%)", icon: CheckCircle2 },
-                { label: "Total Vencido", value: formatCurrency(totalVencido), color: "hsl(0,72%,51%)", icon: AlertTriangle },
-                { label: "Contas Pendentes", value: String(qtdPendente), color: "hsl(216,60%,22%)", icon: TrendingUp },
-              ].map(({ label, value, color, icon: Icon }) => (
-                <div key={label} className="flex items-center gap-4 rounded-xl border border-border bg-card p-5 shadow-sm">
-                  <div className="flex-1">
-                    <p className="text-sm text-muted-foreground">{label}</p>
-                    <p className="mt-1 text-xl font-bold" style={{ color }}>{value}</p>
-                  </div>
-                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full" style={{ backgroundColor: color }}>
-                    <Icon className="h-6 w-6 text-white" />
-                  </div>
+            {/* Action toolbar */}
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={openNew}
+                  className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
+                  <Plus className="h-4 w-4" />Adicionar
+                </button>
+              </div>
+              <div className="flex items-center gap-2">
+                <div className="flex items-center rounded-lg border border-border bg-card">
+                  {([
+                    { key: "mes_atual", label: "Mes atual" },
+                    { key: "7dias", label: "7 dias" },
+                    { key: "personalizado", label: "Personalizado" },
+                    { key: "todos", label: "Todos" },
+                  ] as const).map(({ key, label }) => (
+                    <button key={key} type="button" onClick={() => setFilterPeriodo(key)}
+                      className={`px-3 py-1.5 text-sm font-medium transition-colors first:rounded-l-lg last:rounded-r-lg ${filterPeriodo === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
+                {filterPeriodo === "personalizado" && (
+                  <div className="flex items-center gap-1.5">
+                    <Input type="date" value={customDateFrom} onChange={(e) => setCustomDateFrom(e.target.value)} className="h-10 w-36 text-sm" />
+                    <span className="text-xs text-muted-foreground">ate</span>
+                    <Input type="date" value={customDateTo} onChange={(e) => setCustomDateTo(e.target.value)} className="h-10 w-36 text-sm" />
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Summary Cards */}
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
+              {([
+                { key: "Vencido" as const, label: "Vencidos", value: totalVencido, borderColor: "#dc2626" },
+                { key: "Vencem Hoje" as const, label: "Vencem hoje", value: totalVencemHoje, borderColor: "#ea580c" },
+                { key: "A Vencer" as const, label: "A vencer", value: totalAVencer, borderColor: "#eab308" },
+                { key: "Recebido" as const, label: "Recebidos", value: totalRecebido, borderColor: "#16a34a" },
+              ]).map(({ key, label, value, borderColor }) => (
+                <button key={key} type="button"
+                  onClick={() => setFilterStatus(filterStatus === key ? "Todos" : key)}
+                  className={`group relative overflow-hidden rounded-lg border bg-card p-4 text-left shadow-sm transition-all hover:shadow-md ${filterStatus === key ? "ring-2 ring-primary" : "border-border"}`}
+                >
+                  <div className="absolute inset-x-0 top-0 h-1" style={{ backgroundColor: borderColor }} />
+                  <p className="text-xs font-medium text-muted-foreground">{label}</p>
+                  <p className="mt-1 text-lg font-bold tabular-nums" style={{ color: borderColor }}>{formatCurrency(value)}</p>
+                </button>
               ))}
+              <div className="relative overflow-hidden rounded-lg bg-[#16a34a] p-4 text-left shadow-sm">
+                <p className="text-xs font-medium text-white/80">Total</p>
+                <p className="mt-1 text-lg font-bold tabular-nums text-white">{formatCurrency(totalGeral)}</p>
+              </div>
             </div>
 
             {/* Filters bar */}
@@ -315,14 +406,6 @@ function ContasAReceberPage() {
                   onChange={(e) => setSearch(e.target.value)}
                   className="pl-10"
                 />
-              </div>
-
-              <div className="flex items-center rounded-lg border border-border bg-card">
-                {(["Todos", "Pendente", "Recebido", "Vencido"] as const).map((s) => (
-                  <button key={s} type="button" onClick={() => setFilterStatus(s)}
-                    className={`px-3 py-1.5 text-sm font-medium transition-colors first:rounded-l-lg last:rounded-r-lg ${filterStatus === s ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                  >{s}</button>
-                ))}
               </div>
 
               <div className="relative">
@@ -357,12 +440,6 @@ function ContasAReceberPage() {
                   <X className="h-3.5 w-3.5" /> Limpar
                 </button>
               )}
-
-              <button type="button" onClick={openNew}
-                className="ml-auto flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
-                <Plus className="h-4 w-4" />
-                Nova Conta a Receber
-              </button>
             </div>
 
             {isLoading && (
@@ -396,13 +473,13 @@ function ContasAReceberPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {filtered.length === 0 ? (
+                      {paginatedFiltered.length === 0 ? (
                         <tr>
                           <td colSpan={8} className="px-5 py-12 text-center text-sm text-muted-foreground">
                             {hasFilter ? "Nenhuma conta encontrada com os filtros atuais." : "Nenhuma conta a receber cadastrada."}
                           </td>
                         </tr>
-                      ) : filtered.map((conta) => (
+                      ) : paginatedFiltered.map((conta) => (
                         <tr key={conta.id} className="group border-b border-border last:border-b-0 transition-colors hover:bg-muted/40">
                           <td className="px-4 py-3.5">
                             <div className="flex items-center gap-3">
@@ -449,6 +526,37 @@ function ContasAReceberPage() {
                     </tbody>
                   </table>
                 </div>
+                {/* Pagination */}
+                {filtered.length > 0 && (
+                  <div className="flex items-center justify-between border-t border-border px-4 py-3">
+                    <p className="text-xs text-muted-foreground">
+                      Mostrando {Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)}-{Math.min(page * PAGE_SIZE, filtered.length)} de {filtered.length} registros
+                    </p>
+                    <div className="flex items-center gap-1">
+                      <button type="button" disabled={page <= 1} onClick={() => setPage(p => p - 1)}
+                        className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed">
+                        <ChevronLeft className="h-4 w-4" />
+                      </button>
+                      {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+                        let pageNum: number
+                        if (totalPages <= 5) { pageNum = i + 1 }
+                        else if (page <= 3) { pageNum = i + 1 }
+                        else if (page >= totalPages - 2) { pageNum = totalPages - 4 + i }
+                        else { pageNum = page - 2 + i }
+                        return (
+                          <button key={pageNum} type="button" onClick={() => setPage(pageNum)}
+                            className={`flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium transition-colors ${page === pageNum ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted"}`}>
+                            {pageNum}
+                          </button>
+                        )
+                      })}
+                      <button type="button" disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}
+                        className="flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground transition-colors hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed">
+                        <ChevronRight className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
           </div>
