@@ -14,8 +14,12 @@ import {
   Building2,
   User,
   RefreshCw,
+  Upload,
+  FileSpreadsheet,
+  Check,
 } from "lucide-react"
-import { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback } from "react"
+import { parseCSVRaw } from "@/lib/spreadsheet-parser"
 import { useSearchParams, useRouter } from "next/navigation"
 import { Suspense } from "react"
 import {
@@ -103,6 +107,13 @@ function ClientesPage() {
   const [search, setSearch] = useState("")
   const [cnpjLoading, setCnpjLoading] = useState(false)
   const [cnpjError, setCnpjError] = useState("")
+
+  // Import
+  const [importOpen, setImportOpen] = useState(false)
+  const [importRows, setImportRows] = useState<{ nome: string; tipo: string; documento: string; email: string; telefone: string }[]>([])
+  const [importing, setImporting] = useState(false)
+  const [importResult, setImportResult] = useState<{ created: number; skipped: number } | null>(null)
+  const importFileRef = React.useRef<HTMLInputElement>(null)
 
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -195,6 +206,77 @@ function ClientesPage() {
     }
   }, [form, editingItem, mutate])
 
+  // ---- Import CSV/XLS ----
+  function readFileText(file: File, enc: string): Promise<string> {
+    return new Promise((res, rej) => { const r = new FileReader(); r.onload = e => res(e.target?.result as string); r.onerror = rej; r.readAsText(file, enc) })
+  }
+
+  async function handleImportFile(file: File) {
+    try {
+      const ext = file.name.toLowerCase().split(".").pop() ?? ""
+      let rawRows: Record<string, string>[] = []
+      if (ext === "csv") {
+        let content = await readFileText(file, "UTF-8")
+        const fl = content.split("\n")[0] || ""
+        if (!fl.includes(";") && !fl.includes(",")) content = await readFileText(file, "ISO-8859-1")
+        rawRows = parseCSVRaw(content)
+      } else if (ext === "xls" || ext === "xlsx") {
+        const buffer = await file.arrayBuffer()
+        const XLSX = await import("xlsx")
+        const wb = XLSX.read(buffer, { type: "array" })
+        const ws = wb.Sheets[wb.SheetNames[0]]
+        const jsonRows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" })
+        rawRows = jsonRows.map(r => {
+          const n: Record<string, string> = {}
+          for (const [k, v] of Object.entries(r)) n[k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim()] = String(v)
+          return n
+        })
+      } else { alert("Formato nao suportado. Use CSV, XLS ou XLSX."); return }
+      const mapped = rawRows.map(row => {
+        let nome = "", tipo = "", documento = "", email = "", telefone = ""
+        for (const [key, val] of Object.entries(row)) {
+          const k = key.trim()
+          if (k.includes("nome") || k.includes("razao")) nome = val.trim()
+          else if (k.includes("tipo")) tipo = val.trim()
+          else if (k.includes("doc") || k.includes("cnpj") || k.includes("cpf")) documento = val.trim()
+          else if (k.includes("email") || k.includes("e mail")) email = val.trim()
+          else if (k.includes("tel") || k.includes("fone") || k.includes("celular")) telefone = val.trim()
+        }
+        const tl = tipo.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").trim()
+        const tipoPessoa = (tl.includes("juridica") || tl.includes("pj")) ? "PJ" : "PF"
+        return { nome, tipo: tipoPessoa, documento, email, telefone }
+      }).filter(r => r.nome.trim())
+      setImportRows(mapped)
+      setImportResult(null)
+    } catch (err) { alert("Erro ao ler arquivo: " + (err instanceof Error ? err.message : String(err))) }
+  }
+
+  async function handleImportSave() {
+    if (importRows.length === 0) return
+    setImporting(true)
+    try {
+      const supabase = createClient()
+      const tid = getActiveTenantId()
+      let created = 0, skipped = 0
+      for (const row of importRows) {
+        let q = supabase.from("clientes").select("id").ilike("nome", row.nome).limit(1)
+        if (tid) q = q.eq("tenant_id", tid)
+        const { data: existing } = await q
+        if (existing && existing.length > 0) { skipped++; continue }
+        const payload: Record<string, unknown> = {
+          nome: row.nome, tipo_pessoa: row.tipo, documento: row.documento,
+          cnpj: row.tipo === "PJ" ? row.documento : "", email: row.email, telefone: row.telefone,
+        }
+        if (tid) payload.tenant_id = tid
+        await supabase.from("clientes").insert(payload)
+        created++
+      }
+      setImportResult({ created, skipped })
+      await mutate()
+    } catch (err) { alert("Erro ao importar: " + (err instanceof Error ? err.message : String(err))) }
+    finally { setImporting(false) }
+  }
+
   const handleDelete = useCallback(async (item: Cliente) => {
     const supabase = createClient()
     await supabase.from("clientes").delete().eq("id", item.id)
@@ -260,10 +342,14 @@ function ClientesPage() {
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input placeholder="Buscar cliente..." value={search} onChange={(e) => setSearch(e.target.value)} className="pl-10" />
               </div>
-              <button type="button" onClick={openNew} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
-                <Plus className="h-4 w-4" />
-                Novo Cliente
-              </button>
+              <div className="flex items-center gap-2">
+                <button type="button" onClick={() => { setImportRows([]); setImportResult(null); setImportOpen(true) }} className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
+                  <Upload className="h-4 w-4" />Importar
+                </button>
+                <button type="button" onClick={openNew} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
+                  <Plus className="h-4 w-4" />Novo Cliente
+                </button>
+              </div>
             </div>
 
             {/* List */}
@@ -420,6 +506,110 @@ function ClientesPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Import Dialog */}
+      <Dialog open={importOpen} onOpenChange={setImportOpen}>
+        <DialogContent className="max-w-3xl max-h-[85vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <FileSpreadsheet className="h-5 w-5" />
+              Importar Clientes
+            </DialogTitle>
+            <DialogDescription>
+              Importe clientes a partir de um arquivo CSV ou Excel. Colunas: Nome, Tipo, Documento, E-mail, Telefone.
+            </DialogDescription>
+          </DialogHeader>
+
+          {importRows.length === 0 && !importResult && (
+            <div className="space-y-4 py-4">
+              <div
+                onClick={() => importFileRef.current?.click()}
+                className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border p-10 text-center transition-colors hover:border-primary/50 hover:bg-primary/5"
+              >
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
+                  <Upload className="h-7 w-7 text-primary" />
+                </div>
+                <p className="mt-4 text-sm font-semibold text-foreground">Clique para selecionar o arquivo</p>
+                <p className="mt-1 text-xs text-muted-foreground">Formatos: .CSV, .XLS, .XLSX</p>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Colunas: <span className="font-medium text-foreground">Nome</span> | <span className="font-medium text-foreground">Tipo</span> | <span className="font-medium text-foreground">Documento</span> | <span className="font-medium text-foreground">E-mail</span> | <span className="font-medium text-foreground">Telefone</span>
+                </p>
+              </div>
+              <input
+                ref={importFileRef}
+                type="file"
+                accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportFile(f); if (e.target) e.target.value = "" }}
+              />
+            </div>
+          )}
+
+          {importRows.length > 0 && !importResult && (
+            <div className="space-y-4 py-2">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-medium text-foreground">
+                  {importRows.length} {importRows.length === 1 ? "cliente encontrado" : "clientes encontrados"}
+                </p>
+                <button type="button" onClick={() => setImportRows([])} className="text-xs text-muted-foreground hover:text-foreground">Trocar arquivo</button>
+              </div>
+              <div className="max-h-64 overflow-auto rounded-lg border border-border">
+                <table className="w-full text-sm">
+                  <thead className="sticky top-0 bg-muted">
+                    <tr>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Nome</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Tipo</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Documento</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">E-mail</th>
+                      <th className="px-3 py-2 text-left font-medium text-muted-foreground">Telefone</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {importRows.map((row, i) => (
+                      <tr key={i} className="border-t border-border">
+                        <td className="px-3 py-2 font-medium text-foreground">{row.nome}</td>
+                        <td className="px-3 py-2">
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${row.tipo === "PJ" ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)]" : "bg-[hsl(216,60%,22%)]/10 text-[hsl(216,60%,22%)]"}`}>
+                            {row.tipo === "PJ" ? "Pessoa Juridica" : "Pessoa Fisica"}
+                          </span>
+                        </td>
+                        <td className="px-3 py-2 font-mono text-xs text-muted-foreground">{row.documento || "-"}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{row.email || "-"}</td>
+                        <td className="px-3 py-2 text-muted-foreground">{row.telefone || "-"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <DialogFooter>
+                <button type="button" onClick={() => setImportOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">Cancelar</button>
+                <button type="button" onClick={handleImportSave} disabled={importing} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+                  {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
+                  {importing ? "Importando..." : `Importar ${importRows.length} clientes`}
+                </button>
+              </DialogFooter>
+            </div>
+          )}
+
+          {importResult && (
+            <div className="space-y-4 py-4">
+              <div className="flex flex-col items-center gap-3 rounded-xl bg-[hsl(142,71%,40%)]/5 p-6">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[hsl(142,71%,40%)]/10">
+                  <Check className="h-6 w-6 text-[hsl(142,71%,40%)]" />
+                </div>
+                <p className="text-sm font-semibold text-foreground">Importacao concluida</p>
+                <div className="flex gap-4 text-sm text-muted-foreground">
+                  <span><strong className="text-foreground">{importResult.created}</strong> clientes criados</span>
+                  {importResult.skipped > 0 && <span><strong className="text-foreground">{importResult.skipped}</strong> ja existentes</span>}
+                </div>
+              </div>
+              <DialogFooter>
+                <button type="button" onClick={() => setImportOpen(false)} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Fechar</button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
