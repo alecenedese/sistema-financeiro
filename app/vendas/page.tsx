@@ -301,49 +301,77 @@ function VendasPage() {
   }
 
   async function handleImportFile(file: File) {
+    console.log("[v0] handleImportFile chamado com arquivo:", file.name, file.type, file.size)
     try {
       const ext = file.name.toLowerCase().split(".").pop() ?? ""
+      console.log("[v0] Extensao detectada:", ext)
       let rawRows: Record<string, string>[] = []
       if (ext === "csv") {
         let content = await readFileText(file, "UTF-8")
         const fl = content.split("\n")[0] || ""
+        console.log("[v0] Primeira linha CSV:", fl)
         if (!fl.includes(";") && !fl.includes(",")) content = await readFileText(file, "ISO-8859-1")
         rawRows = parseCSVRaw(content)
+        console.log("[v0] parseCSVRaw retornou", rawRows.length, "linhas")
+        if (rawRows.length > 0) console.log("[v0] Primeira linha parseada:", JSON.stringify(rawRows[0]))
       } else if (ext === "xls" || ext === "xlsx") {
         const buffer = await file.arrayBuffer()
         const XLSX = await import("xlsx")
         const wb = XLSX.read(buffer, { type: "array" })
+        console.log("[v0] Sheets encontradas:", wb.SheetNames)
         const ws = wb.Sheets[wb.SheetNames[0]]
         const jsonRows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" })
+        console.log("[v0] XLSX retornou", jsonRows.length, "linhas")
+        if (jsonRows.length > 0) console.log("[v0] Primeira linha XLSX:", JSON.stringify(jsonRows[0]))
         rawRows = jsonRows.map(r => {
           const n: Record<string, string> = {}
           for (const [k, v] of Object.entries(r)) n[k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim()] = String(v)
           return n
         })
+        console.log("[v0] Apos normalizacao:", rawRows.length > 0 ? JSON.stringify(rawRows[0]) : "vazio")
       } else { alert("Formato nao suportado. Use CSV, XLS ou XLSX."); return }
 
-      const mapped = rawRows.map(row => {
+      console.log("[v0] Colunas disponiveis:", rawRows.length > 0 ? Object.keys(rawRows[0]) : [])
+      
+      const mapped = rawRows.map((row, idx) => {
         let codigo = "", cliente = "", valor_total = "", acrescimo = "", taxas_marketplace = ""
         let desconto = "", valor_recebido = "", forma_pagamento = "", canal = "", data_venda = ""
         for (const [key, val] of Object.entries(row)) {
-          const k = key.trim()
-          if (k.includes("codigo") || k.includes("cod")) codigo = val.trim()
-          else if (k.includes("cliente")) cliente = val.trim()
-          else if (k.includes("valor total") || k === "valor total") valor_total = parseNumber(val)
-          else if (k.includes("acrescimo") || k.includes("acresc")) acrescimo = parseNumber(val)
-          else if (k.includes("taxa") || k.includes("marketplace")) taxas_marketplace = parseNumber(val)
-          else if (k.includes("desconto") || k.includes("desc")) desconto = parseNumber(val)
-          else if (k.includes("valor recebido") || k.includes("recebido")) valor_recebido = parseNumber(val)
-          else if (k.includes("forma") || k.includes("pagamento")) forma_pagamento = val.trim()
-          else if (k.includes("canal")) canal = val.trim()
-          else if (k.includes("data")) data_venda = parseDate(val.trim())
+          const k = key.trim().toLowerCase()
+          // Codigo
+          if (k.includes("codigo") || k.includes("cod")) { codigo = val.trim(); continue }
+          // Cliente
+          if (k.includes("cliente")) { cliente = val.trim(); continue }
+          // Valor Total (antes de "recebido" pois "valor recebido" inclui "valor")
+          if (k.includes("valor total") || (k.includes("valor") && !k.includes("recebido"))) { valor_total = parseNumber(val); continue }
+          // Valor Recebido
+          if (k.includes("recebido") || k.includes("valor recebido")) { valor_recebido = parseNumber(val); continue }
+          // Acrescimo
+          if (k.includes("acrescimo") || k.includes("acresc")) { acrescimo = parseNumber(val); continue }
+          // Taxas Marketplace
+          if (k.includes("taxa") || k.includes("marketplace")) { taxas_marketplace = parseNumber(val); continue }
+          // Desconto (cuidado para nao pegar "desc" de "descricao")
+          if (k === "desconto" || k.includes("desconto")) { desconto = parseNumber(val); continue }
+          // Forma de Pagamento
+          if (k.includes("forma") || (k.includes("pagamento") && !k.includes("forma"))) { forma_pagamento = val.trim(); continue }
+          // Canal
+          if (k.includes("canal")) { canal = val.trim(); continue }
+          // Data
+          if (k.includes("data")) { data_venda = parseDate(val.trim()); continue }
         }
+        if (idx === 0) console.log("[v0] Primeiro registro mapeado:", { codigo, cliente, valor_total, acrescimo, taxas_marketplace, desconto, valor_recebido, forma_pagamento, canal, data_venda })
         return { codigo, cliente, valor_total, acrescimo, taxas_marketplace, desconto, valor_recebido, forma_pagamento, canal, data_venda }
       }).filter(r => r.valor_total && parseFloat(r.valor_total) > 0)
 
+      console.log("[v0] Mapped com valores > 0:", mapped.length, "linhas")
+      if (mapped.length > 0) console.log("[v0] Primeiro mapeado:", JSON.stringify(mapped[0]))
+
       setImportRows(mapped)
       setImportResult(null)
-    } catch (err) { alert("Erro ao ler arquivo: " + (err instanceof Error ? err.message : String(err))) }
+    } catch (err) { 
+      console.log("[v0] Erro ao importar:", err)
+      alert("Erro ao ler arquivo: " + (err instanceof Error ? err.message : String(err))) 
+    }
   }
 
   async function handleImportSave() {
