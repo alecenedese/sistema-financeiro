@@ -284,11 +284,26 @@ function VendasPage() {
 
   function parseDate(str: string): string {
     if (!str) return ""
+    // Excel serial number (e.g., 46082.957650462966)
+    const num = parseFloat(str)
+    if (!isNaN(num) && num > 25000 && num < 60000) {
+      // Excel date serial: days since 1900-01-01 (with Excel bug for 1900 leap year)
+      const excelEpoch = new Date(1899, 11, 30) // Dec 30, 1899
+      const msPerDay = 24 * 60 * 60 * 1000
+      const date = new Date(excelEpoch.getTime() + num * msPerDay)
+      return date.toISOString()
+    }
     // Try DD/MM/YYYY HH:MM:SS format
     const match = str.match(/^(\d{2})\/(\d{2})\/(\d{4})\s*(\d{2}):(\d{2}):?(\d{2})?$/)
     if (match) {
       const [, d, m, y, h, min, s] = match
       return `${y}-${m}-${d}T${h}:${min}:${s || "00"}`
+    }
+    // Try DD/MM/YYYY format (without time)
+    const matchDate = str.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+    if (matchDate) {
+      const [, d, m, y] = matchDate
+      return `${y}-${m}-${d}T00:00:00`
     }
     // Try YYYY-MM-DD format
     if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str
@@ -401,6 +416,7 @@ function VendasPage() {
 
   async function handleImportSave() {
     if (importRows.length === 0) return
+    console.log("[v0] handleImportSave iniciado com", importRows.length, "linhas")
     setImporting(true)
     try {
       const supabase = createClient()
@@ -408,12 +424,18 @@ function VendasPage() {
       let created = 0, skipped = 0
 
       for (const row of importRows) {
+        console.log("[v0] Processando linha:", row.codigo, row.cliente)
+        
         // Check if already exists by codigo
         if (row.codigo) {
           let q = supabase.from("vendas").select("id").eq("codigo", row.codigo).limit(1)
           if (tenantId) q = q.eq("tenant_id", tenantId)
           const { data: existing } = await q
-          if (existing && existing.length > 0) { skipped++; continue }
+          if (existing && existing.length > 0) { 
+            console.log("[v0] Codigo ja existe, pulando:", row.codigo)
+            skipped++
+            continue 
+          }
         }
 
         const payload: Record<string, unknown> = {
@@ -429,13 +451,24 @@ function VendasPage() {
           data_venda: row.data_venda || new Date().toISOString(),
         }
         if (tenantId) payload.tenant_id = tenantId
-        await supabase.from("vendas").insert(payload)
-        created++
+        
+        console.log("[v0] Inserindo payload:", JSON.stringify(payload))
+        const { error } = await supabase.from("vendas").insert(payload)
+        if (error) {
+          console.log("[v0] Erro ao inserir:", error)
+        } else {
+          console.log("[v0] Inserido com sucesso:", row.codigo)
+          created++
+        }
       }
 
+      console.log("[v0] Importacao finalizada - criados:", created, "pulados:", skipped)
       setImportResult({ created, skipped })
       await mutate()
-    } catch (err) { alert("Erro ao importar: " + (err instanceof Error ? err.message : String(err))) }
+    } catch (err) { 
+      console.log("[v0] Erro geral:", err)
+      alert("Erro ao importar: " + (err instanceof Error ? err.message : String(err))) 
+    }
     finally { setImporting(false) }
   }
 
