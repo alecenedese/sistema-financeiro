@@ -320,15 +320,40 @@ function VendasPage() {
         const wb = XLSX.read(buffer, { type: "array" })
         console.log("[v0] Sheets encontradas:", wb.SheetNames)
         const ws = wb.Sheets[wb.SheetNames[0]]
-        const jsonRows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" })
+        let jsonRows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" })
         console.log("[v0] XLSX retornou", jsonRows.length, "linhas")
-        if (jsonRows.length > 0) console.log("[v0] Primeira linha XLSX:", JSON.stringify(jsonRows[0]))
-        rawRows = jsonRows.map(r => {
-          const n: Record<string, string> = {}
-          for (const [k, v] of Object.entries(r)) n[k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim()] = String(v)
-          return n
-        })
-        console.log("[v0] Apos normalizacao:", rawRows.length > 0 ? JSON.stringify(rawRows[0]) : "vazio")
+        
+        // Verifica se os headers contem __EMPTY (indica que linha 1 e titulo, nao header)
+        if (jsonRows.length > 0) {
+          const firstRowKeys = Object.keys(jsonRows[0])
+          const hasEmptyHeaders = firstRowKeys.some(k => k.includes("__EMPTY") || k.includes("EMPTY"))
+          console.log("[v0] Headers tem __EMPTY?", hasEmptyHeaders, "Keys:", firstRowKeys)
+          
+          if (hasEmptyHeaders) {
+            // A linha 1 e titulo - os valores da primeira "linha" sao os headers reais
+            const realHeaders = Object.values(jsonRows[0]) as string[]
+            console.log("[v0] Headers reais detectados:", realHeaders)
+            
+            // Remapeia as linhas restantes usando os headers reais
+            rawRows = jsonRows.slice(1).map(row => {
+              const n: Record<string, string> = {}
+              const values = Object.values(row) as string[]
+              realHeaders.forEach((header, idx) => {
+                const normalizedKey = String(header).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim()
+                n[normalizedKey] = String(values[idx] ?? "")
+              })
+              return n
+            })
+          } else {
+            // Headers normais, apenas normaliza
+            rawRows = jsonRows.map(r => {
+              const n: Record<string, string> = {}
+              for (const [k, v] of Object.entries(r)) n[k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim()] = String(v)
+              return n
+            })
+          }
+        }
+        console.log("[v0] Apos normalizacao:", rawRows.length, "linhas", rawRows.length > 0 ? JSON.stringify(rawRows[0]) : "vazio")
       } else { alert("Formato nao suportado. Use CSV, XLS ou XLSX."); return }
 
       console.log("[v0] Colunas disponiveis:", rawRows.length > 0 ? Object.keys(rawRows[0]) : [])
