@@ -148,6 +148,13 @@ async function fetchDRE(ano: number, mes: number): Promise<CategoriaRow[]> {
 
   if (error) throw error
 
+  // Busca vendas do periodo - toda venda entra como Receita Operacional Bruta
+  const { data: vendasData } = await supabase
+    .from("vendas")
+    .select(`valor_total, data_venda`)
+    .gte("data_venda", from)
+    .lte("data_venda", to + "T23:59:59")
+
   // Agrupa por categoria
   const map: Record<string, CategoriaRow> = {}
   for (const row of data || []) {
@@ -157,6 +164,18 @@ async function fetchDRE(ano: number, mes: number): Promise<CategoriaRow[]> {
     if (!map[key]) map[key] = { id: cat.id, nome: cat.nome, grupo_dre: cat.grupo_dre, total: 0 }
     map[key].total += Number(row.valor)
   }
+
+  // Adiciona vendas como Receita Operacional Bruta
+  if (vendasData && vendasData.length > 0) {
+    const totalVendas = vendasData.reduce((acc, v) => acc + (Number(v.valor_total) || 0), 0)
+    if (totalVendas > 0) {
+      const vendasKey = "vendas_receita_bruta"
+      map[vendasKey] = { id: -1, nome: "Vendas", grupo_dre: "receita_bruta", total: totalVendas }
+    }
+  }
+
+  return Object.values(map)
+}
 
   return Object.values(map)
 }

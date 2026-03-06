@@ -23,6 +23,7 @@ import {
   RepeatIcon,
   Shield,
   X,
+  ShoppingCart,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTenant } from "@/hooks/use-tenant"
@@ -31,6 +32,7 @@ const menuItems = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/" },
   { icon: Landmark, label: "Contas Bancarias", href: "/contas-bancarias" },
   { icon: ArrowLeftRight, label: "Transacoes", href: "/transacoes" },
+  { icon: ShoppingCart, label: "Vendas", href: "/vendas" },
   { icon: FileDown, label: "Contas a Pagar", href: "/contas-a-pagar" },
   { icon: FileUp, label: "Contas a Receber", href: "/contas-a-receber" },
   { icon: Target, label: "Planejamento", href: "/planejamento" },
@@ -47,6 +49,7 @@ const menuItems = [
 const novoOptions = [
   { icon: Landmark, label: "Nova Conta Bancaria", href: "/contas-bancarias?novo=1" },
   { icon: ArrowLeftRight, label: "Nova Transacao", href: "/transacoes?novo=1" },
+  { icon: ShoppingCart, label: "Nova Venda", href: "/vendas?novo=1" },
   { icon: FileDown, label: "Nova Conta a Pagar", href: "/contas-a-pagar?novo=1" },
   { icon: FileUp, label: "Nova Conta a Receber", href: "/contas-a-receber?novo=1" },
   { icon: Target, label: "Nova Meta", href: "/planejamento?novo=1" },
