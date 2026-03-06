@@ -177,9 +177,6 @@ async function fetchDRE(ano: number, mes: number): Promise<CategoriaRow[]> {
   return Object.values(map)
 }
 
-  return Object.values(map)
-}
-
 export default function DREPage() {
   const now = new Date()
   const [ano, setAno] = useState(now.getFullYear())
