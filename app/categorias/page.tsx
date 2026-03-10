@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/page-header"
 import {
   Tags, Plus, ChevronDown, ChevronRight, Pencil, Trash2, Loader2,
   X, ArrowRight, ReceiptText, CalendarClock, FileText, BarChart3,
-  Upload, FileSpreadsheet, Check, AlertCircle
+  Upload, FileSpreadsheet, Check, AlertCircle, Download, Share2
 } from "lucide-react"
 import { parseCSVRaw } from "@/lib/spreadsheet-parser"
 import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
@@ -158,6 +158,13 @@ function CategoriasPage() {
   const [importing, setImporting] = useState(false)
   const [importResult, setImportResult] = useState<{ created: number; skipped: number } | null>(null)
   const importFileRef = React.useRef<HTMLInputElement>(null)
+
+  // Transfer state
+  const [transferOpen, setTransferOpen] = useState(false)
+  const [transferring, setTransferring] = useState(false)
+  const [allTenants, setAllTenants] = useState<{ id: number; nome: string }[]>([])
+  const [selectedTenantId, setSelectedTenantId] = useState<number | null>(null)
+  const [transferResult, setTransferResult] = useState<{ created: number; skipped: number } | null>(null)
 
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -456,6 +463,107 @@ function CategoriasPage() {
     }
   }
 
+  // Exportar categorias para CSV
+  function handleExport() {
+    if (!categorias || categorias.length === 0) { alert("Nenhuma categoria para exportar."); return }
+    const rows: string[] = ["Categoria,Tipo,Grupo DRE,Subcategoria,Sub-filho"]
+    for (const cat of categorias) {
+      const grupoDreLabel = GRUPOS_DRE.find(g => g.value === cat.grupo_dre)?.label || ""
+      if (cat.subcategorias.length === 0) {
+        rows.push(`"${cat.nome}","${cat.tipo}","${grupoDreLabel}","",""`)
+      } else {
+        for (const sub of cat.subcategorias) {
+          if (sub.filhos.length === 0) {
+            rows.push(`"${cat.nome}","${cat.tipo}","${grupoDreLabel}","${sub.nome}",""`)
+          } else {
+            for (const filho of sub.filhos) {
+              rows.push(`"${cat.nome}","${cat.tipo}","${grupoDreLabel}","${sub.nome}","${filho.nome}"`)
+            }
+          }
+        }
+      }
+    }
+    const csv = rows.join("\n")
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `categorias_${tenant?.nome || "export"}_${new Date().toISOString().split("T")[0]}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  // Abrir dialog de transferencia
+  async function openTransferDialog() {
+    setTransferring(false)
+    setTransferResult(null)
+    setSelectedTenantId(null)
+    setTransferOpen(true)
+    // Buscar todos os tenants
+    const supabase = createClient()
+    const { data } = await supabase.from("tenant_clientes").select("id, nome").order("nome")
+    setAllTenants((data || []).filter(t => t.id !== tid))
+  }
+
+  // Transferir categorias para outro tenant
+  async function handleTransfer() {
+    if (!selectedTenantId || !categorias || categorias.length === 0) return
+    setTransferring(true)
+    try {
+      const supabase = createClient()
+      let created = 0, skipped = 0
+
+      for (const cat of categorias) {
+        // Verificar se categoria ja existe no destino
+        const { data: existing } = await supabase.from("categorias").select("id").eq("nome", cat.nome).eq("tenant_id", selectedTenantId).limit(1)
+        let catId: number
+
+        if (existing && existing.length > 0) {
+          catId = existing[0].id
+          skipped++
+        } else {
+          const { data: newCat } = await supabase.from("categorias").insert({
+            nome: cat.nome, tipo: cat.tipo, grupo_dre: cat.grupo_dre, cor: cat.cor, tenant_id: selectedTenantId
+          }).select("id").single()
+          if (!newCat) continue
+          catId = newCat.id
+          created++
+        }
+
+        // Transferir subcategorias
+        for (const sub of cat.subcategorias) {
+          const { data: existingSub } = await supabase.from("subcategorias").select("id").eq("nome", sub.nome).eq("categoria_id", catId).eq("tenant_id", selectedTenantId).limit(1)
+          let subId: number
+
+          if (existingSub && existingSub.length > 0) {
+            subId = existingSub[0].id
+          } else {
+            const { data: newSub } = await supabase.from("subcategorias").insert({
+              nome: sub.nome, categoria_id: catId, tenant_id: selectedTenantId
+            }).select("id").single()
+            if (!newSub) continue
+            subId = newSub.id
+          }
+
+          // Transferir filhos
+          for (const filho of sub.filhos) {
+            const { data: existingFilho } = await supabase.from("subcategorias_filhos").select("id").eq("nome", filho.nome).eq("subcategoria_id", subId).eq("tenant_id", selectedTenantId).limit(1)
+            if (existingFilho && existingFilho.length > 0) continue
+            await supabase.from("subcategorias_filhos").insert({
+              nome: filho.nome, subcategoria_id: subId, tenant_id: selectedTenantId
+            })
+          }
+        }
+      }
+
+      setTransferResult({ created, skipped })
+    } catch (err) {
+      alert("Erro ao transferir: " + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setTransferring(false)
+    }
+  }
+
   async function handleDelete() {
     if (!deleteConfirm) return
     setSaving(true)
@@ -509,6 +617,12 @@ function CategoriasPage() {
                   </div>
                   <button type="button" onClick={() => { setImportRows([]); setImportResult(null); setImportOpen(true) }} className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
                     <Upload className="h-4 w-4" />Importar
+                  </button>
+                  <button type="button" onClick={handleExport} className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
+                    <Download className="h-4 w-4" />Exportar
+                  </button>
+                  <button type="button" onClick={openTransferDialog} className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
+                    <Share2 className="h-4 w-4" />Transferir
                   </button>
                   <button type="button" onClick={openNewCategoria} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
                     <Plus className="h-4 w-4" />Nova Categoria
@@ -874,6 +988,98 @@ function CategoriasPage() {
               </div>
               <DialogFooter>
                 <button type="button" onClick={() => setImportOpen(false)} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+                  Fechar
+                </button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Transfer Dialog */}
+      <Dialog open={transferOpen} onOpenChange={setTransferOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Share2 className="h-5 w-5" />
+              Transferir Categorias
+            </DialogTitle>
+            <DialogDescription>
+              Transfira todas as categorias do cliente atual para outro cliente. Categorias ja existentes no destino serao ignoradas.
+            </DialogDescription>
+          </DialogHeader>
+
+          {!transferResult ? (
+            <div className="space-y-4 py-4">
+              <div className="space-y-2">
+                <Label>Cliente de origem</Label>
+                <div className="rounded-lg border border-border bg-muted/50 px-3 py-2 text-sm font-medium text-foreground">
+                  {tenant?.nome || "Nenhum cliente selecionado"}
+                </div>
+              </div>
+
+              <div className="flex items-center justify-center py-2">
+                <ArrowRight className="h-5 w-5 text-muted-foreground" />
+              </div>
+
+              <div className="space-y-2">
+                <Label htmlFor="transfer-tenant">Cliente de destino</Label>
+                <div className="relative">
+                  <select
+                    id="transfer-tenant"
+                    value={selectedTenantId ?? ""}
+                    onChange={(e) => setSelectedTenantId(e.target.value ? Number(e.target.value) : null)}
+                    className="h-10 w-full appearance-none rounded-lg border border-border bg-card pl-3 pr-8 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+                  >
+                    <option value="">Selecione um cliente...</option>
+                    {allTenants.map((t) => (
+                      <option key={t.id} value={t.id}>{t.nome}</option>
+                    ))}
+                  </select>
+                  <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                </div>
+              </div>
+
+              <div className="rounded-lg border border-border bg-muted/30 p-3">
+                <p className="text-xs text-muted-foreground">
+                  <strong className="text-foreground">{categorias?.length || 0}</strong> categorias serao transferidas
+                  {categorias && categorias.length > 0 && (
+                    <span> com <strong className="text-foreground">
+                      {categorias.reduce((acc, c) => acc + c.subcategorias.length, 0)}
+                    </strong> subcategorias</span>
+                  )}
+                </p>
+              </div>
+
+              <DialogFooter>
+                <button type="button" onClick={() => setTransferOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  onClick={handleTransfer}
+                  disabled={transferring || !selectedTenantId}
+                  className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+                >
+                  {transferring ? <Loader2 className="h-4 w-4 animate-spin" /> : <Share2 className="h-4 w-4" />}
+                  {transferring ? "Transferindo..." : "Transferir"}
+                </button>
+              </DialogFooter>
+            </div>
+          ) : (
+            <div className="space-y-4 py-4">
+              <div className="flex flex-col items-center gap-3 rounded-xl bg-[hsl(142,71%,40%)]/5 p-6">
+                <div className="flex h-12 w-12 items-center justify-center rounded-full bg-[hsl(142,71%,40%)]/10">
+                  <Check className="h-6 w-6 text-[hsl(142,71%,40%)]" />
+                </div>
+                <p className="text-sm font-semibold text-foreground">Transferencia concluida</p>
+                <div className="flex gap-4 text-sm text-muted-foreground">
+                  <span><strong className="text-foreground">{transferResult.created}</strong> categorias transferidas</span>
+                  {transferResult.skipped > 0 && <span><strong className="text-foreground">{transferResult.skipped}</strong> ja existentes</span>}
+                </div>
+              </div>
+              <DialogFooter>
+                <button type="button" onClick={() => setTransferOpen(false)} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
                   Fechar
                 </button>
               </DialogFooter>
