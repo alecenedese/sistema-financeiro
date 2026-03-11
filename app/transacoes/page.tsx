@@ -72,6 +72,34 @@ function getPeriodoDates(periodo: PeriodoFiltro, custom: { from: string; to: str
   return { from: custom.from, to: custom.to }
 }
 
+// Recalcula e atualiza o saldo de uma conta bancaria
+async function recalcularSaldoConta(contaId: number) {
+  if (!contaId) return
+  const supabase = createClient()
+  // Busca saldo inicial da conta
+  const { data: conta } = await supabase.from("contas_bancarias").select("saldo_inicial").eq("id", contaId).single()
+  if (!conta) return
+  const saldoInicial = Number(conta.saldo_inicial) || 0
+  
+  // Busca transacoes de contas_pagar (saidas pagas)
+  const { data: despesas } = await supabase.from("contas_pagar").select("valor").eq("conta_bancaria_id", contaId).eq("status", "pago")
+  // Busca transacoes de contas_receber (entradas recebidas)
+  const { data: receitas } = await supabase.from("contas_receber").select("valor").eq("conta_bancaria_id", contaId).eq("status", "recebido")
+  // Busca lancamentos manuais
+  const { data: lancamentos } = await supabase.from("lancamentos").select("valor, tipo").eq("conta_bancaria_id", contaId)
+  
+  let entradas = 0, saidas = 0
+  for (const l of lancamentos || []) {
+    if (l.tipo === "receita") entradas += Number(l.valor)
+    else saidas += Number(l.valor)
+  }
+  for (const r of receitas || []) entradas += Number(r.valor)
+  for (const d of despesas || []) saidas += Number(d.valor)
+  
+  const novoSaldo = saldoInicial + entradas - saidas
+  await supabase.from("contas_bancarias").update({ saldo: novoSaldo }).eq("id", contaId)
+}
+
 async function fetchContas(tid: number | null): Promise<ContaBancaria[]> {
   const supabase = createClient()
   let q = supabase.from("contas_bancarias").select("id,nome").order("nome")
@@ -213,13 +241,16 @@ function TransacoesPage() {
     try {
       const supabase = createClient()
       const tid = getActiveTenantId()
+      const novaContaId = form.conta_bancaria_id ? Number(form.conta_bancaria_id) : null
+      const contaAnteriorId = editingItem?.conta_bancaria_id || null
+      
       const payload: Record<string, unknown> = {
         descricao: form.descricao,
         valor: parseFloat(form.valor) || 0,
         tipo: form.tipo,
         data: form.data || toISOLocal(new Date()),
         categoria_id: form.categoria_id ? Number(form.categoria_id) : null,
-        conta_bancaria_id: form.conta_bancaria_id ? Number(form.conta_bancaria_id) : null,
+        conta_bancaria_id: novaContaId,
         forma_pagamento: form.forma_pagamento || null,
         status: form.status,
       }
@@ -229,6 +260,11 @@ function TransacoesPage() {
       } else {
         await supabase.from("lancamentos").insert(payload)
       }
+      
+      // Recalcula saldo da(s) conta(s) afetada(s)
+      if (novaContaId) await recalcularSaldoConta(novaContaId)
+      if (contaAnteriorId && contaAnteriorId !== novaContaId) await recalcularSaldoConta(contaAnteriorId)
+      
       await mutate()
       setDialogOpen(false)
     } finally {
@@ -238,7 +274,10 @@ function TransacoesPage() {
 
   const handleDelete = useCallback(async (l: Lancamento) => {
     const supabase = createClient()
+    const contaId = l.conta_bancaria_id
     await supabase.from("lancamentos").delete().eq("id", l.id)
+    // Recalcula saldo da conta apos exclusao
+    if (contaId) await recalcularSaldoConta(contaId)
     await mutate()
     setDeleteConfirm(null)
   }, [mutate])
