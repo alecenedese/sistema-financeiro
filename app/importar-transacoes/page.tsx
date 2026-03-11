@@ -37,6 +37,36 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog"
 
+// ---------- Helper Functions ----------
+
+// Recalcula e atualiza o saldo de uma conta bancaria
+async function recalcularSaldoConta(contaId: number) {
+  if (!contaId) return
+  const supabase = createClient()
+  // Busca saldo inicial da conta
+  const { data: conta } = await supabase.from("contas_bancarias").select("saldo_inicial").eq("id", contaId).single()
+  if (!conta) return
+  const saldoInicial = Number(conta.saldo_inicial) || 0
+  
+  // Busca transacoes de contas_pagar (saidas pagas)
+  const { data: despesas } = await supabase.from("contas_pagar").select("valor").eq("conta_bancaria_id", contaId).eq("status", "pago")
+  // Busca transacoes de contas_receber (entradas recebidas)
+  const { data: receitas } = await supabase.from("contas_receber").select("valor").eq("conta_bancaria_id", contaId).eq("status", "recebido")
+  // Busca lancamentos manuais
+  const { data: lancamentos } = await supabase.from("lancamentos").select("valor, tipo").eq("conta_bancaria_id", contaId)
+  
+  let entradas = 0, saidas = 0
+  for (const l of lancamentos || []) {
+    if (l.tipo === "receita") entradas += Number(l.valor)
+    else saidas += Number(l.valor)
+  }
+  for (const r of receitas || []) entradas += Number(r.valor)
+  for (const d of despesas || []) saidas += Number(d.valor)
+  
+  const novoSaldo = saldoInicial + entradas - saidas
+  await supabase.from("contas_bancarias").update({ saldo: novoSaldo }).eq("id", contaId)
+}
+
 // ---------- Types ----------
 
 interface CategoriaRow { id: number; nome: string; tipo: string }
@@ -806,7 +836,10 @@ export default function ImportarTransacoesPage() {
         await supabase.from("contas_receber").insert(receitasToInsert)
       }
 
-      // O trigger fn_recalcular_saldo no banco cuida do saldo automaticamente
+      // Recalcula saldo da conta bancaria apos importacao
+      if (contaBancariaId) {
+        await recalcularSaldoConta(Number(contaBancariaId))
+      }
 
       const newEntry: ImportHistoryItem = {
         id: Date.now(),
