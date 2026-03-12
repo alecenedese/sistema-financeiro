@@ -229,16 +229,19 @@ function VendasPage() {
   }
 
   async function handleSave() {
-    if (!form.valor_total) return
+    console.log("[v0] handleSave chamado, form:", form)
+    if (!form.valor_total) { console.log("[v0] valor_total vazio, retornando"); return }
     setSaving(true)
     try {
       const supabase = createClient()
       const tenantId = getActiveTenantId()
+      console.log("[v0] tenantId:", tenantId)
       const valorTotal = parseBRL(form.valor_total)
       const acrescimo = parseBRL(form.acrescimo)
       const taxas = parseBRL(form.taxas_marketplace)
       const desconto = parseBRL(form.desconto)
       const valorRecebido = parseBRL(form.valor_recebido) || (valorTotal + acrescimo - taxas - desconto)
+      console.log("[v0] Valores parseados:", { valorTotal, acrescimo, taxas, desconto, valorRecebido })
 
       const payload: Record<string, unknown> = {
         codigo: form.codigo,
@@ -255,11 +258,14 @@ function VendasPage() {
         observacoes: form.observacoes,
       }
       if (tenantId) payload.tenant_id = tenantId
+      console.log("[v0] Payload final:", payload)
 
       if (editingVenda) {
-        await supabase.from("vendas").update(payload).eq("id", editingVenda.id)
+        const { error } = await supabase.from("vendas").update(payload).eq("id", editingVenda.id)
+        console.log("[v0] Update result error:", error)
       } else {
-        await supabase.from("vendas").insert(payload)
+        const { error } = await supabase.from("vendas").insert(payload)
+        console.log("[v0] Insert result error:", error)
       }
       await mutate()
       setDialogOpen(false)

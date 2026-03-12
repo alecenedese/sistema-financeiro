@@ -1,5 +1,8 @@
 /**
  * Utilitarios para formatacao de moeda brasileira (BRL)
+ */
+
+/**
  * Formata valor numérico para formato brasileiro (1.000,00)
  */
 export function formatBRL(value: number | string): string {
@@ -11,8 +14,10 @@ export function formatBRL(value: number | string): string {
 /**
  * Remove formatação e converte para número
  */
-export function parseBRL(formatted: string): number {
-  const cleaned = formatted.replace(/\./g, "").replace(",", ".")
+export function parseBRL(formatted: string | number | null | undefined): number {
+  if (formatted == null) return 0
+  if (typeof formatted === "number") return formatted
+  const cleaned = String(formatted).replace(/\./g, "").replace(",", ".")
   const num = parseFloat(cleaned)
   return isNaN(num) ? 0 : num
 }
@@ -20,10 +25,20 @@ export function parseBRL(formatted: string): number {
 /**
  * Handler para input de moeda brasileira
  * Retorna string formatada para exibição
+ * Aceita qualquer tipo de entrada (evento, string, number, etc)
  */
 export function handleCurrencyInput(value: unknown): string {
   // Garante que value seja string - aceita qualquer tipo de entrada
   if (value == null) return ""
+  
+  // Se for um evento, extrai o valor
+  if (typeof value === "object" && value !== null && "target" in value) {
+    const target = (value as { target: { value?: unknown } }).target
+    if (target && typeof target.value !== "undefined") {
+      value = target.value
+    }
+  }
+  
   const strValue = typeof value === "string" ? value : String(value)
   // Remove tudo exceto números
   const numbersOnly = strValue.replace(/\D/g, "")
