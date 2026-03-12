@@ -20,9 +20,10 @@ export function parseBRL(formatted: string): number {
  * Handler para input de moeda brasileira
  * Retorna string formatada para exibição
  */
-export function handleCurrencyInput(value: string | number | undefined | null): string {
-  // Garante que value seja string
-  const strValue = value == null ? "" : String(value)
+export function handleCurrencyInput(value: unknown): string {
+  // Garante que value seja string - aceita qualquer tipo de entrada
+  if (value == null) return ""
+  const strValue = typeof value === "string" ? value : String(value)
   // Remove tudo exceto números
   const numbersOnly = strValue.replace(/\D/g, "")
   if (!numbersOnly) return ""
