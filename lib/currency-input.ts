@@ -1,4 +1,5 @@
 /**
+ * Utilitarios para formatacao de moeda brasileira (BRL)
  * Formata valor numérico para formato brasileiro (1.000,00)
  */
 export function formatBRL(value: number | string): string {
