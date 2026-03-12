@@ -112,6 +112,8 @@ interface TransactionRow extends OFXTransaction {
   selected: boolean
   isSplit?: boolean
   splits?: TransactionSplit[]
+  forma_pagamento: string
+  descricao_editada: string
 }
 
 interface ImportHistoryItem {
@@ -522,7 +524,7 @@ export default function ImportarTransacoesPage() {
 
       const rows: TransactionRow[] = txs
         .map((tx) => {
-          const extra = tx as OFXTransaction & { _fornecedor?: string; _planoConta?: string }
+          const extra = tx as OFXTransaction & { _fornecedor?: string; _planoConta?: string; _formaPagamento?: string }
 
           // 1. Match fornecedor pelo nome do CSV
           let fornecedor_id: number | null = null
@@ -544,6 +546,18 @@ export default function ImportarTransacoesPage() {
           if (!clienteFornecedor) clienteFornecedor = matched.clienteFornecedor || extractClienteFornecedor(tx.memo)
           if (!categoria_id && matched.categoria_id) categoria_id = matched.categoria_id
 
+          // 4. Detecta forma de pagamento automaticamente
+          let forma_pagamento = extra._formaPagamento || ""
+          if (!forma_pagamento) {
+            const memoLower = tx.memo.toLowerCase()
+            if (memoLower.includes("pix")) forma_pagamento = "PIX"
+            else if (memoLower.includes("ted") || memoLower.includes("transf")) forma_pagamento = "Transferencia"
+            else if (memoLower.includes("boleto")) forma_pagamento = "Boleto"
+            else if (memoLower.includes("debito") || memoLower.includes("debit")) forma_pagamento = "Cartao de Debito"
+            else if (memoLower.includes("credito") || memoLower.includes("credit")) forma_pagamento = "Cartao de Credito"
+            else if (memoLower.includes("cheque")) forma_pagamento = "Cheque"
+          }
+
           return {
             ...tx,
             categoria_id,
@@ -553,6 +567,8 @@ export default function ImportarTransacoesPage() {
             cliente_id: matched.cliente_id,
             clienteFornecedor,
             selected: tx.amount !== 0,
+            forma_pagamento,
+            descricao_editada: tx.memo,
           }
         })
         .filter((tx) => tx.amount !== 0)
@@ -761,10 +777,11 @@ export default function ImportarTransacoesPage() {
       if (despesas.length > 0) {
         const despesasToInsert = []
         for (const tx of despesas) {
+          const descricaoFinal = tx.descricao_editada || tx.memo
           if (tx.isSplit && tx.splits && tx.splits.length > 0) {
             for (const split of tx.splits) {
               despesasToInsert.push({
-                descricao: tx.memo,
+                descricao: descricaoFinal,
                 valor: Math.abs(split.valor),
                 vencimento: tx.date.split("/").reverse().join("-"),
                 status: "pago",
@@ -774,13 +791,14 @@ export default function ImportarTransacoesPage() {
                 subcategoria_id: split.subcategoria_id,
                 subcategoria_filho_id: split.subcategoria_filho_id,
                 conta_bancaria_id: contaBancariaId,
+                forma_pagamento: tx.forma_pagamento || null,
                 tenant_id: tid,
               })
             }
           } else {
             const fornNome = tx.fornecedor_id ? fornecedoresLista.find((f) => f.id === tx.fornecedor_id)?.nome || tx.clienteFornecedor : tx.clienteFornecedor
             despesasToInsert.push({
-              descricao: tx.memo,
+              descricao: descricaoFinal,
               valor: Math.abs(tx.amount),
               vencimento: tx.date.split("/").reverse().join("-"),
               status: "pago",
@@ -790,6 +808,7 @@ export default function ImportarTransacoesPage() {
               subcategoria_id: tx.subcategoria_id,
               subcategoria_filho_id: tx.subcategoria_filho_id,
               conta_bancaria_id: contaBancariaId,
+              forma_pagamento: tx.forma_pagamento || null,
               tenant_id: tid,
             })
           }
@@ -800,10 +819,11 @@ export default function ImportarTransacoesPage() {
       if (receitas.length > 0) {
         const receitasToInsert = []
         for (const tx of receitas) {
+          const descricaoFinal = tx.descricao_editada || tx.memo
           if (tx.isSplit && tx.splits && tx.splits.length > 0) {
             for (const split of tx.splits) {
               receitasToInsert.push({
-                descricao: tx.memo,
+                descricao: descricaoFinal,
                 valor: split.valor,
                 vencimento: tx.date.split("/").reverse().join("-"),
                 status: "recebido",
@@ -813,13 +833,14 @@ export default function ImportarTransacoesPage() {
                 subcategoria_id: split.subcategoria_id,
                 subcategoria_filho_id: split.subcategoria_filho_id,
                 conta_bancaria_id: contaBancariaId,
+                forma_pagamento: tx.forma_pagamento || null,
                 tenant_id: tid,
               })
             }
           } else {
             const cliNome = tx.cliente_id ? clientesLista.find((c) => c.id === tx.cliente_id)?.nome || tx.clienteFornecedor : tx.clienteFornecedor
             receitasToInsert.push({
-              descricao: tx.memo,
+              descricao: descricaoFinal,
               valor: tx.amount,
               vencimento: tx.date.split("/").reverse().join("-"),
               status: "recebido",
@@ -829,6 +850,7 @@ export default function ImportarTransacoesPage() {
               subcategoria_id: tx.subcategoria_id,
               subcategoria_filho_id: tx.subcategoria_filho_id,
               conta_bancaria_id: contaBancariaId,
+              forma_pagamento: tx.forma_pagamento || null,
               tenant_id: tid,
             })
           }
@@ -1131,7 +1153,7 @@ export default function ImportarTransacoesPage() {
 
                 {/* Transactions review table */}
                 <div className="rounded-xl border border-border bg-card shadow-sm overflow-x-auto">
-                  <table className="w-full min-w-[1050px]">
+                  <table className="w-full min-w-[1200px]">
                     <thead>
                       <tr className="border-b border-border text-xs font-semibold uppercase text-muted-foreground">
                         <th className="px-3 py-3 text-left w-10">
@@ -1144,6 +1166,7 @@ export default function ImportarTransacoesPage() {
                         <th className="px-3 py-3 text-left">Subcategoria</th>
                         <th className="px-3 py-3 text-left">Sub-Filho</th>
                         <th className="px-3 py-3 text-left">Cliente / Fornecedor</th>
+                        <th className="px-3 py-3 text-left">F. Pagamento</th>
                         <th className="px-3 py-3 text-right">Acoes</th>
                       </tr>
                     </thead>
@@ -1153,6 +1176,18 @@ export default function ImportarTransacoesPage() {
                         const subcats = getSubcatOptions(tx.categoria_id?.toString() || "")
                         const filhos = getFilhoOptions(tx.subcategoria_id?.toString() || "")
                         const isAutoMatched = tx.categoria_id !== null
+                        const fornecedorOptions = fornecedoresLista.map(f => ({ label: f.nome, value: f.id.toString() }))
+                        const clienteOptions = clientesLista.map(c => ({ label: c.nome, value: c.id.toString() }))
+                        const formaPgtoOptions = [
+                          { label: "PIX", value: "PIX" },
+                          { label: "Boleto", value: "Boleto" },
+                          { label: "Cartao de Credito", value: "Cartao de Credito" },
+                          { label: "Cartao de Debito", value: "Cartao de Debito" },
+                          { label: "Transferencia", value: "Transferencia" },
+                          { label: "Debito em Conta", value: "Debito em Conta" },
+                          { label: "Dinheiro", value: "Dinheiro" },
+                          { label: "Cheque", value: "Cheque" },
+                        ]
                         return (
                           <tr key={tx.fitId} className={`transition-colors hover:bg-muted/50 ${!tx.selected ? "opacity-40" : ""}`}>
                             <td className="px-3 py-2.5">
@@ -1164,8 +1199,14 @@ export default function ImportarTransacoesPage() {
                                 <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${isCredit ? "bg-[hsl(142,71%,40%)]/10" : "bg-[hsl(0,72%,51%)]/10"}`}>
                                   {isCredit ? <ArrowDownLeft className="h-3.5 w-3.5 text-[hsl(142,71%,40%)]" /> : <ArrowUpRight className="h-3.5 w-3.5 text-[hsl(0,72%,51%)]" />}
                                 </div>
-                                <div className="min-w-0">
-                                  <p className="truncate text-sm text-card-foreground max-w-[240px]" title={tx.memo}>{tx.memo}</p>
+                                <div className="min-w-0 flex-1">
+                                  <input
+                                    type="text"
+                                    value={tx.descricao_editada || tx.memo}
+                                    onChange={(e) => updateTx(idx, "descricao_editada", e.target.value)}
+                                    className="w-full max-w-[220px] rounded-md border border-transparent bg-transparent px-1 py-0.5 text-sm text-card-foreground outline-none hover:border-border focus:border-primary/50 focus:bg-background"
+                                    title={tx.memo}
+                                  />
                                   {isAutoMatched && <span className="text-[10px] text-[hsl(142,71%,40%)]">auto-classificado</span>}
                                 </div>
                               </div>
@@ -1202,34 +1243,41 @@ export default function ImportarTransacoesPage() {
                             </td>
                             <td className="px-3 py-2.5">
                               {tx.amount < 0 ? (
-                                <select
+                                <InlineDropdown
                                   value={tx.fornecedor_id?.toString() || ""}
-                                  onChange={(e) => {
-                                    const fId = e.target.value ? Number(e.target.value) : null
+                                  options={fornecedorOptions}
+                                  onChange={(val) => {
+                                    const fId = val ? Number(val) : null
                                     const fNome = fornecedoresLista.find((f) => f.id === fId)?.nome || ""
                                     updateTx(idx, "fornecedor_id", fId)
                                     updateTx(idx, "clienteFornecedor", fNome)
                                   }}
-                                  className="w-full max-w-[160px] rounded-md border border-border bg-card px-2 py-1.5 text-xs text-card-foreground outline-none focus:border-primary/50"
-                                >
-                                  <option value="">Fornecedor...</option>
-                                  {fornecedoresLista.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
-                                </select>
+                                  placeholder="Fornecedor..."
+                                  width="w-36"
+                                />
                               ) : (
-                                <select
+                                <InlineDropdown
                                   value={tx.cliente_id?.toString() || ""}
-                                  onChange={(e) => {
-                                    const cId = e.target.value ? Number(e.target.value) : null
+                                  options={clienteOptions}
+                                  onChange={(val) => {
+                                    const cId = val ? Number(val) : null
                                     const cNome = clientesLista.find((c) => c.id === cId)?.nome || ""
                                     updateTx(idx, "cliente_id", cId)
                                     updateTx(idx, "clienteFornecedor", cNome)
                                   }}
-                                  className="w-full max-w-[160px] rounded-md border border-border bg-card px-2 py-1.5 text-xs text-card-foreground outline-none focus:border-primary/50"
-                                >
-                                  <option value="">Cliente...</option>
-                                  {clientesLista.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
-                                </select>
+                                  placeholder="Cliente..."
+                                  width="w-36"
+                                />
                               )}
+                            </td>
+                            <td className="px-3 py-2.5">
+                              <InlineDropdown
+                                value={tx.forma_pagamento || ""}
+                                options={formaPgtoOptions}
+                                onChange={(val) => updateTx(idx, "forma_pagamento", val)}
+                                placeholder={tx.forma_pagamento || "F. Pgto..."}
+                                width="w-32"
+                              />
                             </td>
                             <td className="px-3 py-2.5 text-right">
                               <button type="button" onClick={() => openSplitDialog(idx)}
