@@ -1,5 +1,6 @@
 /**
  * Utilitarios para formatacao de moeda brasileira (BRL)
+ * @version 2.0.0 - Atualizado para aceitar eventos e valores
  */
 
 /**

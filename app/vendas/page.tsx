@@ -1,5 +1,5 @@
 "use client"
-
+// v2.0.0 - Fixed currency input handling
 import React, { useState, useEffect, useMemo, useCallback } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { Suspense } from "react"
