@@ -204,9 +204,10 @@ function VendasPage() {
   }
 
   function openNew() {
-    setEditingVenda(null)
-    setForm(emptyForm)
-    setDialogOpen(true)
+  console.log("[v0] openNew chamado, form:", emptyForm)
+  setEditingVenda(null)
+  setForm(emptyForm)
+  setDialogOpen(true)
   }
 
   function openEdit(v: Venda) {
@@ -689,11 +690,11 @@ function VendasPage() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Codigo</Label>
-                  <Input placeholder="Codigo da venda" value={form.codigo} onChange={(e) => setForm({ ...form, codigo: e.target.value })} />
+                  <Input placeholder="Codigo da venda" value={form.codigo} onChange={(e) => { console.log("[v0] Codigo onChange:", e.target.value); setForm({ ...form, codigo: e.target.value }) }} />
                 </div>
                 <div className="space-y-2">
                   <Label>Data/Hora</Label>
-                  <Input type="datetime-local" value={form.data_venda} onChange={(e) => setForm({ ...form, data_venda: e.target.value })} />
+                  <Input type="datetime-local" value={form.data_venda} onChange={(e) => { console.log("[v0] Data onChange:", e.target.value); setForm({ ...form, data_venda: e.target.value }) }} />
                 </div>
               </div>
 
