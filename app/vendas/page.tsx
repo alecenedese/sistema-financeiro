@@ -204,10 +204,9 @@ function VendasPage() {
   }
 
   function openNew() {
-  console.log("[v0] openNew chamado, form:", emptyForm)
-  setEditingVenda(null)
-  setForm(emptyForm)
-  setDialogOpen(true)
+    setEditingVenda(null)
+    setForm(emptyForm)
+    setDialogOpen(true)
   }
 
   function openEdit(v: Venda) {
@@ -715,26 +714,26 @@ function VendasPage() {
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label>Valor Total *</Label>
-                  <Input placeholder="0,00" value={form.valor_total} onChange={(e) => setForm({ ...form, valor_total: handleCurrencyInput(e) })} />
+                  <Input placeholder="0,00" value={form.valor_total} onChange={(e) => setForm({ ...form, valor_total: handleCurrencyInput(e.target.value) })} />
                 </div>
                 <div className="space-y-2">
                   <Label>Acrescimo</Label>
-                  <Input placeholder="0,00" value={form.acrescimo} onChange={(e) => setForm({ ...form, acrescimo: handleCurrencyInput(e) })} />
+                  <Input placeholder="0,00" value={form.acrescimo} onChange={(e) => setForm({ ...form, acrescimo: handleCurrencyInput(e.target.value) })} />
                 </div>
                 <div className="space-y-2">
                   <Label>Taxas Marketplace</Label>
-                  <Input placeholder="0,00" value={form.taxas_marketplace} onChange={(e) => setForm({ ...form, taxas_marketplace: handleCurrencyInput(e) })} />
+                  <Input placeholder="0,00" value={form.taxas_marketplace} onChange={(e) => setForm({ ...form, taxas_marketplace: handleCurrencyInput(e.target.value) })} />
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label>Desconto</Label>
-                  <Input placeholder="0,00" value={form.desconto} onChange={(e) => setForm({ ...form, desconto: handleCurrencyInput(e) })} />
+                  <Input placeholder="0,00" value={form.desconto} onChange={(e) => setForm({ ...form, desconto: handleCurrencyInput(e.target.value) })} />
                 </div>
                 <div className="space-y-2">
                   <Label>Valor Recebido</Label>
-                  <Input placeholder="Calculado automaticamente" value={form.valor_recebido} onChange={(e) => setForm({ ...form, valor_recebido: handleCurrencyInput(e) })} />
+                  <Input placeholder="Calculado automaticamente" value={form.valor_recebido} onChange={(e) => setForm({ ...form, valor_recebido: handleCurrencyInput(e.target.value) })} />
                 </div>
                 <div className="space-y-2">
                   <Label>Forma Pagamento</Label>
