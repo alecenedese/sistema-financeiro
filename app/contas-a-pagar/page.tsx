@@ -46,7 +46,22 @@ interface ContaPagar {
   fornecedor_nome: string
 }
 
-const FORMAS_PAGAMENTO = ["PIX", "Boleto", "Cartao de Credito", "Cartao de Debito", "Debito em Conta", "Transferencia", "Dinheiro", "Cheque"]
+const FORMAS_PAGAMENTO = ["PIX", "Boleto", "Cartão de Crédito", "Cartão de Débito", "Débito em Conta", "Transferência", "Dinheiro", "Cheque"]
+
+// Normaliza forma de pagamento para valor padrao do select
+function normalizaFormaPgto(fp: string): string {
+  if (!fp) return ""
+  const lower = fp.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+  if (lower === "pix") return "PIX"
+  if (lower === "boleto") return "Boleto"
+  if (lower.includes("credito")) return "Cartão de Crédito"
+  if (lower.includes("debito") && lower.includes("conta")) return "Débito em Conta"
+  if (lower.includes("debito")) return "Cartão de Débito"
+  if (lower.includes("transfer")) return "Transferência"
+  if (lower.includes("dinheiro")) return "Dinheiro"
+  if (lower.includes("cheque")) return "Cheque"
+  return fp
+}
 const selectClass = "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
 
 // Recalcula e atualiza o saldo de uma conta bancaria
@@ -311,7 +326,7 @@ function ContasAPagarPage() {
       subcategoria_filho_id: conta.subcategoria_filho_id?.toString() || "",
       conta_bancaria_id: conta.conta_bancaria_id?.toString() || "",
       status: conta.status,
-      forma_pagamento: conta.forma_pagamento || "",
+      forma_pagamento: normalizaFormaPgto(conta.forma_pagamento),
     })
     setDialogOpen(true)
   }
