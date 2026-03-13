@@ -551,10 +551,10 @@ export default function ImportarTransacoesPage() {
           if (!forma_pagamento) {
             const memoLower = tx.memo.toLowerCase()
             if (memoLower.includes("pix")) forma_pagamento = "PIX"
-            else if (memoLower.includes("ted") || memoLower.includes("transf")) forma_pagamento = "Transferencia"
+            else if (memoLower.includes("ted") || memoLower.includes("transf")) forma_pagamento = "Transferência"
             else if (memoLower.includes("boleto")) forma_pagamento = "Boleto"
-            else if (memoLower.includes("debito") || memoLower.includes("debit")) forma_pagamento = "Cartao de Debito"
-            else if (memoLower.includes("credito") || memoLower.includes("credit")) forma_pagamento = "Cartao de Credito"
+            else if (memoLower.includes("debito") || memoLower.includes("debit")) forma_pagamento = "Cartão de Débito"
+            else if (memoLower.includes("credito") || memoLower.includes("credit")) forma_pagamento = "Cartão de Crédito"
             else if (memoLower.includes("cheque")) forma_pagamento = "Cheque"
           }
 
@@ -1181,10 +1181,10 @@ export default function ImportarTransacoesPage() {
                         const formaPgtoOptions = [
                           { label: "PIX", value: "PIX" },
                           { label: "Boleto", value: "Boleto" },
-                          { label: "Cartao de Credito", value: "Cartao de Credito" },
-                          { label: "Cartao de Debito", value: "Cartao de Debito" },
-                          { label: "Transferencia", value: "Transferencia" },
-                          { label: "Debito em Conta", value: "Debito em Conta" },
+                          { label: "Cartão de Crédito", value: "Cartão de Crédito" },
+                          { label: "Cartão de Débito", value: "Cartão de Débito" },
+                          { label: "Transferência", value: "Transferência" },
+                          { label: "Débito em Conta", value: "Débito em Conta" },
                           { label: "Dinheiro", value: "Dinheiro" },
                           { label: "Cheque", value: "Cheque" },
                         ]
