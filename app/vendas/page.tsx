@@ -118,6 +118,8 @@ function VendasPage() {
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
   const [deleteConfirm, setDeleteConfirm] = useState<Venda | null>(null)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [deleteMultiConfirm, setDeleteMultiConfirm] = useState(false)
 
   // Import
   const [importOpen, setImportOpen] = useState(false)
@@ -282,6 +284,36 @@ function VendasPage() {
     await mutate()
     setDeleteConfirm(null)
   }, [mutate])
+
+  // Seleção múltipla
+  function toggleSelectAll() {
+    if (selectedIds.size === paginatedFiltered.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(paginatedFiltered.map(v => v.id)))
+    }
+  }
+
+  function toggleSelect(id: number) {
+    const newSet = new Set(selectedIds)
+    if (newSet.has(id)) newSet.delete(id)
+    else newSet.add(id)
+    setSelectedIds(newSet)
+  }
+
+  async function handleDeleteMultiple() {
+    if (selectedIds.size === 0) return
+    setSaving(true)
+    try {
+      const supabase = createClient()
+      await supabase.from("vendas").delete().in("id", Array.from(selectedIds))
+      await mutate()
+      setSelectedIds(new Set())
+      setDeleteMultiConfirm(false)
+    } finally {
+      setSaving(false)
+    }
+  }
 
   // Import functions
   function readFileText(file: File, enc: string): Promise<string> {
@@ -498,6 +530,12 @@ function VendasPage() {
                 className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
                 <Upload className="h-4 w-4" />Importar
               </button>
+              {selectedIds.size > 0 && (
+                <button type="button" onClick={() => setDeleteMultiConfirm(true)}
+                  className="flex items-center gap-2 rounded-lg bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition-colors hover:bg-destructive/90">
+                  <Trash2 className="h-4 w-4" />Excluir ({selectedIds.size})
+                </button>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <div className="flex items-center rounded-lg border border-border bg-card">
@@ -592,6 +630,9 @@ function VendasPage() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="border-b border-border bg-muted/50">
+                      <th className="w-10 px-3 py-3">
+                        <input type="checkbox" checked={selectedIds.size === paginatedFiltered.length && paginatedFiltered.length > 0} onChange={toggleSelectAll} className="h-4 w-4 rounded border-border" />
+                      </th>
                       <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Codigo</th>
                       <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Cliente</th>
                       <th className="px-4 py-3 text-right font-semibold text-muted-foreground">Valor Total</th>
@@ -608,12 +649,15 @@ function VendasPage() {
                   <tbody>
                     {paginatedFiltered.length === 0 ? (
                       <tr>
-                        <td colSpan={11} className="px-5 py-12 text-center text-sm text-muted-foreground">
+                        <td colSpan={12} className="px-5 py-12 text-center text-sm text-muted-foreground">
                           {hasFilter ? "Nenhuma venda encontrada com os filtros atuais." : "Nenhuma venda cadastrada."}
                         </td>
                       </tr>
                     ) : paginatedFiltered.map((venda) => (
-                      <tr key={venda.id} className="border-b border-border last:border-0 hover:bg-muted/30 transition-colors">
+                      <tr key={venda.id} className={`border-b border-border last:border-0 hover:bg-muted/30 transition-colors ${selectedIds.has(venda.id) ? "bg-primary/5" : ""}`}>
+                        <td className="px-3 py-3">
+                          <input type="checkbox" checked={selectedIds.has(venda.id)} onChange={() => toggleSelect(venda.id)} className="h-4 w-4 rounded border-border" />
+                        </td>
                         <td className="px-4 py-3 font-mono text-xs">{venda.codigo || "-"}</td>
                         <td className="px-4 py-3 font-medium">{venda.cliente_nome || "-"}</td>
                         <td className="px-4 py-3 text-right font-semibold text-[#16a34a]">{formatCurrency(venda.valor_total)}</td>
@@ -791,6 +835,24 @@ function VendasPage() {
               <AlertDialogCancel>Cancelar</AlertDialogCancel>
               <AlertDialogAction onClick={() => deleteConfirm && handleDelete(deleteConfirm)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                 Excluir
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        {/* Delete multiple confirmation */}
+        <AlertDialog open={deleteMultiConfirm} onOpenChange={setDeleteMultiConfirm}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Excluir {selectedIds.size} vendas</AlertDialogTitle>
+              <AlertDialogDescription>
+                Tem certeza que deseja excluir {selectedIds.size} vendas selecionadas? Esta acao nao pode ser desfeita.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancelar</AlertDialogCancel>
+              <AlertDialogAction onClick={handleDeleteMultiple} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : `Excluir ${selectedIds.size}`}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

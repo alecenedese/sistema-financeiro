@@ -190,6 +190,8 @@ function ContasAReceberPage() {
   const [deleteConfirm, setDeleteConfirm] = useState<ContaReceber | null>(null)
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [deleteMultiConfirm, setDeleteMultiConfirm] = useState(false)
 
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -381,6 +383,48 @@ function openEdit(conta: ContaReceber) {
     }
   }
 
+  // Seleção múltipla
+  function toggleSelectAll() {
+    if (selectedIds.size === paginatedFiltered.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(paginatedFiltered.map(c => c.id)))
+    }
+  }
+
+  function toggleSelect(id: number) {
+    const newSet = new Set(selectedIds)
+    if (newSet.has(id)) newSet.delete(id)
+    else newSet.add(id)
+    setSelectedIds(newSet)
+  }
+
+  async function handleDeleteMultiple() {
+    if (selectedIds.size === 0) return
+    setSaving(true)
+    try {
+      const supabase = createClient()
+      const contasAfetadas = new Set<number>()
+      
+      for (const id of selectedIds) {
+        const conta = contas.find(c => c.id === id)
+        if (conta?.conta_bancaria_id) contasAfetadas.add(conta.conta_bancaria_id)
+      }
+      
+      await supabase.from("contas_receber").delete().in("id", Array.from(selectedIds))
+      
+      for (const contaId of contasAfetadas) {
+        await recalcularSaldoConta(contaId)
+      }
+      
+      await mutate()
+      setSelectedIds(new Set())
+      setDeleteMultiConfirm(false)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
     <div className="flex min-h-screen bg-background">
       <AppSidebar />
@@ -396,6 +440,12 @@ function openEdit(conta: ContaReceber) {
                   className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
                   <Plus className="h-4 w-4" />Adicionar
                 </button>
+                {selectedIds.size > 0 && (
+                  <button type="button" onClick={() => setDeleteMultiConfirm(true)}
+                    className="flex items-center gap-2 rounded-lg bg-destructive px-4 py-2 text-sm font-semibold text-destructive-foreground transition-colors hover:bg-destructive/90">
+                    <Trash2 className="h-4 w-4" />Excluir ({selectedIds.size})
+                  </button>
+                )}
               </div>
               <div className="flex items-center gap-2">
                 <div className="flex items-center rounded-lg border border-border bg-card">
@@ -511,6 +561,9 @@ function openEdit(conta: ContaReceber) {
                   <table className="w-full min-w-[860px] border-collapse text-sm">
                     <thead>
                       <tr className="border-b border-border bg-muted/40">
+                        <th className="w-10 px-3 py-3">
+                          <input type="checkbox" checked={selectedIds.size === paginatedFiltered.length && paginatedFiltered.length > 0} onChange={toggleSelectAll} className="h-4 w-4 rounded border-border" />
+                        </th>
                         <th className="px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Descricao</th>
                         <th className="w-36 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Cliente</th>
                         <th className="w-44 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Categoria</th>
@@ -524,12 +577,15 @@ function openEdit(conta: ContaReceber) {
                     <tbody>
                       {paginatedFiltered.length === 0 ? (
                         <tr>
-                          <td colSpan={8} className="px-5 py-12 text-center text-sm text-muted-foreground">
+                          <td colSpan={9} className="px-5 py-12 text-center text-sm text-muted-foreground">
                             {hasFilter ? "Nenhuma conta encontrada com os filtros atuais." : "Nenhuma conta a receber cadastrada."}
                           </td>
                         </tr>
                       ) : paginatedFiltered.map((conta) => (
-                        <tr key={conta.id} className="group border-b border-border last:border-b-0 transition-colors hover:bg-muted/40">
+                        <tr key={conta.id} className={`group border-b border-border last:border-b-0 transition-colors hover:bg-muted/40 ${selectedIds.has(conta.id) ? "bg-primary/5" : ""}`}>
+                          <td className="px-3 py-3.5">
+                            <input type="checkbox" checked={selectedIds.has(conta.id)} onChange={() => toggleSelect(conta.id)} className="h-4 w-4 rounded border-border" />
+                          </td>
                           <td className="px-4 py-3.5">
                             <div className="flex items-center gap-3">
                               <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${conta.status === "vencido" ? "bg-[hsl(0,72%,51%)]/10" : conta.status === "recebido" ? "bg-[hsl(142,71%,40%)]/10" : "bg-[hsl(38,92%,50%)]/10"}`}>
@@ -713,6 +769,23 @@ function openEdit(conta: ContaReceber) {
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
             <AlertDialogAction onClick={() => deleteConfirm && handleDelete(deleteConfirm)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
               {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Excluir"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={deleteMultiConfirm} onOpenChange={setDeleteMultiConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Excluir {selectedIds.size} contas a receber</AlertDialogTitle>
+            <AlertDialogDescription>
+              Tem certeza que deseja excluir {selectedIds.size} contas selecionadas? Esta acao nao pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDeleteMultiple} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : `Excluir ${selectedIds.size}`}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
