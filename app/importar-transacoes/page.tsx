@@ -1223,33 +1223,38 @@ export default function ImportarTransacoesPage() {
                               {isCredit ? "+" : "-"} {formatCurrency(Math.abs(tx.amount))}
                             </td>
                             <td className="px-2 py-2.5">
-                              {!isCredit ? (
-                                <InlineDropdown
-                                  value={tx.categoria_id?.toString() || ""}
-                                  options={catOptions}
-                                  onChange={(val) => updateTx(idx, "categoria_id", val ? Number(val) : null)}
-                                  placeholder="Selecionar"
-                                  width="w-28"
-                                />
-                              ) : (
-                                <span className="text-xs text-muted-foreground">-</span>
-                              )}
+                              <InlineDropdown
+                                value={tx.categoria_id?.toString() || ""}
+                                options={catOptions}
+                                onChange={(val) => updateTx(idx, "categoria_id", val ? Number(val) : null)}
+                                placeholder="Categoria..."
+                                width="w-28"
+                              />
                             </td>
                             <td className="px-2 py-2.5">
-                              {!isCredit && tx.categoria_id ? (
+                              <InlineDropdown
+                                value={tx.subcategoria_id?.toString() || ""}
+                                options={subcats}
+                                onChange={(val) => updateTx(idx, "subcategoria_id", val ? Number(val) : null)}
+                                placeholder={tx.categoria_id ? "Subcategoria..." : "-"}
+                                width="w-32"
+                              />
+                            </td>
+                            <td className="px-2 py-2.5">
+                              {isCredit ? (
                                 <InlineDropdown
-                                  value={tx.subcategoria_id?.toString() || ""}
-                                  options={subcats}
-                                  onChange={(val) => updateTx(idx, "subcategoria_id", val ? Number(val) : null)}
-                                  placeholder="Selecionar"
+                                  value={tx.cliente_id?.toString() || ""}
+                                  options={clienteOptions}
+                                  onChange={(val) => {
+                                    const cId = val ? Number(val) : null
+                                    const cNome = clientesLista.find((c) => c.id === cId)?.nome || ""
+                                    updateTx(idx, "cliente_id", cId)
+                                    updateTx(idx, "clienteFornecedor", cNome)
+                                  }}
+                                  placeholder="Cliente..."
                                   width="w-32"
                                 />
                               ) : (
-                                <span className="text-xs text-muted-foreground">-</span>
-                              )}
-                            </td>
-                            <td className="px-2 py-2.5">
-                              {!isCredit ? (
                                 <InlineDropdown
                                   value={tx.fornecedor_id?.toString() || ""}
                                   options={fornecedorOptions}
@@ -1262,8 +1267,6 @@ export default function ImportarTransacoesPage() {
                                   placeholder="Fornecedor..."
                                   width="w-32"
                                 />
-                              ) : (
-                                <span className="text-xs text-muted-foreground">-</span>
                               )}
                             </td>
                             <td className="px-2 py-2.5">
