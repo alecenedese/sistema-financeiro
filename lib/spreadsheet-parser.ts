@@ -56,6 +56,7 @@ export interface ParsedSpreadsheetTransaction {
   fornecedor: string
   formaPagamento: string
   planoConta: string
+  subcategoria: string
   banco: string
 }
 
@@ -151,9 +152,10 @@ function mapHeaders(headers: string[]): Record<string, number> {
     data:           ["data", "date", "dt"],
     descricao:      ["descr", "histor", "memo", "description"],
     valor:          ["valor", "value", "amount", "vlr"],
-    fornecedor:     ["fornecedor", "cliente", "supplier", "vendor", "favorecido"],
+    fornecedor:     ["fornecedor", "cliente", "supplier", "vendor", "favorecido", "cliente for", "cliente fornecedor"],
     formaPagamento: ["forma", "pgto", "pagamento", "payment", "f pgto"],
     planoConta:     ["plano", "categoria", "category", "conta"],
+    subcategoria:   ["subcategoria", "subcategory", "sub categoria"],
     banco:          ["banco", "bank"],
   }
 
@@ -198,6 +200,7 @@ export function parseCSV(content: string): ParsedSpreadsheetTransaction[] {
     const fornecedor = idx.fornecedor !== undefined ? cols[idx.fornecedor] || "" : ""
     const formaPagamento = idx.formaPagamento !== undefined ? cols[idx.formaPagamento] || "" : ""
     const planoConta = idx.planoConta !== undefined ? cols[idx.planoConta] || "" : ""
+    const subcategoria = idx.subcategoria !== undefined ? cols[idx.subcategoria] || "" : ""
     const banco = idx.banco !== undefined ? cols[idx.banco] || "" : ""
 
     if (!dataRaw && !descricao && !valorRaw) continue
@@ -210,6 +213,7 @@ export function parseCSV(content: string): ParsedSpreadsheetTransaction[] {
       fornecedor,
       formaPagamento,
       planoConta,
+      subcategoria,
       banco,
     })
   }
@@ -242,6 +246,7 @@ export async function parseXLSX(buffer: ArrayBuffer): Promise<ParsedSpreadsheetT
     const fornecedor = idx.fornecedor !== undefined ? String(cols[idx.fornecedor] ?? "") : ""
     const formaPagamento = idx.formaPagamento !== undefined ? String(cols[idx.formaPagamento] ?? "") : ""
     const planoConta = idx.planoConta !== undefined ? String(cols[idx.planoConta] ?? "") : ""
+    const subcategoria = idx.subcategoria !== undefined ? String(cols[idx.subcategoria] ?? "") : ""
     const banco = idx.banco !== undefined ? String(cols[idx.banco] ?? "") : ""
 
     if (!dataRaw && !descricao && !valorRaw) continue
@@ -263,6 +268,7 @@ export async function parseXLSX(buffer: ArrayBuffer): Promise<ParsedSpreadsheetT
       fornecedor,
       formaPagamento,
       planoConta,
+      subcategoria,
       banco,
     })
   }
@@ -291,8 +297,9 @@ export function spreadsheetToOFXTransactions(rows: ParsedSpreadsheetTransaction[
         // Campos extras preservados para pré-preenchimento
         _fornecedor: r.fornecedor,
         _planoConta: r.planoConta,
+        _subcategoria: r.subcategoria,
         _banco: r.banco,
         _formaPagamento: r.formaPagamento,
-      } as OFXTransaction & { _fornecedor: string; _planoConta: string; _banco: string; _formaPagamento: string }
+      } as OFXTransaction & { _fornecedor: string; _planoConta: string; _subcategoria: string; _banco: string; _formaPagamento: string }
     })
 }
