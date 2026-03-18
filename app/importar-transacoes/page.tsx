@@ -525,46 +525,55 @@ export default function ImportarTransacoesPage() {
       const rows: TransactionRow[] = txs
         .map((tx) => {
           const extra = tx as OFXTransaction & { _fornecedor?: string; _planoConta?: string; _formaPagamento?: string }
-
-          // 1. Match fornecedor pelo nome do CSV
+          const isDebit = tx.amount < 0 // Saída/despesa
+          
+          // Para entradas (CREDIT), não preencher categoria/cliente/fornecedor automaticamente
           let fornecedor_id: number | null = null
           let clienteFornecedor = ""
-          if (extra._fornecedor) {
-            fornecedor_id = matchByName(fornecedorList, extra._fornecedor)
-            clienteFornecedor = extra._fornecedor.trim()
-          }
-
-          // 2. Match categoria pelo plano de conta do CSV
           let categoria_id: number | null = null
-          if (extra._planoConta) {
-            categoria_id = matchByName(categoriaList, extra._planoConta)
+          let subcategoria_id: number | null = null
+          let subcategoria_filho_id: number | null = null
+          let cliente_id: number | null = null
+          
+          // Só aplica regras automáticas para SAÍDAS (débitos)
+          if (isDebit) {
+            // 1. Match fornecedor pelo nome do CSV
+            if (extra._fornecedor) {
+              fornecedor_id = matchByName(fornecedorList, extra._fornecedor)
+              clienteFornecedor = extra._fornecedor.trim()
+            }
+
+            // 2. Match categoria pelo plano de conta do CSV
+            if (extra._planoConta) {
+              categoria_id = matchByName(categoriaList, extra._planoConta)
+            }
+
+            // 3. Aplica regras automaticas como fallback (se CSV nao mapeou)
+            const matched = applyRules(tx)
+            if (!fornecedor_id && matched.fornecedor_id) fornecedor_id = matched.fornecedor_id
+            if (!clienteFornecedor) clienteFornecedor = matched.clienteFornecedor || extractClienteFornecedor(tx.memo)
+            if (!categoria_id && matched.categoria_id) categoria_id = matched.categoria_id
+            subcategoria_id = matched.subcategoria_id
+            subcategoria_filho_id = matched.subcategoria_filho_id
           }
 
-          // 3. Aplica regras automaticas como fallback (se CSV nao mapeou)
-          const matched = applyRules(tx)
-          if (!fornecedor_id && matched.fornecedor_id) fornecedor_id = matched.fornecedor_id
-          if (!clienteFornecedor) clienteFornecedor = matched.clienteFornecedor || extractClienteFornecedor(tx.memo)
-          if (!categoria_id && matched.categoria_id) categoria_id = matched.categoria_id
-
-          // 4. Detecta forma de pagamento automaticamente
+          // 4. Detecta forma de pagamento automaticamente (para ambos)
           let forma_pagamento = extra._formaPagamento || ""
           if (!forma_pagamento) {
             const memoLower = tx.memo.toLowerCase()
             if (memoLower.includes("pix")) forma_pagamento = "PIX"
             else if (memoLower.includes("ted") || memoLower.includes("transf")) forma_pagamento = "Transferência"
             else if (memoLower.includes("boleto")) forma_pagamento = "Boleto"
-            else if (memoLower.includes("debito") || memoLower.includes("debit")) forma_pagamento = "Cartão de Débito"
-            else if (memoLower.includes("credito") || memoLower.includes("credit")) forma_pagamento = "Cartão de Crédito"
             else if (memoLower.includes("cheque")) forma_pagamento = "Cheque"
           }
 
           return {
             ...tx,
             categoria_id,
-            subcategoria_id: matched.subcategoria_id,
-            subcategoria_filho_id: matched.subcategoria_filho_id,
+            subcategoria_id,
+            subcategoria_filho_id,
             fornecedor_id,
-            cliente_id: matched.cliente_id,
+            cliente_id,
             clienteFornecedor,
             selected: tx.amount !== 0,
             forma_pagamento,
@@ -1153,21 +1162,20 @@ export default function ImportarTransacoesPage() {
 
                 {/* Transactions review table */}
                 <div className="rounded-xl border border-border bg-card shadow-sm overflow-x-auto">
-                  <table className="w-full min-w-[1200px]">
+                  <table className="w-full min-w-[1100px]">
                     <thead>
                       <tr className="border-b border-border text-xs font-semibold uppercase text-muted-foreground">
-                        <th className="px-3 py-3 text-left w-10">
+                        <th className="px-2 py-3 text-left w-8">
                           <input type="checkbox" checked={selectAll} onChange={toggleSelectAll} className="rounded border-border" />
                         </th>
-                        <th className="px-3 py-3 text-left">Data</th>
-                        <th className="px-3 py-3 text-left">Descricao</th>
-                        <th className="px-3 py-3 text-right w-24">Valor</th>
-                        <th className="px-3 py-3 text-left">Categoria</th>
-                        <th className="px-3 py-3 text-left">Subcategoria</th>
-                        <th className="px-3 py-3 text-left">Sub-Filho</th>
-                        <th className="px-3 py-3 text-left">Cliente / Fornecedor</th>
-                        <th className="px-3 py-3 text-left">F. Pagamento</th>
-                        <th className="px-3 py-3 text-right">Acoes</th>
+                        <th className="px-2 py-3 text-left w-20">Data</th>
+                        <th className="px-3 py-3 text-left min-w-[280px]">Descricao</th>
+                        <th className="px-2 py-3 text-right w-24">Valor</th>
+                        <th className="px-2 py-3 text-left">Categoria</th>
+                        <th className="px-2 py-3 text-left">Subcategoria</th>
+                        <th className="px-2 py-3 text-left">Cliente / Fornecedor</th>
+                        <th className="px-2 py-3 text-left">F. Pagamento</th>
+                        <th className="px-2 py-3 text-right w-16">Acoes</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-border">
@@ -1190,59 +1198,58 @@ export default function ImportarTransacoesPage() {
                         ]
                         return (
                           <tr key={tx.fitId} className={`transition-colors hover:bg-muted/50 ${!tx.selected ? "opacity-40" : ""}`}>
-                            <td className="px-3 py-2.5">
+                            <td className="px-2 py-2.5">
                               <input type="checkbox" checked={tx.selected} onChange={(e) => updateTx(idx, "selected", e.target.checked)} className="rounded border-border" />
                             </td>
-                            <td className="px-3 py-2.5 text-sm text-muted-foreground whitespace-nowrap">{tx.date}</td>
+                            <td className="px-2 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{tx.date}</td>
                             <td className="px-3 py-2.5">
                               <div className="flex items-center gap-2">
-                                <div className={`flex h-7 w-7 shrink-0 items-center justify-center rounded-md ${isCredit ? "bg-[hsl(142,71%,40%)]/10" : "bg-[hsl(0,72%,51%)]/10"}`}>
-                                  {isCredit ? <ArrowDownLeft className="h-3.5 w-3.5 text-[hsl(142,71%,40%)]" /> : <ArrowUpRight className="h-3.5 w-3.5 text-[hsl(0,72%,51%)]" />}
+                                <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${isCredit ? "bg-[hsl(142,71%,40%)]/10" : "bg-[hsl(0,72%,51%)]/10"}`}>
+                                  {isCredit ? <ArrowDownLeft className="h-3 w-3 text-[hsl(142,71%,40%)]" /> : <ArrowUpRight className="h-3 w-3 text-[hsl(0,72%,51%)]" />}
                                 </div>
                                 <div className="min-w-0 flex-1">
                                   <input
                                     type="text"
                                     value={tx.descricao_editada || tx.memo}
                                     onChange={(e) => updateTx(idx, "descricao_editada", e.target.value)}
-                                    className="w-full max-w-[220px] rounded-md border border-transparent bg-transparent px-1 py-0.5 text-sm text-card-foreground outline-none hover:border-border focus:border-primary/50 focus:bg-background"
+                                    className="w-full min-w-[240px] rounded-md border border-transparent bg-transparent px-1 py-0.5 text-sm text-card-foreground outline-none hover:border-border focus:border-primary/50 focus:bg-background"
                                     title={tx.memo}
                                   />
-                                  {isAutoMatched && <span className="text-[10px] text-[hsl(142,71%,40%)]">auto-classificado</span>}
+                                  {isAutoMatched && !isCredit && <span className="text-[10px] text-[hsl(142,71%,40%)]">auto-classificado</span>}
                                 </div>
                               </div>
                             </td>
-                            <td className={`px-3 py-2.5 text-right text-sm font-semibold whitespace-nowrap ${isCredit ? "text-[hsl(142,71%,45%)]" : "text-[hsl(0,72%,51%)]"}`}>
+                            <td className={`px-2 py-2.5 text-right text-sm font-semibold whitespace-nowrap ${isCredit ? "text-[hsl(142,71%,45%)]" : "text-[hsl(0,72%,51%)]"}`}>
                               {isCredit ? "+" : "-"} {formatCurrency(Math.abs(tx.amount))}
                             </td>
-                            <td className="px-3 py-2.5">
-                              <InlineDropdown
-                                value={tx.categoria_id?.toString() || ""}
-                                options={catOptions}
-                                onChange={(val) => updateTx(idx, "categoria_id", val ? Number(val) : null)}
-                                placeholder="Selecionar"
-                                width="w-32"
-                              />
+                            <td className="px-2 py-2.5">
+                              {!isCredit ? (
+                                <InlineDropdown
+                                  value={tx.categoria_id?.toString() || ""}
+                                  options={catOptions}
+                                  onChange={(val) => updateTx(idx, "categoria_id", val ? Number(val) : null)}
+                                  placeholder="Selecionar"
+                                  width="w-28"
+                                />
+                              ) : (
+                                <span className="text-xs text-muted-foreground">-</span>
+                              )}
                             </td>
-                            <td className="px-3 py-2.5">
-                              <InlineDropdown
-                                value={tx.subcategoria_id?.toString() || ""}
-                                options={subcats}
-                                onChange={(val) => updateTx(idx, "subcategoria_id", val ? Number(val) : null)}
-                                placeholder={tx.categoria_id ? "Selecionar" : "-"}
-                                width="w-36"
-                              />
+                            <td className="px-2 py-2.5">
+                              {!isCredit && tx.categoria_id ? (
+                                <InlineDropdown
+                                  value={tx.subcategoria_id?.toString() || ""}
+                                  options={subcats}
+                                  onChange={(val) => updateTx(idx, "subcategoria_id", val ? Number(val) : null)}
+                                  placeholder="Selecionar"
+                                  width="w-32"
+                                />
+                              ) : (
+                                <span className="text-xs text-muted-foreground">-</span>
+                              )}
                             </td>
-                            <td className="px-3 py-2.5">
-                              <InlineDropdown
-                                value={tx.subcategoria_filho_id?.toString() || ""}
-                                options={filhos}
-                                onChange={(val) => updateTx(idx, "subcategoria_filho_id", val ? Number(val) : null)}
-                                placeholder={filhos.length > 0 ? "Selecionar" : "-"}
-                                width="w-32"
-                              />
-                            </td>
-                            <td className="px-3 py-2.5">
-                              {tx.amount < 0 ? (
+                            <td className="px-2 py-2.5">
+                              {!isCredit ? (
                                 <InlineDropdown
                                   value={tx.fornecedor_id?.toString() || ""}
                                   options={fornecedorOptions}
@@ -1253,37 +1260,26 @@ export default function ImportarTransacoesPage() {
                                     updateTx(idx, "clienteFornecedor", fNome)
                                   }}
                                   placeholder="Fornecedor..."
-                                  width="w-36"
+                                  width="w-32"
                                 />
                               ) : (
-                                <InlineDropdown
-                                  value={tx.cliente_id?.toString() || ""}
-                                  options={clienteOptions}
-                                  onChange={(val) => {
-                                    const cId = val ? Number(val) : null
-                                    const cNome = clientesLista.find((c) => c.id === cId)?.nome || ""
-                                    updateTx(idx, "cliente_id", cId)
-                                    updateTx(idx, "clienteFornecedor", cNome)
-                                  }}
-                                  placeholder="Cliente..."
-                                  width="w-36"
-                                />
+                                <span className="text-xs text-muted-foreground">-</span>
                               )}
                             </td>
-                            <td className="px-3 py-2.5">
+                            <td className="px-2 py-2.5">
                               <InlineDropdown
                                 value={tx.forma_pagamento || ""}
                                 options={formaPgtoOptions}
                                 onChange={(val) => updateTx(idx, "forma_pagamento", val)}
                                 placeholder={tx.forma_pagamento || "F. Pgto..."}
-                                width="w-32"
+                                width="w-28"
                               />
                             </td>
-                            <td className="px-3 py-2.5 text-right">
+                            <td className="px-2 py-2.5 text-right">
                               <button type="button" onClick={() => openSplitDialog(idx)}
-                                className="inline-flex items-center gap-1 rounded-md px-2.5 py-1.5 text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors">
-                                <ArrowLeftRight className="h-3.5 w-3.5" />
-                                {tx.isSplit ? `${tx.splits?.length} divisoes` : "Dividir"}
+                                className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium bg-muted text-muted-foreground hover:bg-muted/80 transition-colors">
+                                <ArrowLeftRight className="h-3 w-3" />
+                                {tx.isSplit ? `${tx.splits?.length}` : ""}
                               </button>
                             </td>
                           </tr>
