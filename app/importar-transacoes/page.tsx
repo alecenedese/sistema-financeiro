@@ -27,6 +27,9 @@ import {
   RotateCcw,
   Loader2,
   Plus,
+  Copy,
+  Pencil,
+  Download,
 } from "lucide-react"
 import {
   Dialog,
@@ -96,10 +99,16 @@ interface MappingRule {
   fornecedor_id: number | null
   cliente_id: number | null
   cliente_fornecedor: string
+  conta_bancaria_id?: number | null
+  forma_pagamento?: string
+  descricao?: string
+  substituir_descricao?: boolean
   // Joined names for display
   categoria_nome?: string
   subcategoria_nome?: string
   filho_nome?: string
+  fornecedor_nome?: string
+  cliente_nome?: string
 }
 
 interface TransactionRow extends OFXTransaction {
@@ -202,17 +211,23 @@ async function fetchDespesasFixas(): Promise<DespesaFixaRow[]> {
   }))
 }
 
-async function fetchRules(): Promise<MappingRule[]> {
+async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   const supabase = createClient()
-  const { data, error } = await supabase
+  let q = supabase
     .from("mapping_rules")
     .select(`
       *,
       categorias(nome),
       subcategorias(nome),
-      subcategorias_filhos(nome)
+      subcategorias_filhos(nome),
+      fornecedores(nome),
+      clientes(nome)
     `)
     .order("keyword")
+  
+  if (tid) q = q.eq("tenant_id", tid)
+
+  const { data, error } = await q
 
   if (error) throw error
 
@@ -224,10 +239,16 @@ async function fetchRules(): Promise<MappingRule[]> {
     subcategoria_filho_id: row.subcategoria_filho_id as number | null,
     fornecedor_id: row.fornecedor_id as number | null,
     cliente_id: row.cliente_id as number | null,
-    cliente_fornecedor: row.cliente_fornecedor as string,
+    cliente_fornecedor: (row.cliente_fornecedor as string) || "",
+    conta_bancaria_id: row.conta_bancaria_id as number | null,
+    forma_pagamento: (row.forma_pagamento as string) || "",
+    descricao: (row.descricao as string) || "",
+    substituir_descricao: (row.substituir_descricao as boolean) || false,
     categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
     subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
     filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
+    fornecedor_nome: (row.fornecedores as Record<string, string> | null)?.nome || "",
+    cliente_nome: (row.clientes as Record<string, string> | null)?.nome || "",
   }))
 }
 
@@ -352,7 +373,7 @@ export default function ImportarTransacoesPage() {
   const tid = tenant?.id ?? null
 
   const { data: hierarchy } = useSWR(["hierarchy_importar", tid], ([, t]) => fetchHierarchy(t as number | null))
-  const { data: rules, mutate: mutateRules } = useSWR("mapping_rules", fetchRules)
+  const { data: rules, mutate: mutateRules } = useSWR(["mapping_rules", tid], ([, t]) => fetchRules(t as number | null))
   const { data: contasBancarias = [] } = useSWR(["contas_bancarias_importar", tid], ([, t]) => fetchContasBancarias(t))
   const { data: fornecedoresLista = [] } = useSWR(["fornecedores_importar", tid], ([, t]) => fetchFornecedores(t))
   const { data: clientesLista = [] } = useSWR(["clientes_importar", tid], ([, t]) => fetchClientes(t))
@@ -376,6 +397,11 @@ export default function ImportarTransacoesPage() {
   const [splitTransactionIdx, setSplitTransactionIdx] = useState<number | null>(null)
   const [splitEntries, setSplitEntries] = useState<TransactionSplit[]>([])
   const [splitDisplayValues, setSplitDisplayValues] = useState<Record<string, string>>({})
+
+  // Rule editing state
+  const [selectedRules, setSelectedRules] = useState<Set<number>>(new Set())
+  const [editingRule, setEditingRule] = useState<MappingRule | null>(null)
+  const [ruleEditDialogOpen, setRuleEditDialogOpen] = useState(false)
 
   const allRules = rules || []
 
@@ -505,6 +531,7 @@ export default function ImportarTransacoesPage() {
       // Mapas para match por nome (case-insensitive, trim)
       // Match exato + parcial (contains) para maior flexibilidade
       const fornecedorList = fornecedoresLista.map(f => ({ id: f.id, key: f.nome.trim().toLowerCase() }))
+      const clienteList = clientesLista.map(c => ({ id: c.id, key: c.nome.trim().toLowerCase() }))
       const categoriaList = (hierarchy?.categorias || []).map(c => ({ id: c.id, key: c.nome.trim().toLowerCase() }))
       const subcategoriaList = (hierarchy?.subcategorias || []).map(s => ({ id: s.id, categoria_id: s.categoria_id, key: s.nome.trim().toLowerCase() }))
 
@@ -523,12 +550,21 @@ export default function ImportarTransacoesPage() {
         return null
       }
 
+      console.log("[v0] Listas para match:", {
+        fornecedores: fornecedorList.length,
+        clientes: clienteList.length,
+        categorias: categoriaList.length,
+        subcategorias: subcategoriaList.length,
+      })
+      console.log("[v0] Fornecedores disponiveis:", fornecedorList.map(f => f.key))
+      console.log("[v0] Clientes disponiveis:", clienteList.map(c => c.key))
+      console.log("[v0] Categorias disponiveis:", categoriaList.map(c => c.key))
+
       const rows: TransactionRow[] = txs
         .map((tx) => {
-          const extra = tx as OFXTransaction & { _fornecedor?: string; _planoConta?: string; _subcategoria?: string; _formaPagamento?: string }
+          const extra = tx as OFXTransaction & { _fornecedor?: string; _planoConta?: string; _subcategoria?: string; _formaPagamento?: string; _banco?: string }
           const isDebit = tx.amount < 0 // Saída/despesa
           
-          // Para entradas (CREDIT), não preencher categoria/cliente/fornecedor automaticamente
           let fornecedor_id: number | null = null
           let clienteFornecedor = ""
           let categoria_id: number | null = null
@@ -536,45 +572,64 @@ export default function ImportarTransacoesPage() {
           let subcategoria_filho_id: number | null = null
           let cliente_id: number | null = null
           
-          // Só aplica regras automáticas para SAÍDAS (débitos)
-          if (isDebit) {
-            // 1. Match fornecedor pelo nome do CSV
-            if (extra._fornecedor) {
-              fornecedor_id = matchByName(fornecedorList, extra._fornecedor)
-              clienteFornecedor = extra._fornecedor.trim()
-            }
+          console.log("[v0] Processando tx:", {
+            memo: tx.memo,
+            amount: tx.amount,
+            isDebit,
+            _fornecedor: extra._fornecedor,
+            _planoConta: extra._planoConta,
+            _subcategoria: extra._subcategoria,
+          })
 
-            // 2. Match categoria pelo plano de conta do CSV
-            if (extra._planoConta) {
-              categoria_id = matchByName(categoriaList, extra._planoConta)
+          // 1. Match cliente/fornecedor pelo nome do CSV
+          if (extra._fornecedor) {
+            const searchTerm = extra._fornecedor.trim()
+            clienteFornecedor = searchTerm
+            
+            if (isDebit) {
+              // Para despesas, procura em fornecedores
+              fornecedor_id = matchByName(fornecedorList, searchTerm)
+              console.log("[v0] Match fornecedor:", searchTerm, "->", fornecedor_id)
+            } else {
+              // Para receitas, procura em clientes
+              cliente_id = matchByName(clienteList, searchTerm)
+              console.log("[v0] Match cliente:", searchTerm, "->", cliente_id)
             }
+          }
 
-            // 3. Match subcategoria pelo nome da planilha
-            if (extra._subcategoria) {
-              const subcatSearch = extra._subcategoria.trim().toLowerCase()
-              // Se já tem categoria, filtra subcategorias dessa categoria
-              if (categoria_id) {
-                const subcatMatch = subcategoriaList.find(s => s.categoria_id === categoria_id && s.key.includes(subcatSearch))
-                if (subcatMatch) subcategoria_id = subcatMatch.id
-              } else {
-                // Se não tem categoria, procura em todas subcategorias
-                const subcatMatch = subcategoriaList.find(s => s.key.includes(subcatSearch) || subcatSearch.includes(s.key))
-                if (subcatMatch) {
-                  subcategoria_id = subcatMatch.id
-                  // Preenche a categoria correspondente
-                  categoria_id = subcatMatch.categoria_id
-                }
+          // 2. Match categoria pelo plano de conta do CSV
+          if (extra._planoConta) {
+            categoria_id = matchByName(categoriaList, extra._planoConta)
+            console.log("[v0] Match categoria:", extra._planoConta, "->", categoria_id)
+          }
+
+          // 3. Match subcategoria pelo nome da planilha
+          if (extra._subcategoria) {
+            const subcatSearch = extra._subcategoria.trim().toLowerCase()
+            // Se já tem categoria, filtra subcategorias dessa categoria
+            if (categoria_id) {
+              const subcatMatch = subcategoriaList.find(s => s.categoria_id === categoria_id && (s.key.includes(subcatSearch) || subcatSearch.includes(s.key)))
+              if (subcatMatch) subcategoria_id = subcatMatch.id
+            } else {
+              // Se não tem categoria, procura em todas subcategorias
+              const subcatMatch = subcategoriaList.find(s => s.key.includes(subcatSearch) || subcatSearch.includes(s.key))
+              if (subcatMatch) {
+                subcategoria_id = subcatMatch.id
+                // Preenche a categoria correspondente
+                categoria_id = subcatMatch.categoria_id
               }
             }
-
-            // 4. Aplica regras automaticas como fallback (se CSV nao mapeou)
-            const matched = applyRules(tx)
-            if (!fornecedor_id && matched.fornecedor_id) fornecedor_id = matched.fornecedor_id
-            if (!clienteFornecedor) clienteFornecedor = matched.clienteFornecedor || extractClienteFornecedor(tx.memo)
-            if (!categoria_id && matched.categoria_id) categoria_id = matched.categoria_id
-            if (!subcategoria_id && matched.subcategoria_id) subcategoria_id = matched.subcategoria_id
-            subcategoria_filho_id = matched.subcategoria_filho_id
+            console.log("[v0] Match subcategoria:", extra._subcategoria, "->", subcategoria_id, "categoria:", categoria_id)
           }
+
+          // 4. Aplica regras automaticas como fallback (se planilha nao mapeou)
+          const matched = applyRules(tx)
+          if (!fornecedor_id && matched.fornecedor_id) fornecedor_id = matched.fornecedor_id
+          if (!cliente_id && matched.cliente_id) cliente_id = matched.cliente_id
+          if (!clienteFornecedor) clienteFornecedor = matched.clienteFornecedor || extractClienteFornecedor(tx.memo)
+          if (!categoria_id && matched.categoria_id) categoria_id = matched.categoria_id
+          if (!subcategoria_id && matched.subcategoria_id) subcategoria_id = matched.subcategoria_id
+          if (!subcategoria_filho_id && matched.subcategoria_filho_id) subcategoria_filho_id = matched.subcategoria_filho_id
 
           // 4. Detecta forma de pagamento automaticamente (para ambos)
           let forma_pagamento = extra._formaPagamento || ""
@@ -920,6 +975,84 @@ export default function ImportarTransacoesPage() {
     const supabase = createClient()
     await supabase.from("mapping_rules").delete().eq("id", id)
     await mutateRules()
+  }
+
+  async function deleteSelectedRules() {
+    if (selectedRules.size === 0) return
+    if (!confirm(`Tem certeza que deseja excluir ${selectedRules.size} regra(s)?`)) return
+    const supabase = createClient()
+    const ids = Array.from(selectedRules)
+    await supabase.from("mapping_rules").delete().in("id", ids)
+    setSelectedRules(new Set())
+    await mutateRules()
+  }
+
+  function cloneRule(rule: MappingRule) {
+    const cloned: MappingRule = {
+      ...rule,
+      id: 0, // Will be assigned by DB
+      keyword: rule.keyword + " (copia)",
+      descricao: (rule.descricao || "") + " (copia)",
+    }
+    setEditingRule(cloned)
+    setRuleEditDialogOpen(true)
+  }
+
+  function openEditRule(rule: MappingRule) {
+    setEditingRule({ ...rule })
+    setRuleEditDialogOpen(true)
+  }
+
+  function exportRule(rule: MappingRule) {
+    const data = {
+      keyword: rule.keyword,
+      descricao: rule.descricao,
+      categoria: rule.categoria_nome,
+      subcategoria: rule.subcategoria_nome,
+      subcategoria_filho: rule.filho_nome,
+      cliente_fornecedor: rule.cliente_fornecedor,
+      forma_pagamento: rule.forma_pagamento,
+    }
+    const json = JSON.stringify(data, null, 2)
+    const blob = new Blob([json], { type: "application/json" })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    a.download = `regra-${rule.keyword.replace(/[^a-z0-9]/gi, "_")}.json`
+    a.click()
+    URL.revokeObjectURL(url)
+  }
+
+  async function saveEditedRule() {
+    if (!editingRule) return
+    const supabase = createClient()
+    
+    const ruleData = {
+      keyword: editingRule.keyword,
+      categoria_id: editingRule.categoria_id,
+      subcategoria_id: editingRule.subcategoria_id,
+      subcategoria_filho_id: editingRule.subcategoria_filho_id,
+      fornecedor_id: editingRule.fornecedor_id,
+      cliente_id: editingRule.cliente_id,
+      cliente_fornecedor: editingRule.cliente_fornecedor,
+      conta_bancaria_id: editingRule.conta_bancaria_id,
+      forma_pagamento: editingRule.forma_pagamento,
+      descricao: editingRule.descricao,
+      substituir_descricao: editingRule.substituir_descricao,
+      tenant_id: tid,
+    }
+
+    if (editingRule.id === 0) {
+      // New rule (clone)
+      await supabase.from("mapping_rules").insert(ruleData)
+    } else {
+      // Update existing
+      await supabase.from("mapping_rules").update(ruleData).eq("id", editingRule.id)
+    }
+
+    await mutateRules()
+    setRuleEditDialogOpen(false)
+    setEditingRule(null)
   }
 
   function reapplyRules() {
@@ -1402,12 +1535,12 @@ export default function ImportarTransacoesPage() {
       </div>
 
       {/* Rules Management Dialog */}
-      <Dialog open={rulesDialogOpen} onOpenChange={setRulesDialogOpen}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+      <Dialog open={rulesDialogOpen} onOpenChange={(open) => { setRulesDialogOpen(open); if (!open) setSelectedRules(new Set()) }}>
+        <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
             <DialogTitle>Regras de Classificacao Automatica</DialogTitle>
             <DialogDescription>
-              Quando uma transacao no extrato conter a palavra-chave, ela sera automaticamente classificada com a categoria, subcategoria e cliente/fornecedor definidos.
+              Quando uma transacao no extrato conter a palavra-chave, ela sera automaticamente classificada.
             </DialogDescription>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto -mx-6 px-6">
@@ -1417,37 +1550,284 @@ export default function ImportarTransacoesPage() {
               </p>
             )}
             <div className="divide-y divide-border">
-              {allRules.map((rule) => (
-                <div key={rule.id} className="flex items-center gap-3 py-3">
-                  <span className="shrink-0 rounded-md bg-muted px-2.5 py-1 text-xs font-mono font-medium text-foreground min-w-[80px]">
-                    {rule.keyword}
-                  </span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm text-card-foreground">
-                      {[rule.categoria_nome, rule.subcategoria_nome, rule.filho_nome].filter(Boolean).join(" > ")}
-                    </p>
-                    {rule.cliente_fornecedor && (
-                      <p className="text-xs text-muted-foreground">{rule.cliente_fornecedor}</p>
-                    )}
+              {allRules.map((rule) => {
+                const contaNome = contasBancarias.find(c => c.id === rule.conta_bancaria_id)?.nome
+                return (
+                  <div key={rule.id} className="group relative flex items-start gap-3 py-3 hover:bg-muted/30 transition-colors -mx-3 px-3 rounded-md">
+                    {/* Checkbox */}
+                    <input
+                      type="checkbox"
+                      checked={selectedRules.has(rule.id)}
+                      onChange={(e) => {
+                        const newSet = new Set(selectedRules)
+                        if (e.target.checked) newSet.add(rule.id)
+                        else newSet.delete(rule.id)
+                        setSelectedRules(newSet)
+                      }}
+                      className="mt-1.5 rounded border-border"
+                    />
+                    
+                    {/* Content */}
+                    <div className="flex-1 min-w-0">
+                      {/* Title Row */}
+                      <div className="flex items-baseline gap-2">
+                        <span className="text-sm font-semibold text-card-foreground">
+                          {rule.descricao || rule.keyword.split(",")[0].trim().toUpperCase()}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          ({rule.keyword})
+                        </span>
+                      </div>
+                      
+                      {/* Tags Row */}
+                      <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                        {contaNome && (
+                          <span className="inline-flex items-center rounded border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground">
+                            {contaNome}
+                          </span>
+                        )}
+                        {rule.categoria_nome && (
+                          <span className="inline-flex items-center rounded border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground">
+                            {rule.categoria_nome}
+                            {rule.subcategoria_nome && `/${rule.subcategoria_nome}`}
+                          </span>
+                        )}
+                        {(rule.fornecedor_nome || rule.cliente_nome || rule.cliente_fornecedor) && (
+                          <span className="inline-flex items-center rounded border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground">
+                            {rule.fornecedor_nome || rule.cliente_nome || rule.cliente_fornecedor}
+                          </span>
+                        )}
+                        {rule.forma_pagamento && (
+                          <span className="inline-flex items-center rounded border border-border bg-background px-2 py-0.5 text-xs text-muted-foreground">
+                            {rule.forma_pagamento}
+                          </span>
+                        )}
+                        {rule.filho_nome && (
+                          <span className="inline-flex items-center rounded border border-[hsl(38,92%,50%)]/50 bg-[hsl(38,92%,50%)]/10 px-2 py-0.5 text-xs text-[hsl(38,92%,50%)]">
+                            {rule.filho_nome}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    
+                    {/* Action Buttons (show on hover) */}
+                    <div className="absolute right-3 top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity bg-card/80 backdrop-blur-sm rounded-md px-1 py-1">
+                      <button
+                        type="button"
+                        onClick={() => cloneRule(rule)}
+                        title="Clonar regra"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => openEditRule(rule)}
+                        title="Editar regra"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => exportRule(rule)}
+                        title="Exportar regra"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+                      >
+                        <Download className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteRule(rule.id)}
+                        title="Excluir regra"
+                        className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => deleteRule(rule.id)}
-                    className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className="flex items-center justify-between border-t border-border pt-4">
+            <div className="flex items-center gap-2">
+              {selectedRules.size > 0 && (
+                <>
+                  <span className="text-xs text-muted-foreground">{selectedRules.size} selecionada(s)</span>
+                  <button
+                    type="button"
+                    onClick={deleteSelectedRules}
+                    className="flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-medium text-destructive hover:bg-destructive/10 transition-colors"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                    Excluir selecionadas
+                  </button>
+                </>
+              )}
+            </div>
             <button
               type="button"
               onClick={() => setRulesDialogOpen(false)}
               className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
             >
               Fechar
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rule Edit Dialog */}
+      <Dialog open={ruleEditDialogOpen} onOpenChange={setRuleEditDialogOpen}>
+        <DialogContent className="max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Editar regra de preenchimento</DialogTitle>
+          </DialogHeader>
+          {editingRule && (
+            <div className="space-y-4">
+              {/* Keywords */}
+              <div>
+                <label className="text-xs font-medium text-[hsl(0,72%,51%)]">Palavras chave (separadas por virgula) *</label>
+                <input
+                  type="text"
+                  value={editingRule.keyword}
+                  onChange={(e) => setEditingRule({ ...editingRule, keyword: e.target.value })}
+                  className="mt-1 w-full rounded-md border border-primary/50 bg-background px-3 py-2 text-sm text-card-foreground outline-none focus:border-primary"
+                  maxLength={200}
+                />
+                <div className="mt-1 text-right text-xs text-muted-foreground">{editingRule.keyword.length} / 200</div>
+              </div>
+              
+              {/* Description */}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Descricao dos lancamentos *</label>
+                <input
+                  type="text"
+                  value={editingRule.descricao || ""}
+                  onChange={(e) => setEditingRule({ ...editingRule, descricao: e.target.value })}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                  maxLength={200}
+                />
+                <div className="mt-1 text-right text-xs text-muted-foreground">{(editingRule.descricao || "").length} / 200</div>
+              </div>
+              
+              {/* Grid Fields */}
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Conta</label>
+                  <select
+                    value={editingRule.conta_bancaria_id?.toString() || ""}
+                    onChange={(e) => setEditingRule({ ...editingRule, conta_bancaria_id: e.target.value ? Number(e.target.value) : null })}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                  >
+                    <option value="">Selecionar...</option>
+                    {contasBancarias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Categoria</label>
+                  <select
+                    value={editingRule.categoria_id?.toString() || ""}
+                    onChange={(e) => setEditingRule({ ...editingRule, categoria_id: e.target.value ? Number(e.target.value) : null, subcategoria_id: null, subcategoria_filho_id: null })}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                  >
+                    <option value="">Selecionar...</option>
+                    {catOptions.map((c) => <option key={c.value} value={c.value}>{c.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Contato</label>
+                  <input
+                    type="text"
+                    value={editingRule.cliente_fornecedor || ""}
+                    onChange={(e) => setEditingRule({ ...editingRule, cliente_fornecedor: e.target.value })}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                  />
+                </div>
+              </div>
+              
+              <div className="grid grid-cols-3 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Centro</label>
+                  <select
+                    value={editingRule.subcategoria_id?.toString() || ""}
+                    onChange={(e) => setEditingRule({ ...editingRule, subcategoria_id: e.target.value ? Number(e.target.value) : null, subcategoria_filho_id: null })}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                  >
+                    <option value="">Selecionar...</option>
+                    {getSubcatOptions(editingRule.categoria_id?.toString() || "").map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Projeto</label>
+                  <select
+                    value={editingRule.subcategoria_filho_id?.toString() || ""}
+                    onChange={(e) => setEditingRule({ ...editingRule, subcategoria_filho_id: e.target.value ? Number(e.target.value) : null })}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                  >
+                    <option value="">Selecionar...</option>
+                    {getFilhoOptions(editingRule.subcategoria_id?.toString() || "").map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Forma de pagto</label>
+                  <select
+                    value={editingRule.forma_pagamento || ""}
+                    onChange={(e) => setEditingRule({ ...editingRule, forma_pagamento: e.target.value })}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                  >
+                    <option value="">Selecionar...</option>
+                    <option value="PIX">PIX</option>
+                    <option value="Boleto">Boleto</option>
+                    <option value="Cartão de Crédito">Cartao de Credito</option>
+                    <option value="Cartão de Débito">Cartao de Debito</option>
+                    <option value="Transferência">Transferencia</option>
+                    <option value="Débito em Conta">Debito em Conta</option>
+                    <option value="Dinheiro">Dinheiro</option>
+                    <option value="Cheque">Cheque</option>
+                  </select>
+                </div>
+              </div>
+              
+              {/* Tags */}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Tags</label>
+                <input
+                  type="text"
+                  placeholder="Adicionar tags..."
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                />
+              </div>
+              
+              {/* Toggle */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingRule({ ...editingRule, substituir_descricao: !editingRule.substituir_descricao })}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${editingRule.substituir_descricao ? "bg-primary" : "bg-muted"}`}
+                >
+                  <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${editingRule.substituir_descricao ? "translate-x-5" : "translate-x-0"}`} />
+                </button>
+                <span className="text-sm text-card-foreground">
+                  Ao importar lancamentos, substituir a descricao do extrato por <strong>{editingRule.descricao || editingRule.keyword.split(",")[0].trim().toUpperCase()}</strong>.
+                </span>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => setRuleEditDialogOpen(false)}
+              className="rounded-lg border border-border px-4 py-2 text-sm font-semibold text-card-foreground hover:bg-muted transition-colors"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={saveEditedRule}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+            >
+              Salvar
             </button>
           </DialogFooter>
         </DialogContent>
