@@ -72,15 +72,11 @@ function mesRange(offset = 0) {
 
 type TidKey = [string, number | null]
 
-type TidKey = [string, number | null]
-
 // ─── fetchers ─────────────────────────────────────────────────────────────────
 
 async function fetchSummary([, tid]: TidKey): Promise<SummaryData> {
   const supabase = createClient()
   const { from, to } = mesRange(0)
-
-  console.log("[v0] fetchSummary - tenant_id:", tid, "from:", from, "to:", to)
 
   // Contas a pagar (despesas)
   let qPagar = supabase
@@ -110,24 +106,9 @@ async function fetchSummary([, tid]: TidKey): Promise<SummaryData> {
   let qContas = supabase.from("contas_bancarias").select("saldo")
   if (tid) qContas = qContas.eq("tenant_id", tid)
 
-  const [resPagar, resReceber, resLanc, resContas] = await Promise.all([
+  const [{ data: pagar }, { data: receber }, { data: lanc }, { data: contas }] = await Promise.all([
     qPagar, qReceber, qLanc, qContas,
   ])
-
-  console.log("[v0] contas_pagar response:", resPagar)
-  console.log("[v0] contas_receber response:", resReceber)
-  console.log("[v0] lancamentos response:", resLanc)
-  console.log("[v0] contas_bancarias response:", resContas)
-
-  const { data: pagar, error: errPagar } = resPagar
-  const { data: receber, error: errReceber } = resReceber
-  const { data: lanc, error: errLanc } = resLanc
-  const { data: contas, error: errContas } = resContas
-
-  if (errPagar) console.log("[v0] Erro contas_pagar:", errPagar)
-  if (errReceber) console.log("[v0] Erro contas_receber:", errReceber)
-  if (errLanc) console.log("[v0] Erro lancamentos:", errLanc)
-  if (errContas) console.log("[v0] Erro contas_bancarias:", errContas)
 
   let despesas = 0, receitas = 0, pendente = 0
 
@@ -200,11 +181,9 @@ async function fetchRecentTx([, tid]: TidKey): Promise<RecentTx[]> {
 
 async function fetchAccounts([, tid]: TidKey): Promise<AccountRow[]> {
   const supabase = createClient()
-  console.log("[v0] fetchAccounts - tenant_id:", tid)
   let q = supabase.from("contas_bancarias").select("id, nome, tipo, saldo").order("nome")
   if (tid) q = q.eq("tenant_id", tid)
-  const { data, error } = await q
-  console.log("[v0] fetchAccounts response - data:", data, "error:", error)
+  const { data } = await q
   return (data || []).map((r) => ({
     id: r.id as number,
     nome: r.nome as string,
