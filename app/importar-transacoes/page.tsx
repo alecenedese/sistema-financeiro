@@ -992,6 +992,25 @@ export default function ImportarTransacoesPage() {
     setRuleEditDialogOpen(true)
   }
 
+  function createNewRule() {
+    const newRule: MappingRule = {
+      id: 0, // Will be assigned by DB
+      keyword: "",
+      categoria_id: null,
+      subcategoria_id: null,
+      subcategoria_filho_id: null,
+      fornecedor_id: null,
+      cliente_id: null,
+      cliente_fornecedor: "",
+      conta_bancaria_id: null,
+      forma_pagamento: "",
+      descricao: "",
+      substituir_descricao: false,
+    }
+    setEditingRule(newRule)
+    setRuleEditDialogOpen(true)
+  }
+
   function exportRule(rule: MappingRule) {
     const data = {
       keyword: rule.keyword,
@@ -1527,15 +1546,27 @@ export default function ImportarTransacoesPage() {
       <Dialog open={rulesDialogOpen} onOpenChange={(open) => { setRulesDialogOpen(open); if (!open) setSelectedRules(new Set()) }}>
         <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
-            <DialogTitle>Regras de Classificacao Automatica</DialogTitle>
-            <DialogDescription>
-              Quando uma transacao no extrato conter a palavra-chave, ela sera automaticamente classificada.
-            </DialogDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle>Regras de Classificacao Automatica</DialogTitle>
+                <DialogDescription>
+                  Quando uma transacao no extrato conter a palavra-chave, ela sera automaticamente classificada.
+                </DialogDescription>
+              </div>
+              <button
+                type="button"
+                onClick={createNewRule}
+                className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                <Plus className="h-4 w-4" />
+                Nova Regra
+              </button>
+            </div>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto -mx-6 px-6">
             {allRules.length === 0 && (
               <p className="py-8 text-center text-sm text-muted-foreground">
-                Nenhuma regra cadastrada. Importe um arquivo e classifique as transacoes para criar regras automaticamente.
+                Nenhuma regra cadastrada. Clique em &quot;Nova Regra&quot; para criar uma regra manualmente.
               </p>
             )}
             <div className="divide-y divide-border">
