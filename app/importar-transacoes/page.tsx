@@ -556,6 +556,9 @@ export default function ImportarTransacoesPage() {
         categorias: categoriaList.length,
         subcategorias: subcategoriaList.length,
       })
+      console.log("[v0] Fornecedores disponiveis:", fornecedorList.map(f => f.key))
+      console.log("[v0] Clientes disponiveis:", clienteList.map(c => c.key))
+      console.log("[v0] Categorias disponiveis:", categoriaList.map(c => c.key))
 
       const rows: TransactionRow[] = txs
         .map((tx) => {
