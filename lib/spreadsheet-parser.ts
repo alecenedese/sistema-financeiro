@@ -164,11 +164,9 @@ function mapHeaders(headers: string[]): Record<string, number> {
     for (const [key, values] of Object.entries(aliases)) {
       if (!(key in map) && values.some((v) => norm.includes(v))) {
         map[key] = i
-        console.log("[v0] Header match:", h, "->", key, "(index:", i, ")")
       }
     }
   })
-  console.log("[v0] Final mapHeaders:", map)
   return map
 }
 
@@ -282,10 +280,6 @@ export async function parseXLSX(buffer: ArrayBuffer): Promise<ParsedSpreadsheetT
  * para compatibilidade total com o pipeline existente
  */
 export function spreadsheetToOFXTransactions(rows: ParsedSpreadsheetTransaction[]): OFXTransaction[] {
-  console.log("[v0] spreadsheetToOFXTransactions - rows:", rows.length)
-  if (rows.length > 0) {
-    console.log("[v0] Primeira row:", rows[0])
-  }
   return rows
     .filter((r) => r.data || r.descricao)  // filtra só linhas completamente vazias
     .map((r, i) => {
