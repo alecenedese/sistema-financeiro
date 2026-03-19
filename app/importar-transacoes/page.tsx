@@ -528,15 +528,23 @@ export default function ImportarTransacoesPage() {
 
       setOfxData(parsedOFX)
 
-      // Mapas para match por nome (case-insensitive, trim)
-      // Match exato + parcial (contains) para maior flexibilidade
-      const fornecedorList = fornecedoresLista.map(f => ({ id: f.id, key: f.nome.trim().toLowerCase() }))
-      const clienteList = clientesLista.map(c => ({ id: c.id, key: c.nome.trim().toLowerCase() }))
-      const categoriaList = (hierarchy?.categorias || []).map(c => ({ id: c.id, key: c.nome.trim().toLowerCase() }))
-      const subcategoriaList = (hierarchy?.subcategorias || []).map(s => ({ id: s.id, categoria_id: s.categoria_id, key: s.nome.trim().toLowerCase() }))
+      // Função para normalizar texto (remove acentos e converte para minúsculo)
+      function normalizeText(text: string): string {
+        return text
+          .trim()
+          .toLowerCase()
+          .normalize("NFD")
+          .replace(/[\u0300-\u036f]/g, "") // Remove acentos
+      }
+
+      // Mapas para match por nome (case-insensitive, sem acentos)
+      const fornecedorList = fornecedoresLista.map(f => ({ id: f.id, key: normalizeText(f.nome), original: f.nome }))
+      const clienteList = clientesLista.map(c => ({ id: c.id, key: normalizeText(c.nome), original: c.nome }))
+      const categoriaList = (hierarchy?.categorias || []).map(c => ({ id: c.id, key: normalizeText(c.nome), original: c.nome }))
+      const subcategoriaList = (hierarchy?.subcategorias || []).map(s => ({ id: s.id, categoria_id: s.categoria_id, key: normalizeText(s.nome), original: s.nome }))
 
       function matchByName(list: { id: number; key: string }[], search: string): number | null {
-        const s = search.trim().toLowerCase()
+        const s = normalizeText(search)
         if (!s) return null
         // 1. Match exato
         const exact = list.find(item => item.key === s)
@@ -550,15 +558,7 @@ export default function ImportarTransacoesPage() {
         return null
       }
 
-      console.log("[v0] Listas para match:", {
-        fornecedores: fornecedorList.length,
-        clientes: clienteList.length,
-        categorias: categoriaList.length,
-        subcategorias: subcategoriaList.length,
-      })
-      console.log("[v0] Fornecedores disponiveis:", fornecedorList.map(f => f.key))
-      console.log("[v0] Clientes disponiveis:", clienteList.map(c => c.key))
-      console.log("[v0] Categorias disponiveis:", categoriaList.map(c => c.key))
+
 
       const rows: TransactionRow[] = txs
         .map((tx) => {
@@ -572,15 +572,6 @@ export default function ImportarTransacoesPage() {
           let subcategoria_filho_id: number | null = null
           let cliente_id: number | null = null
           
-          console.log("[v0] Processando tx:", {
-            memo: tx.memo,
-            amount: tx.amount,
-            isDebit,
-            _fornecedor: extra._fornecedor,
-            _planoConta: extra._planoConta,
-            _subcategoria: extra._subcategoria,
-          })
-
           // 1. Match cliente/fornecedor pelo nome do CSV
           if (extra._fornecedor) {
             const searchTerm = extra._fornecedor.trim()
@@ -589,23 +580,20 @@ export default function ImportarTransacoesPage() {
             if (isDebit) {
               // Para despesas, procura em fornecedores
               fornecedor_id = matchByName(fornecedorList, searchTerm)
-              console.log("[v0] Match fornecedor:", searchTerm, "->", fornecedor_id)
             } else {
               // Para receitas, procura em clientes
               cliente_id = matchByName(clienteList, searchTerm)
-              console.log("[v0] Match cliente:", searchTerm, "->", cliente_id)
             }
           }
 
           // 2. Match categoria pelo plano de conta do CSV
           if (extra._planoConta) {
             categoria_id = matchByName(categoriaList, extra._planoConta)
-            console.log("[v0] Match categoria:", extra._planoConta, "->", categoria_id)
           }
 
           // 3. Match subcategoria pelo nome da planilha
           if (extra._subcategoria) {
-            const subcatSearch = extra._subcategoria.trim().toLowerCase()
+            const subcatSearch = normalizeText(extra._subcategoria)
             // Se já tem categoria, filtra subcategorias dessa categoria
             if (categoria_id) {
               const subcatMatch = subcategoriaList.find(s => s.categoria_id === categoria_id && (s.key.includes(subcatSearch) || subcatSearch.includes(s.key)))
@@ -619,7 +607,6 @@ export default function ImportarTransacoesPage() {
                 categoria_id = subcatMatch.categoria_id
               }
             }
-            console.log("[v0] Match subcategoria:", extra._subcategoria, "->", subcategoria_id, "categoria:", categoria_id)
           }
 
           // 4. Aplica regras automaticas como fallback (se planilha nao mapeou)
@@ -814,9 +801,10 @@ export default function ImportarTransacoesPage() {
 
   // Save rules from current mapping to Supabase
   async function saveNewRules() {
+    if (!tid) return // Não salva regras sem tenant
     const supabase = createClient()
     const existingKeywords = new Set(allRules.map((r) => r.keyword.toUpperCase()))
-    const newRuleInserts: { keyword: string; categoria_id: number | null; subcategoria_id: number | null; subcategoria_filho_id: number | null; fornecedor_id: number | null; cliente_id: number | null; cliente_fornecedor: string }[] = []
+    const newRuleInserts: { keyword: string; categoria_id: number | null; subcategoria_id: number | null; subcategoria_filho_id: number | null; fornecedor_id: number | null; cliente_id: number | null; cliente_fornecedor: string; tenant_id: number }[] = []
 
     for (const tx of transactions) {
       if (tx.categoria_id && tx.memo) {
@@ -832,6 +820,7 @@ export default function ImportarTransacoesPage() {
               fornecedor_id: tx.fornecedor_id,
               cliente_id: tx.cliente_id,
               cliente_fornecedor: tx.clienteFornecedor,
+              tenant_id: tid,
             })
           }
         }
@@ -1000,6 +989,25 @@ export default function ImportarTransacoesPage() {
 
   function openEditRule(rule: MappingRule) {
     setEditingRule({ ...rule })
+    setRuleEditDialogOpen(true)
+  }
+
+  function createNewRule() {
+    const newRule: MappingRule = {
+      id: 0, // Will be assigned by DB
+      keyword: "",
+      categoria_id: null,
+      subcategoria_id: null,
+      subcategoria_filho_id: null,
+      fornecedor_id: null,
+      cliente_id: null,
+      cliente_fornecedor: "",
+      conta_bancaria_id: null,
+      forma_pagamento: "",
+      descricao: "",
+      substituir_descricao: false,
+    }
+    setEditingRule(newRule)
     setRuleEditDialogOpen(true)
   }
 
@@ -1538,15 +1546,27 @@ export default function ImportarTransacoesPage() {
       <Dialog open={rulesDialogOpen} onOpenChange={(open) => { setRulesDialogOpen(open); if (!open) setSelectedRules(new Set()) }}>
         <DialogContent className="max-w-4xl max-h-[85vh] overflow-hidden flex flex-col">
           <DialogHeader>
-            <DialogTitle>Regras de Classificacao Automatica</DialogTitle>
-            <DialogDescription>
-              Quando uma transacao no extrato conter a palavra-chave, ela sera automaticamente classificada.
-            </DialogDescription>
+            <div className="flex items-center justify-between">
+              <div>
+                <DialogTitle>Regras de Classificacao Automatica</DialogTitle>
+                <DialogDescription>
+                  Quando uma transacao no extrato conter a palavra-chave, ela sera automaticamente classificada.
+                </DialogDescription>
+              </div>
+              <button
+                type="button"
+                onClick={createNewRule}
+                className="flex items-center gap-2 rounded-lg bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90"
+              >
+                <Plus className="h-4 w-4" />
+                Nova Regra
+              </button>
+            </div>
           </DialogHeader>
           <div className="flex-1 overflow-y-auto -mx-6 px-6">
             {allRules.length === 0 && (
               <p className="py-8 text-center text-sm text-muted-foreground">
-                Nenhuma regra cadastrada. Importe um arquivo e classifique as transacoes para criar regras automaticamente.
+                Nenhuma regra cadastrada. Clique em &quot;Nova Regra&quot; para criar uma regra manualmente.
               </p>
             )}
             <div className="divide-y divide-border">
