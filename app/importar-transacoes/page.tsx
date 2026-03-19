@@ -506,6 +506,7 @@ export default function ImportarTransacoesPage() {
       // Match exato + parcial (contains) para maior flexibilidade
       const fornecedorList = fornecedoresLista.map(f => ({ id: f.id, key: f.nome.trim().toLowerCase() }))
       const categoriaList = (hierarchy?.categorias || []).map(c => ({ id: c.id, key: c.nome.trim().toLowerCase() }))
+      const subcategoriaList = (hierarchy?.subcategorias || []).map(s => ({ id: s.id, categoria_id: s.categoria_id, key: s.nome.trim().toLowerCase() }))
 
       function matchByName(list: { id: number; key: string }[], search: string): number | null {
         const s = search.trim().toLowerCase()
@@ -524,7 +525,7 @@ export default function ImportarTransacoesPage() {
 
       const rows: TransactionRow[] = txs
         .map((tx) => {
-          const extra = tx as OFXTransaction & { _fornecedor?: string; _planoConta?: string; _formaPagamento?: string }
+          const extra = tx as OFXTransaction & { _fornecedor?: string; _planoConta?: string; _subcategoria?: string; _formaPagamento?: string }
           const isDebit = tx.amount < 0 // Saída/despesa
           
           // Para entradas (CREDIT), não preencher categoria/cliente/fornecedor automaticamente
@@ -548,12 +549,30 @@ export default function ImportarTransacoesPage() {
               categoria_id = matchByName(categoriaList, extra._planoConta)
             }
 
-            // 3. Aplica regras automaticas como fallback (se CSV nao mapeou)
+            // 3. Match subcategoria pelo nome da planilha
+            if (extra._subcategoria) {
+              const subcatSearch = extra._subcategoria.trim().toLowerCase()
+              // Se já tem categoria, filtra subcategorias dessa categoria
+              if (categoria_id) {
+                const subcatMatch = subcategoriaList.find(s => s.categoria_id === categoria_id && s.key.includes(subcatSearch))
+                if (subcatMatch) subcategoria_id = subcatMatch.id
+              } else {
+                // Se não tem categoria, procura em todas subcategorias
+                const subcatMatch = subcategoriaList.find(s => s.key.includes(subcatSearch) || subcatSearch.includes(s.key))
+                if (subcatMatch) {
+                  subcategoria_id = subcatMatch.id
+                  // Preenche a categoria correspondente
+                  categoria_id = subcatMatch.categoria_id
+                }
+              }
+            }
+
+            // 4. Aplica regras automaticas como fallback (se CSV nao mapeou)
             const matched = applyRules(tx)
             if (!fornecedor_id && matched.fornecedor_id) fornecedor_id = matched.fornecedor_id
             if (!clienteFornecedor) clienteFornecedor = matched.clienteFornecedor || extractClienteFornecedor(tx.memo)
             if (!categoria_id && matched.categoria_id) categoria_id = matched.categoria_id
-            subcategoria_id = matched.subcategoria_id
+            if (!subcategoria_id && matched.subcategoria_id) subcategoria_id = matched.subcategoria_id
             subcategoria_filho_id = matched.subcategoria_filho_id
           }
 
