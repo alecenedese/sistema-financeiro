@@ -531,6 +531,7 @@ export default function ImportarTransacoesPage() {
       // Mapas para match por nome (case-insensitive, trim)
       // Match exato + parcial (contains) para maior flexibilidade
       const fornecedorList = fornecedoresLista.map(f => ({ id: f.id, key: f.nome.trim().toLowerCase() }))
+      const clienteList = clientesLista.map(c => ({ id: c.id, key: c.nome.trim().toLowerCase() }))
       const categoriaList = (hierarchy?.categorias || []).map(c => ({ id: c.id, key: c.nome.trim().toLowerCase() }))
       const subcategoriaList = (hierarchy?.subcategorias || []).map(s => ({ id: s.id, categoria_id: s.categoria_id, key: s.nome.trim().toLowerCase() }))
 
@@ -549,12 +550,18 @@ export default function ImportarTransacoesPage() {
         return null
       }
 
+      console.log("[v0] Listas para match:", {
+        fornecedores: fornecedorList.length,
+        clientes: clienteList.length,
+        categorias: categoriaList.length,
+        subcategorias: subcategoriaList.length,
+      })
+
       const rows: TransactionRow[] = txs
         .map((tx) => {
-          const extra = tx as OFXTransaction & { _fornecedor?: string; _planoConta?: string; _subcategoria?: string; _formaPagamento?: string }
+          const extra = tx as OFXTransaction & { _fornecedor?: string; _planoConta?: string; _subcategoria?: string; _formaPagamento?: string; _banco?: string }
           const isDebit = tx.amount < 0 // Saída/despesa
           
-          // Para entradas (CREDIT), não preencher categoria/cliente/fornecedor automaticamente
           let fornecedor_id: number | null = null
           let clienteFornecedor = ""
           let categoria_id: number | null = null
@@ -562,45 +569,64 @@ export default function ImportarTransacoesPage() {
           let subcategoria_filho_id: number | null = null
           let cliente_id: number | null = null
           
-          // Só aplica regras automáticas para SAÍDAS (débitos)
-          if (isDebit) {
-            // 1. Match fornecedor pelo nome do CSV
-            if (extra._fornecedor) {
-              fornecedor_id = matchByName(fornecedorList, extra._fornecedor)
-              clienteFornecedor = extra._fornecedor.trim()
-            }
+          console.log("[v0] Processando tx:", {
+            memo: tx.memo,
+            amount: tx.amount,
+            isDebit,
+            _fornecedor: extra._fornecedor,
+            _planoConta: extra._planoConta,
+            _subcategoria: extra._subcategoria,
+          })
 
-            // 2. Match categoria pelo plano de conta do CSV
-            if (extra._planoConta) {
-              categoria_id = matchByName(categoriaList, extra._planoConta)
+          // 1. Match cliente/fornecedor pelo nome do CSV
+          if (extra._fornecedor) {
+            const searchTerm = extra._fornecedor.trim()
+            clienteFornecedor = searchTerm
+            
+            if (isDebit) {
+              // Para despesas, procura em fornecedores
+              fornecedor_id = matchByName(fornecedorList, searchTerm)
+              console.log("[v0] Match fornecedor:", searchTerm, "->", fornecedor_id)
+            } else {
+              // Para receitas, procura em clientes
+              cliente_id = matchByName(clienteList, searchTerm)
+              console.log("[v0] Match cliente:", searchTerm, "->", cliente_id)
             }
+          }
 
-            // 3. Match subcategoria pelo nome da planilha
-            if (extra._subcategoria) {
-              const subcatSearch = extra._subcategoria.trim().toLowerCase()
-              // Se já tem categoria, filtra subcategorias dessa categoria
-              if (categoria_id) {
-                const subcatMatch = subcategoriaList.find(s => s.categoria_id === categoria_id && s.key.includes(subcatSearch))
-                if (subcatMatch) subcategoria_id = subcatMatch.id
-              } else {
-                // Se não tem categoria, procura em todas subcategorias
-                const subcatMatch = subcategoriaList.find(s => s.key.includes(subcatSearch) || subcatSearch.includes(s.key))
-                if (subcatMatch) {
-                  subcategoria_id = subcatMatch.id
-                  // Preenche a categoria correspondente
-                  categoria_id = subcatMatch.categoria_id
-                }
+          // 2. Match categoria pelo plano de conta do CSV
+          if (extra._planoConta) {
+            categoria_id = matchByName(categoriaList, extra._planoConta)
+            console.log("[v0] Match categoria:", extra._planoConta, "->", categoria_id)
+          }
+
+          // 3. Match subcategoria pelo nome da planilha
+          if (extra._subcategoria) {
+            const subcatSearch = extra._subcategoria.trim().toLowerCase()
+            // Se já tem categoria, filtra subcategorias dessa categoria
+            if (categoria_id) {
+              const subcatMatch = subcategoriaList.find(s => s.categoria_id === categoria_id && (s.key.includes(subcatSearch) || subcatSearch.includes(s.key)))
+              if (subcatMatch) subcategoria_id = subcatMatch.id
+            } else {
+              // Se não tem categoria, procura em todas subcategorias
+              const subcatMatch = subcategoriaList.find(s => s.key.includes(subcatSearch) || subcatSearch.includes(s.key))
+              if (subcatMatch) {
+                subcategoria_id = subcatMatch.id
+                // Preenche a categoria correspondente
+                categoria_id = subcatMatch.categoria_id
               }
             }
-
-            // 4. Aplica regras automaticas como fallback (se CSV nao mapeou)
-            const matched = applyRules(tx)
-            if (!fornecedor_id && matched.fornecedor_id) fornecedor_id = matched.fornecedor_id
-            if (!clienteFornecedor) clienteFornecedor = matched.clienteFornecedor || extractClienteFornecedor(tx.memo)
-            if (!categoria_id && matched.categoria_id) categoria_id = matched.categoria_id
-            if (!subcategoria_id && matched.subcategoria_id) subcategoria_id = matched.subcategoria_id
-            subcategoria_filho_id = matched.subcategoria_filho_id
+            console.log("[v0] Match subcategoria:", extra._subcategoria, "->", subcategoria_id, "categoria:", categoria_id)
           }
+
+          // 4. Aplica regras automaticas como fallback (se planilha nao mapeou)
+          const matched = applyRules(tx)
+          if (!fornecedor_id && matched.fornecedor_id) fornecedor_id = matched.fornecedor_id
+          if (!cliente_id && matched.cliente_id) cliente_id = matched.cliente_id
+          if (!clienteFornecedor) clienteFornecedor = matched.clienteFornecedor || extractClienteFornecedor(tx.memo)
+          if (!categoria_id && matched.categoria_id) categoria_id = matched.categoria_id
+          if (!subcategoria_id && matched.subcategoria_id) subcategoria_id = matched.subcategoria_id
+          if (!subcategoria_filho_id && matched.subcategoria_filho_id) subcategoria_filho_id = matched.subcategoria_filho_id
 
           // 4. Detecta forma de pagamento automaticamente (para ambos)
           let forma_pagamento = extra._formaPagamento || ""
