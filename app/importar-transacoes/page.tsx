@@ -543,6 +543,9 @@ export default function ImportarTransacoesPage() {
       const categoriaList = (hierarchy?.categorias || []).map(c => ({ id: c.id, key: normalizeText(c.nome), original: c.nome }))
       const subcategoriaList = (hierarchy?.subcategorias || []).map(s => ({ id: s.id, categoria_id: s.categoria_id, key: normalizeText(s.nome), original: s.nome }))
 
+      console.log("[v0] DEBUG - Categorias no banco:", categoriaList.map(c => ({ id: c.id, key: c.key, original: c.original })))
+      console.log("[v0] DEBUG - Subcategorias no banco:", subcategoriaList.map(s => ({ id: s.id, key: s.key, original: s.original })))
+
       function matchByName(list: { id: number; key: string }[], search: string): number | null {
         const s = normalizeText(search)
         if (!s) return null
@@ -588,11 +591,14 @@ export default function ImportarTransacoesPage() {
 
           // 2. Match categoria pelo plano de conta do CSV
           if (extra._planoConta) {
+            console.log("[v0] DEBUG - Buscando categoria:", extra._planoConta, "normalizado:", normalizeText(extra._planoConta))
             categoria_id = matchByName(categoriaList, extra._planoConta)
+            console.log("[v0] DEBUG - Categoria encontrada:", categoria_id)
           }
 
           // 3. Match subcategoria pelo nome da planilha
           if (extra._subcategoria) {
+            console.log("[v0] DEBUG - Buscando subcategoria:", extra._subcategoria, "normalizado:", normalizeText(extra._subcategoria))
             const subcatSearch = normalizeText(extra._subcategoria)
             // Se já tem categoria, filtra subcategorias dessa categoria
             if (categoria_id) {
