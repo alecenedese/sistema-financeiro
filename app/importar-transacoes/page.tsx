@@ -543,6 +543,9 @@ export default function ImportarTransacoesPage() {
       const categoriaList = (hierarchy?.categorias || []).map(c => ({ id: c.id, key: normalizeText(c.nome), original: c.nome }))
       const subcategoriaList = (hierarchy?.subcategorias || []).map(s => ({ id: s.id, categoria_id: s.categoria_id, key: normalizeText(s.nome), original: s.nome }))
 
+      console.log("[v0] Fornecedores carregados:", fornecedorList.length, fornecedorList.map(f => f.original))
+      console.log("[v0] Clientes carregados:", clienteList.length, clienteList.map(c => c.original))
+
       function matchByName(list: { id: number; key: string }[], search: string): number | null {
         const s = normalizeText(search)
         if (!s) return null
@@ -578,12 +581,16 @@ export default function ImportarTransacoesPage() {
             const searchTerm = extra._fornecedor.trim()
             clienteFornecedor = searchTerm
             
+            console.log("[v0] Buscando fornecedor/cliente:", searchTerm, "normalizado:", normalizeText(searchTerm))
+            
             // Tenta encontrar em fornecedores primeiro
             fornecedor_id = matchByName(fornecedorList, searchTerm)
+            console.log("[v0] Match em fornecedores:", fornecedor_id)
             
             // Se não encontrou em fornecedores, tenta em clientes
             if (!fornecedor_id) {
               cliente_id = matchByName(clienteList, searchTerm)
+              console.log("[v0] Match em clientes:", cliente_id)
             }
           }
 
