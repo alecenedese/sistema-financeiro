@@ -216,12 +216,16 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   let q = supabase
     .from("mapping_rules")
     .select(`
-      *,
+      id,
+      keyword,
+      categoria_id,
+      subcategoria_id,
+      subcategoria_filho_id,
+      cliente_fornecedor,
+      tenant_id,
       categorias(nome),
       subcategorias(nome),
-      subcategorias_filhos(nome),
-      fornecedores(nome),
-      clientes(nome)
+      subcategorias_filhos(nome)
     `)
     .order("keyword")
   
@@ -237,18 +241,12 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
     categoria_id: row.categoria_id as number | null,
     subcategoria_id: row.subcategoria_id as number | null,
     subcategoria_filho_id: row.subcategoria_filho_id as number | null,
-    fornecedor_id: row.fornecedor_id as number | null,
-    cliente_id: row.cliente_id as number | null,
+    fornecedor_id: null,
+    cliente_id: null,
     cliente_fornecedor: (row.cliente_fornecedor as string) || "",
-    conta_bancaria_id: row.conta_bancaria_id as number | null,
-    forma_pagamento: (row.forma_pagamento as string) || "",
-    descricao: (row.descricao as string) || "",
-    substituir_descricao: (row.substituir_descricao as boolean) || false,
     categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
     subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
     filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
-    fornecedor_nome: (row.fornecedores as Record<string, string> | null)?.nome || "",
-    cliente_nome: (row.clientes as Record<string, string> | null)?.nome || "",
   }))
 }
 
@@ -543,8 +541,7 @@ export default function ImportarTransacoesPage() {
       const categoriaList = (hierarchy?.categorias || []).map(c => ({ id: c.id, key: normalizeText(c.nome), original: c.nome }))
       const subcategoriaList = (hierarchy?.subcategorias || []).map(s => ({ id: s.id, categoria_id: s.categoria_id, key: normalizeText(s.nome), original: s.nome }))
 
-      console.log("[v0] Fornecedores carregados:", fornecedorList.length, fornecedorList.map(f => f.original))
-      console.log("[v0] Clientes carregados:", clienteList.length, clienteList.map(c => c.original))
+
 
       function matchByName(list: { id: number; key: string }[], search: string): number | null {
         const s = normalizeText(search)
@@ -581,16 +578,12 @@ export default function ImportarTransacoesPage() {
             const searchTerm = extra._fornecedor.trim()
             clienteFornecedor = searchTerm
             
-            console.log("[v0] Buscando fornecedor/cliente:", searchTerm, "normalizado:", normalizeText(searchTerm))
-            
             // Tenta encontrar em fornecedores primeiro
             fornecedor_id = matchByName(fornecedorList, searchTerm)
-            console.log("[v0] Match em fornecedores:", fornecedor_id)
             
             // Se não encontrou em fornecedores, tenta em clientes
             if (!fornecedor_id) {
               cliente_id = matchByName(clienteList, searchTerm)
-              console.log("[v0] Match em clientes:", cliente_id)
             }
           }
 
@@ -1052,22 +1045,15 @@ export default function ImportarTransacoesPage() {
     
     const supabase = createClient()
     
+    // Usa apenas colunas que existem na tabela original
     const ruleData = {
       keyword: editingRule.keyword.trim(),
       categoria_id: editingRule.categoria_id,
       subcategoria_id: editingRule.subcategoria_id,
       subcategoria_filho_id: editingRule.subcategoria_filho_id,
-      fornecedor_id: editingRule.fornecedor_id,
-      cliente_id: editingRule.cliente_id,
       cliente_fornecedor: editingRule.cliente_fornecedor || "",
-      conta_bancaria_id: editingRule.conta_bancaria_id,
-      forma_pagamento: editingRule.forma_pagamento || "",
-      descricao: editingRule.descricao || "",
-      substituir_descricao: editingRule.substituir_descricao || false,
       tenant_id: tid,
     }
-
-    console.log("[v0] Salvando regra:", ruleData)
 
     if (editingRule.id === 0) {
       // New rule
