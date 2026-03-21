@@ -573,15 +573,16 @@ export default function ImportarTransacoesPage() {
           let cliente_id: number | null = null
           
           // 1. Match cliente/fornecedor pelo nome do CSV
+          // Busca em ambas as listas para maior flexibilidade
           if (extra._fornecedor) {
             const searchTerm = extra._fornecedor.trim()
             clienteFornecedor = searchTerm
             
-            if (isDebit) {
-              // Para despesas, procura em fornecedores
-              fornecedor_id = matchByName(fornecedorList, searchTerm)
-            } else {
-              // Para receitas, procura em clientes
+            // Tenta encontrar em fornecedores primeiro
+            fornecedor_id = matchByName(fornecedorList, searchTerm)
+            
+            // Se não encontrou em fornecedores, tenta em clientes
+            if (!fornecedor_id) {
               cliente_id = matchByName(clienteList, searchTerm)
             }
           }
