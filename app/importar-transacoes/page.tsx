@@ -216,12 +216,16 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   let q = supabase
     .from("mapping_rules")
     .select(`
-      *,
+      id,
+      keyword,
+      categoria_id,
+      subcategoria_id,
+      subcategoria_filho_id,
+      cliente_fornecedor,
+      tenant_id,
       categorias(nome),
       subcategorias(nome),
-      subcategorias_filhos(nome),
-      fornecedores(nome),
-      clientes(nome)
+      subcategorias_filhos(nome)
     `)
     .order("keyword")
   
@@ -237,18 +241,12 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
     categoria_id: row.categoria_id as number | null,
     subcategoria_id: row.subcategoria_id as number | null,
     subcategoria_filho_id: row.subcategoria_filho_id as number | null,
-    fornecedor_id: row.fornecedor_id as number | null,
-    cliente_id: row.cliente_id as number | null,
+    fornecedor_id: null,
+    cliente_id: null,
     cliente_fornecedor: (row.cliente_fornecedor as string) || "",
-    conta_bancaria_id: row.conta_bancaria_id as number | null,
-    forma_pagamento: (row.forma_pagamento as string) || "",
-    descricao: (row.descricao as string) || "",
-    substituir_descricao: (row.substituir_descricao as boolean) || false,
     categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
     subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
     filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
-    fornecedor_nome: (row.fornecedores as Record<string, string> | null)?.nome || "",
-    cliente_nome: (row.clientes as Record<string, string> | null)?.nome || "",
   }))
 }
 
@@ -543,8 +541,7 @@ export default function ImportarTransacoesPage() {
       const categoriaList = (hierarchy?.categorias || []).map(c => ({ id: c.id, key: normalizeText(c.nome), original: c.nome }))
       const subcategoriaList = (hierarchy?.subcategorias || []).map(s => ({ id: s.id, categoria_id: s.categoria_id, key: normalizeText(s.nome), original: s.nome }))
 
-      console.log("[v0] DEBUG - Categorias no banco:", categoriaList.map(c => ({ id: c.id, key: c.key, original: c.original })))
-      console.log("[v0] DEBUG - Subcategorias no banco:", subcategoriaList.map(s => ({ id: s.id, key: s.key, original: s.original })))
+
 
       function matchByName(list: { id: number; key: string }[], search: string): number | null {
         const s = normalizeText(search)
@@ -576,29 +573,27 @@ export default function ImportarTransacoesPage() {
           let cliente_id: number | null = null
           
           // 1. Match cliente/fornecedor pelo nome do CSV
+          // Busca em ambas as listas para maior flexibilidade
           if (extra._fornecedor) {
             const searchTerm = extra._fornecedor.trim()
             clienteFornecedor = searchTerm
             
-            if (isDebit) {
-              // Para despesas, procura em fornecedores
-              fornecedor_id = matchByName(fornecedorList, searchTerm)
-            } else {
-              // Para receitas, procura em clientes
+            // Tenta encontrar em fornecedores primeiro
+            fornecedor_id = matchByName(fornecedorList, searchTerm)
+            
+            // Se não encontrou em fornecedores, tenta em clientes
+            if (!fornecedor_id) {
               cliente_id = matchByName(clienteList, searchTerm)
             }
           }
 
           // 2. Match categoria pelo plano de conta do CSV
           if (extra._planoConta) {
-            console.log("[v0] DEBUG - Buscando categoria:", extra._planoConta, "normalizado:", normalizeText(extra._planoConta))
             categoria_id = matchByName(categoriaList, extra._planoConta)
-            console.log("[v0] DEBUG - Categoria encontrada:", categoria_id)
           }
 
           // 3. Match subcategoria pelo nome da planilha
           if (extra._subcategoria) {
-            console.log("[v0] DEBUG - Buscando subcategoria:", extra._subcategoria, "normalizado:", normalizeText(extra._subcategoria))
             const subcatSearch = normalizeText(extra._subcategoria)
             // Se já tem categoria, filtra subcategorias dessa categoria
             if (categoria_id) {
@@ -1039,29 +1034,43 @@ export default function ImportarTransacoesPage() {
 
   async function saveEditedRule() {
     if (!editingRule) return
+    if (!editingRule.keyword.trim()) {
+      alert("Palavra-chave é obrigatória")
+      return
+    }
+    if (!tid) {
+      alert("Selecione um cliente antes de criar regras")
+      return
+    }
+    
     const supabase = createClient()
     
+    // Usa apenas colunas que existem na tabela original
     const ruleData = {
-      keyword: editingRule.keyword,
+      keyword: editingRule.keyword.trim(),
       categoria_id: editingRule.categoria_id,
       subcategoria_id: editingRule.subcategoria_id,
       subcategoria_filho_id: editingRule.subcategoria_filho_id,
-      fornecedor_id: editingRule.fornecedor_id,
-      cliente_id: editingRule.cliente_id,
-      cliente_fornecedor: editingRule.cliente_fornecedor,
-      conta_bancaria_id: editingRule.conta_bancaria_id,
-      forma_pagamento: editingRule.forma_pagamento,
-      descricao: editingRule.descricao,
-      substituir_descricao: editingRule.substituir_descricao,
+      cliente_fornecedor: editingRule.cliente_fornecedor || "",
       tenant_id: tid,
     }
 
     if (editingRule.id === 0) {
-      // New rule (clone)
-      await supabase.from("mapping_rules").insert(ruleData)
+      // New rule
+      const { error } = await supabase.from("mapping_rules").insert(ruleData)
+      if (error) {
+        console.error("[v0] Erro ao inserir regra:", error)
+        alert("Erro ao salvar regra: " + error.message)
+        return
+      }
     } else {
       // Update existing
-      await supabase.from("mapping_rules").update(ruleData).eq("id", editingRule.id)
+      const { error } = await supabase.from("mapping_rules").update(ruleData).eq("id", editingRule.id)
+      if (error) {
+        console.error("[v0] Erro ao atualizar regra:", error)
+        alert("Erro ao atualizar regra: " + error.message)
+        return
+      }
     }
 
     await mutateRules()

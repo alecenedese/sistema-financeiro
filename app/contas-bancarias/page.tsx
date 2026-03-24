@@ -5,6 +5,7 @@ import { PageHeader } from "@/components/page-header"
 import {
   Landmark, CreditCard, Wallet, Plus, TrendingUp, TrendingDown,
   ArrowDownLeft, ArrowUpRight, Eye, EyeOff, Pencil, Trash2, Loader2, X,
+  ArrowLeftRight,
 } from "lucide-react"
 import { useState, useEffect, useCallback } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
@@ -107,6 +108,44 @@ function ContasBancariasPage() {
   const [extrato, setExtrato] = useState<Extrato[]>([])
   const [extratoLoading, setExtratoLoading] = useState(false)
 
+  // Transferência entre contas
+  const [transferDialogOpen, setTransferDialogOpen] = useState(false)
+  const [transferForm, setTransferForm] = useState({
+    contaOrigemId: "",
+    contaDestinoId: "",
+    valor: "",
+    descricao: "Transferência entre contas",
+    data: new Date().toISOString().split("T")[0],
+  })
+  const [transferSaving, setTransferSaving] = useState(false)
+
+  // Criar categoria de transferência automaticamente ao abrir dialog
+  useEffect(() => {
+    if (!transferDialogOpen) return
+    const tid = getActiveTenantId()
+    if (!tid) return
+    
+    const createCategoriaTransferencia = async () => {
+      const supabase = createClient()
+      const { data: existing } = await supabase
+        .from("categorias")
+        .select("id")
+        .eq("nome", "Transferência entre Contas")
+        .eq("tenant_id", tid)
+        .single()
+      
+      if (!existing) {
+        await supabase.from("categorias").insert({
+          nome: "Transferência entre Contas",
+          tipo: "Despesa",
+          cor: "#6B7280",
+          tenant_id: tid,
+        })
+      }
+    }
+    createCategoriaTransferencia()
+  }, [transferDialogOpen])
+
   const searchParams = useSearchParams()
   const router = useRouter()
 
@@ -182,6 +221,106 @@ function ContasBancariasPage() {
     await mutate(); setDeleteConfirm(null)
     if (selectedConta?.id === c.id) setSelectedConta(null)
   }, [mutate, selectedConta])
+
+  // Transferência entre contas
+  const handleTransfer = useCallback(async () => {
+    const valor = parseFloat(transferForm.valor.replace(/[^\d,.-]/g, "").replace(",", ".")) || 0
+    if (!transferForm.contaOrigemId || !transferForm.contaDestinoId || valor <= 0) {
+      alert("Preencha todos os campos corretamente")
+      return
+    }
+    if (transferForm.contaOrigemId === transferForm.contaDestinoId) {
+      alert("Conta de origem e destino devem ser diferentes")
+      return
+    }
+    
+    setTransferSaving(true)
+    try {
+      const supabase = createClient()
+      const tid = getActiveTenantId()
+      const contaOrigemId = parseInt(transferForm.contaOrigemId)
+      const contaDestinoId = parseInt(transferForm.contaDestinoId)
+      const contaOrigem = contas.find(c => c.id === contaOrigemId)
+      const contaDestino = contas.find(c => c.id === contaDestinoId)
+
+      // Buscar ou criar categoria de transferência (sem grupo_dre = não afeta DRE)
+      let categoriaTransferencia: { id: number } | null = null
+      
+      console.log("[v0] Buscando categoria de transferência para tenant:", tid)
+      
+      const { data: catData, error: catError } = await supabase
+        .from("categorias")
+        .select("id")
+        .eq("nome", "Transferência entre Contas")
+        .eq("tenant_id", tid)
+        .maybeSingle()
+      
+      console.log("[v0] Resultado busca categoria:", catData, catError)
+      
+      if (catData) {
+        categoriaTransferencia = catData
+      } else {
+        // Criar categoria se não existir
+        console.log("[v0] Criando nova categoria de transferência")
+        const { data: newCat, error: insertError } = await supabase
+          .from("categorias")
+          .insert({ nome: "Transferência entre Contas", tipo: "Despesa", cor: "#6B7280", tenant_id: tid })
+          .select("id")
+          .single()
+        
+        console.log("[v0] Resultado inserção categoria:", newCat, insertError)
+        
+        if (insertError) {
+          alert("Erro ao criar categoria: " + insertError.message)
+          return
+        }
+        categoriaTransferencia = newCat
+      }
+
+      if (!categoriaTransferencia) {
+        alert("Erro ao criar categoria de transferência")
+        return
+      }
+      
+      console.log("[v0] Categoria de transferência ID:", categoriaTransferencia.id)
+
+      // 1. Criar conta a pagar (saída da conta origem) - já como PAGO
+      const contaPagarPayload: Record<string, unknown> = {
+        descricao: `${transferForm.descricao} - Saída para ${contaDestino?.nome}`,
+        valor: valor,
+        vencimento: transferForm.data,
+        status: "pago",
+        conta_bancaria_id: contaOrigemId,
+        categoria_id: categoriaTransferencia.id,
+      }
+      if (tid) contaPagarPayload.tenant_id = tid
+      await supabase.from("contas_pagar").insert(contaPagarPayload)
+
+      // 2. Criar conta a receber (entrada na conta destino) - já como RECEBIDO
+      const contaReceberPayload: Record<string, unknown> = {
+        descricao: `${transferForm.descricao} - Entrada de ${contaOrigem?.nome}`,
+        valor: valor,
+        vencimento: transferForm.data,
+        status: "recebido",
+        conta_bancaria_id: contaDestinoId,
+        categoria_id: categoriaTransferencia.id,
+      }
+      if (tid) contaReceberPayload.tenant_id = tid
+      await supabase.from("contas_receber").insert(contaReceberPayload)
+
+      await mutate()
+      setTransferDialogOpen(false)
+      setTransferForm({
+        contaOrigemId: "",
+        contaDestinoId: "",
+        valor: "",
+        descricao: "Transferência entre contas",
+        data: new Date().toISOString().split("T")[0],
+      })
+    } finally {
+      setTransferSaving(false)
+    }
+  }, [transferForm, contas, mutate])
 
   const filtroLabels: Record<FiltroExtrato, string> = {
     hoje: "Hoje", ontem: "Ontem", "7dias": "7 dias", mes: "Este mes"
@@ -259,9 +398,19 @@ function ContasBancariasPage() {
               {/* Table header */}
               <div className="flex items-center justify-between">
                 <h2 className="text-base font-semibold text-foreground">Minhas Contas</h2>
-                <button type="button" onClick={openNew} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
-                  <Plus className="h-4 w-4" />Nova Conta
-                </button>
+                <div className="flex items-center gap-2">
+                  <button 
+                    type="button" 
+                    onClick={() => setTransferDialogOpen(true)} 
+                    disabled={contas.length < 2}
+                    className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-semibold text-card-foreground hover:bg-muted disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <ArrowLeftRight className="h-4 w-4" />Transferir
+                  </button>
+                  <button type="button" onClick={openNew} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+                    <Plus className="h-4 w-4" />Nova Conta
+                  </button>
+                </div>
               </div>
 
               {/* Accounts Table */}
@@ -459,6 +608,101 @@ function ContasBancariasPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Dialog de Transferência entre Contas */}
+      <Dialog open={transferDialogOpen} onOpenChange={setTransferDialogOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ArrowLeftRight className="h-5 w-5" />
+              Transferencia entre Contas
+            </DialogTitle>
+            <DialogDescription>
+              Transfira valores entre suas contas bancarias. Esta operacao nao afeta o DRE.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="contaOrigem">Conta de Origem (saida)</Label>
+              <select
+                id="contaOrigem"
+                value={transferForm.contaOrigemId}
+                onChange={(e) => setTransferForm({ ...transferForm, contaOrigemId: e.target.value })}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Selecione a conta de origem...</option>
+                {contas.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nome} - Saldo: {formatCurrency(c.saldo)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="contaDestino">Conta de Destino (entrada)</Label>
+              <select
+                id="contaDestino"
+                value={transferForm.contaDestinoId}
+                onChange={(e) => setTransferForm({ ...transferForm, contaDestinoId: e.target.value })}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <option value="">Selecione a conta de destino...</option>
+                {contas.filter(c => c.id.toString() !== transferForm.contaOrigemId).map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.nome} - Saldo: {formatCurrency(c.saldo)}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="valorTransfer">Valor</Label>
+              <Input
+                id="valorTransfer"
+                type="text"
+                placeholder="R$ 0,00"
+                value={transferForm.valor}
+                onChange={(e) => setTransferForm({ ...transferForm, valor: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="dataTransfer">Data da Transferencia</Label>
+              <Input
+                id="dataTransfer"
+                type="date"
+                value={transferForm.data}
+                onChange={(e) => setTransferForm({ ...transferForm, data: e.target.value })}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="descricaoTransfer">Descricao</Label>
+              <Input
+                id="descricaoTransfer"
+                type="text"
+                placeholder="Ex: Transferência entre contas"
+                value={transferForm.descricao}
+                onChange={(e) => setTransferForm({ ...transferForm, descricao: e.target.value })}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <button
+              type="button"
+              onClick={() => setTransferDialogOpen(false)}
+              className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted"
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              onClick={handleTransfer}
+              disabled={transferSaving}
+              className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+            >
+              {transferSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : "Transferir"}
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

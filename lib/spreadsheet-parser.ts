@@ -150,12 +150,12 @@ function mapHeaders(headers: string[]): Record<string, number> {
 
   const aliases: Record<string, string[]> = {
     data:           ["data", "date", "dt"],
-    descricao:      ["descr", "histor", "memo", "description"],
+    descricao:      ["descricao", "descr", "histor", "memo", "description"],
     valor:          ["valor", "value", "amount", "vlr"],
     fornecedor:     ["fornecedor", "cliente for", "cliente", "supplier", "vendor", "favorecido"],
-    formaPagamento: ["forma", "f pgto", "pgto", "pagamento", "payment"],
-    planoConta:     ["plano", "categoria", "category", "conta"],
-    subcategoria:   ["subcategoria", "subcateg", "sub categoria"],
+    formaPagamento: ["f pgto", "forma", "pgto", "pagamento", "payment"],
+    planoConta:     ["plano de conta", "plano conta", "plano", "categoria", "category", "conta"],
+    subcategoria:   ["subcategoria", "subcateg", "sub categoria", "sub"],
     banco:          ["banco", "bank"],
   }
 
@@ -227,11 +227,12 @@ export function parseCSV(content: string): ParsedSpreadsheetTransaction[] {
  */
 export async function parseXLSX(buffer: ArrayBuffer): Promise<ParsedSpreadsheetTransaction[]> {
   const XLSX = await import("xlsx")
-  const wb = XLSX.read(buffer, { type: "array", cellDates: false })
+  // Força codepage 65001 (UTF-8) para caracteres especiais
+  const wb = XLSX.read(buffer, { type: "array", cellDates: false, codepage: 65001 })
   const sheetName = wb.SheetNames[0]
   const ws = wb.Sheets[sheetName]
-  // Converte para array de arrays
-  const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "" }) as unknown[][]
+  // Converte para array de arrays com raw: false para obter strings formatadas
+  const rows: unknown[][] = XLSX.utils.sheet_to_json(ws, { header: 1, defval: "", raw: false }) as unknown[][]
   if (rows.length < 2) return []
 
   const headers = (rows[0] as string[]).map(String)
@@ -240,14 +241,21 @@ export async function parseXLSX(buffer: ArrayBuffer): Promise<ParsedSpreadsheetT
 
   for (let i = 1; i < rows.length; i++) {
     const cols = rows[i] as unknown[]
-    const dataRaw = idx.data !== undefined ? String(cols[idx.data] ?? "") : ""
-    const descricao = idx.descricao !== undefined ? String(cols[idx.descricao] ?? "") : ""
+    // Função para limpar caracteres inválidos (�, etc)
+    const cleanText = (val: unknown): string => {
+      const str = String(val ?? "")
+      // Remove caracteres de substituição Unicode e outros inválidos
+      return str.replace(/[\uFFFD\u0000-\u001F]/g, "").trim()
+    }
+    
+    const dataRaw = idx.data !== undefined ? cleanText(cols[idx.data]) : ""
+    const descricao = idx.descricao !== undefined ? cleanText(cols[idx.descricao]) : ""
     const valorRaw = idx.valor !== undefined ? String(cols[idx.valor] ?? "") : ""
-    const fornecedor = idx.fornecedor !== undefined ? String(cols[idx.fornecedor] ?? "") : ""
-    const formaPagamento = idx.formaPagamento !== undefined ? String(cols[idx.formaPagamento] ?? "") : ""
-    const planoConta = idx.planoConta !== undefined ? String(cols[idx.planoConta] ?? "") : ""
-    const subcategoria = idx.subcategoria !== undefined ? String(cols[idx.subcategoria] ?? "") : ""
-    const banco = idx.banco !== undefined ? String(cols[idx.banco] ?? "") : ""
+    const fornecedor = idx.fornecedor !== undefined ? cleanText(cols[idx.fornecedor]) : ""
+    const formaPagamento = idx.formaPagamento !== undefined ? cleanText(cols[idx.formaPagamento]) : ""
+    const planoConta = idx.planoConta !== undefined ? cleanText(cols[idx.planoConta]) : ""
+    const subcategoria = idx.subcategoria !== undefined ? cleanText(cols[idx.subcategoria]) : ""
+    const banco = idx.banco !== undefined ? cleanText(cols[idx.banco]) : ""
 
     if (!dataRaw && !descricao && !valorRaw) continue
 
