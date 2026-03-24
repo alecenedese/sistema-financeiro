@@ -93,7 +93,7 @@ async function fetchContas([, tid]: [string, number | null]): Promise<ContaPagar
   let q = supabase
     .from("contas_pagar")
     .select(`*, categorias(nome), subcategorias(nome), subcategorias_filhos(nome), contas_bancarias(nome, tipo), fornecedores(nome)`)
-    .order("vencimento", { ascending: true })
+    .order("vencimento", { ascending: false })
   if (tid) q = q.eq("tenant_id", tid)
   const { data, error } = await q
   if (error) throw error
@@ -179,6 +179,7 @@ function ContasAPagarPage() {
   const [filterStatus, setFilterStatus] = useState<"Todos" | "Pendente" | "Pago" | "Vencido" | "Vencem Hoje" | "A Vencer">("Todos")
   const [filterCategoriaId, setFilterCategoriaId] = useState("")
   const [filterSubcategoriaId, setFilterSubcategoriaId] = useState("")
+  const [filterContaBancariaId, setFilterContaBancariaId] = useState("")
   const [filterPeriodo, setFilterPeriodo] = useState<"mes_atual" | "7dias" | "personalizado" | "todos">("mes_atual")
   const [customDateFrom, setCustomDateFrom] = useState("")
   const [customDateTo, setCustomDateTo] = useState("")
@@ -273,6 +274,7 @@ function ContasAPagarPage() {
       if (filterStatus === "Pendente" && c.status !== "pendente") return false
       if (filterCategoriaId && String(c.categoria_id) !== filterCategoriaId) return false
       if (filterSubcategoriaId && String(c.subcategoria_id) !== filterSubcategoriaId) return false
+      if (filterContaBancariaId && String(c.conta_bancaria_id) !== filterContaBancariaId) return false
       if (dateRange && c.vencimento) {
         if (c.vencimento < dateRange.from || c.vencimento > dateRange.to) return false
       }
@@ -286,7 +288,7 @@ function ContasAPagarPage() {
       }
       return true
     })
-  }, [contas, filterStatus, filterCategoriaId, filterSubcategoriaId, search, dateRange, today])
+  }, [contas, filterStatus, filterCategoriaId, filterSubcategoriaId, filterContaBancariaId, search, dateRange, today])
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
@@ -296,14 +298,15 @@ function ContasAPagarPage() {
   }, [filtered, page])
 
   // Reset page when filters change
-  useEffect(() => { setPage(1) }, [filterStatus, filterCategoriaId, filterSubcategoriaId, search, filterPeriodo, customDateFrom, customDateTo])
+  useEffect(() => { setPage(1) }, [filterStatus, filterCategoriaId, filterSubcategoriaId, filterContaBancariaId, search, filterPeriodo, customDateFrom, customDateTo])
 
-  const hasFilter = filterStatus !== "Todos" || filterCategoriaId || filterSubcategoriaId || search || filterPeriodo !== "mes_atual"
+  const hasFilter = filterStatus !== "Todos" || filterCategoriaId || filterSubcategoriaId || filterContaBancariaId || search || filterPeriodo !== "mes_atual"
 
   function clearFilters() {
     setFilterStatus("Todos")
     setFilterCategoriaId("")
     setFilterSubcategoriaId("")
+    setFilterContaBancariaId("")
     setSearch("")
     setFilterPeriodo("mes_atual")
     setCustomDateFrom("")
@@ -544,6 +547,19 @@ function ContasAPagarPage() {
                   <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 </div>
               )}
+
+              {/* Conta Bancária */}
+              <div className="relative">
+                <select
+                  value={filterContaBancariaId}
+                  onChange={(e) => setFilterContaBancariaId(e.target.value)}
+                  className="h-10 appearance-none rounded-lg border border-border bg-card pl-3 pr-8 text-sm text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                >
+                  <option value="">Todas contas</option>
+                  {contasBancarias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                </select>
+                <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              </div>
 
               {hasFilter && (
                 <button type="button" onClick={clearFilters}

@@ -10,7 +10,7 @@ import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
 import {
   ShoppingCart, Plus, Pencil, Trash2, Loader2, Search, X, ChevronDown,
-  ChevronLeft, ChevronRight, Upload, FileSpreadsheet, Check, TrendingUp
+  ChevronLeft, ChevronRight, Upload, FileSpreadsheet, Check, TrendingUp, Copy
 } from "lucide-react"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -225,6 +225,25 @@ function VendasPage() {
       forma_pagamento: v.forma_pagamento,
       canal: v.canal,
       data_venda: v.data_venda ? v.data_venda.slice(0, 16) : "",
+      observacoes: v.observacoes,
+    })
+    setDialogOpen(true)
+  }
+
+  function cloneVenda(v: Venda) {
+    setEditingVenda(null) // null para criar nova
+    setForm({
+      codigo: "", // Código vazio para nova venda
+      cliente_id: v.cliente_id ? String(v.cliente_id) : "",
+      cliente_nome: v.cliente_nome,
+      valor_total: formatBRL(v.valor_total),
+      acrescimo: formatBRL(v.acrescimo),
+      taxas_marketplace: formatBRL(v.taxas_marketplace),
+      desconto: formatBRL(v.desconto),
+      valor_recebido: formatBRL(v.valor_recebido),
+      forma_pagamento: v.forma_pagamento,
+      canal: v.canal,
+      data_venda: new Date().toISOString().slice(0, 16), // Data atual
       observacoes: v.observacoes,
     })
     setDialogOpen(true)
@@ -674,10 +693,13 @@ function VendasPage() {
                         <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateTimeDisplay(venda.data_venda)}</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-1">
-                            <button type="button" onClick={() => openEdit(venda)} className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+                            <button type="button" onClick={() => cloneVenda(venda)} title="Clonar venda" className="rounded-md p-1.5 text-muted-foreground hover:bg-primary/10 hover:text-primary">
+                              <Copy className="h-4 w-4" />
+                            </button>
+                            <button type="button" onClick={() => openEdit(venda)} title="Editar" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
                               <Pencil className="h-4 w-4" />
                             </button>
-                            <button type="button" onClick={() => setDeleteConfirm(venda)} className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
+                            <button type="button" onClick={() => setDeleteConfirm(venda)} title="Excluir" className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
                               <Trash2 className="h-4 w-4" />
                             </button>
                           </div>
