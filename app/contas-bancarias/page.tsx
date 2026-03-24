@@ -137,7 +137,7 @@ function ContasBancariasPage() {
       if (!existing) {
         await supabase.from("categorias").insert({
           nome: "Transferência entre Contas",
-          tipo: "transferencia",
+          tipo: "Despesa",
           cor: "#6B7280",
           tenant_id: tid,
         })
@@ -264,7 +264,7 @@ function ContasBancariasPage() {
         console.log("[v0] Criando nova categoria de transferência")
         const { data: newCat, error: insertError } = await supabase
           .from("categorias")
-          .insert({ nome: "Transferência entre Contas", tipo: "transferencia", cor: "#6B7280", tenant_id: tid })
+          .insert({ nome: "Transferência entre Contas", tipo: "Despesa", cor: "#6B7280", tenant_id: tid })
           .select("id")
           .single()
         
