@@ -119,6 +119,33 @@ function ContasBancariasPage() {
   })
   const [transferSaving, setTransferSaving] = useState(false)
 
+  // Criar categoria de transferência automaticamente ao abrir dialog
+  useEffect(() => {
+    if (!transferDialogOpen) return
+    const tid = getActiveTenantId()
+    if (!tid) return
+    
+    const createCategoriaTransferencia = async () => {
+      const supabase = createClient()
+      const { data: existing } = await supabase
+        .from("categorias")
+        .select("id")
+        .eq("nome", "Transferência entre Contas")
+        .eq("tenant_id", tid)
+        .single()
+      
+      if (!existing) {
+        await supabase.from("categorias").insert({
+          nome: "Transferência entre Contas",
+          tipo: "transferencia",
+          cor: "#6B7280",
+          tenant_id: tid,
+        })
+      }
+    }
+    createCategoriaTransferencia()
+  }, [transferDialogOpen])
+
   const searchParams = useSearchParams()
   const router = useRouter()
 
