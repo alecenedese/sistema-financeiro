@@ -216,16 +216,40 @@ function ContasBancariasPage() {
       const contaOrigem = contas.find(c => c.id === contaOrigemId)
       const contaDestino = contas.find(c => c.id === contaDestinoId)
 
+      // Buscar ou criar categoria de transferência (sem grupo_dre = não afeta DRE)
+      let categoriaTransferencia: { id: number } | null = null
+      const { data: catData } = await supabase
+        .from("categorias")
+        .select("id")
+        .eq("nome", "Transferência entre Contas")
+        .eq("tenant_id", tid)
+        .single()
+      
+      if (catData) {
+        categoriaTransferencia = catData
+      } else {
+        // Criar categoria se não existir
+        const { data: newCat } = await supabase
+          .from("categorias")
+          .insert({ nome: "Transferência entre Contas", tipo: "transferencia", cor: "#6B7280", tenant_id: tid })
+          .select("id")
+          .single()
+        categoriaTransferencia = newCat
+      }
+
+      if (!categoriaTransferencia) {
+        alert("Erro ao criar categoria de transferência")
+        return
+      }
+
       // 1. Criar conta a pagar (saída da conta origem) - já como PAGO
       const contaPagarPayload: Record<string, unknown> = {
         descricao: `${transferForm.descricao} - Saída para ${contaDestino?.nome}`,
         valor: valor,
         vencimento: transferForm.data,
-        data_pagamento: transferForm.data,
         status: "pago",
         conta_bancaria_id: contaOrigemId,
-        categoria_id: null, // Sem categoria = não aparece no DRE
-        observacoes: `Transferência para conta: ${contaDestino?.nome}`,
+        categoria_id: categoriaTransferencia.id,
       }
       if (tid) contaPagarPayload.tenant_id = tid
       await supabase.from("contas_pagar").insert(contaPagarPayload)
@@ -235,25 +259,12 @@ function ContasBancariasPage() {
         descricao: `${transferForm.descricao} - Entrada de ${contaOrigem?.nome}`,
         valor: valor,
         vencimento: transferForm.data,
-        data_recebimento: transferForm.data,
         status: "recebido",
         conta_bancaria_id: contaDestinoId,
-        categoria_id: null, // Sem categoria = não aparece no DRE
-        observacoes: `Transferência da conta: ${contaOrigem?.nome}`,
+        categoria_id: categoriaTransferencia.id,
       }
       if (tid) contaReceberPayload.tenant_id = tid
       await supabase.from("contas_receber").insert(contaReceberPayload)
-
-      // 3. Atualizar saldos das contas
-      await supabase.from("contas_bancarias").update({
-        saldo: (contaOrigem?.saldo || 0) - valor,
-        saidas: (contaOrigem?.saidas || 0) + valor,
-      }).eq("id", contaOrigemId)
-
-      await supabase.from("contas_bancarias").update({
-        saldo: (contaDestino?.saldo || 0) + valor,
-        entradas: (contaDestino?.entradas || 0) + valor,
-      }).eq("id", contaDestinoId)
 
       await mutate()
       setTransferDialogOpen(false)
