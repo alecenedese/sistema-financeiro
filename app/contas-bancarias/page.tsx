@@ -245,22 +245,35 @@ function ContasBancariasPage() {
 
       // Buscar ou criar categoria de transferência (sem grupo_dre = não afeta DRE)
       let categoriaTransferencia: { id: number } | null = null
-      const { data: catData } = await supabase
+      
+      console.log("[v0] Buscando categoria de transferência para tenant:", tid)
+      
+      const { data: catData, error: catError } = await supabase
         .from("categorias")
         .select("id")
         .eq("nome", "Transferência entre Contas")
         .eq("tenant_id", tid)
-        .single()
+        .maybeSingle()
+      
+      console.log("[v0] Resultado busca categoria:", catData, catError)
       
       if (catData) {
         categoriaTransferencia = catData
       } else {
         // Criar categoria se não existir
-        const { data: newCat } = await supabase
+        console.log("[v0] Criando nova categoria de transferência")
+        const { data: newCat, error: insertError } = await supabase
           .from("categorias")
           .insert({ nome: "Transferência entre Contas", tipo: "transferencia", cor: "#6B7280", tenant_id: tid })
           .select("id")
           .single()
+        
+        console.log("[v0] Resultado inserção categoria:", newCat, insertError)
+        
+        if (insertError) {
+          alert("Erro ao criar categoria: " + insertError.message)
+          return
+        }
         categoriaTransferencia = newCat
       }
 
@@ -268,6 +281,8 @@ function ContasBancariasPage() {
         alert("Erro ao criar categoria de transferência")
         return
       }
+      
+      console.log("[v0] Categoria de transferência ID:", categoriaTransferencia.id)
 
       // 1. Criar conta a pagar (saída da conta origem) - já como PAGO
       const contaPagarPayload: Record<string, unknown> = {
