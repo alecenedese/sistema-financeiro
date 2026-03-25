@@ -1078,7 +1078,9 @@ export default function ImportarTransacoesPage() {
       return
     }
 
+    console.log("[v0] Regra salva com sucesso, atualizando lista...")
     await mutateRules()
+    console.log("[v0] Lista atualizada, fechando dialog")
     setRuleEditDialogOpen(false)
     setEditingRule(null)
   }
