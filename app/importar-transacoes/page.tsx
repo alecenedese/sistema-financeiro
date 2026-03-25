@@ -1054,35 +1054,28 @@ export default function ImportarTransacoesPage() {
       return
     }
     
-    const supabase = createClient()
-    
-  const ruleData = {
-  keyword: editingRule.keyword.trim(),
-  categoria_id: editingRule.categoria_id,
-  subcategoria_id: editingRule.subcategoria_id,
-  subcategoria_filho_id: editingRule.subcategoria_filho_id,
-  cliente_fornecedor: editingRule.cliente_fornecedor || "",
-  descricao: editingRule.descricao || "",
-  substituir_descricao: editingRule.substituir_descricao || false,
-  tenant_id: tid,
-  }
+    const ruleData = {
+      id: editingRule.id,
+      keyword: editingRule.keyword.trim(),
+      categoria_id: editingRule.categoria_id,
+      subcategoria_id: editingRule.subcategoria_id,
+      subcategoria_filho_id: editingRule.subcategoria_filho_id,
+      cliente_fornecedor: editingRule.cliente_fornecedor || "",
+      descricao: editingRule.descricao || "",
+      substituir_descricao: editingRule.substituir_descricao || false,
+      tenant_id: tid,
+    }
 
-    if (editingRule.id === 0) {
-      // New rule
-      const { error } = await supabase.from("mapping_rules").insert(ruleData)
-      if (error) {
-        console.error("[v0] Erro ao inserir regra:", error)
-        alert("Erro ao salvar regra: " + error.message)
-        return
-      }
-    } else {
-      // Update existing
-      const { error } = await supabase.from("mapping_rules").update(ruleData).eq("id", editingRule.id)
-      if (error) {
-        console.error("[v0] Erro ao atualizar regra:", error)
-        alert("Erro ao atualizar regra: " + error.message)
-        return
-      }
+    const response = await fetch("/api/mapping-rules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(ruleData),
+    })
+    
+    const result = await response.json()
+    if (!response.ok) {
+      alert("Erro ao salvar regra: " + result.error)
+      return
     }
 
     await mutateRules()
