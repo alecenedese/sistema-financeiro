@@ -214,41 +214,47 @@ async function fetchDespesasFixas(): Promise<DespesaFixaRow[]> {
 async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   const supabase = createClient()
   let q = supabase
-    .from("mapping_rules")
-    .select(`
-      id,
-      keyword,
-      categoria_id,
-      subcategoria_id,
-      subcategoria_filho_id,
-      cliente_fornecedor,
-      tenant_id,
-      categorias(nome),
-      subcategorias(nome),
-      subcategorias_filhos(nome)
-    `)
-    .order("keyword")
+  .from("mapping_rules")
+  .select(`
+  id,
+  keyword,
+  categoria_id,
+  subcategoria_id,
+  subcategoria_filho_id,
+  cliente_fornecedor,
+  descricao,
+  forma_pagamento,
+  substituir_descricao,
+  tenant_id,
+  categorias(nome),
+  subcategorias(nome),
+  subcategorias_filhos(nome)
+  `)
+  .order("keyword")
   
   if (tid) q = q.eq("tenant_id", tid)
-
+  
   const { data, error } = await q
-
+  
   if (error) throw error
-
+  
   return (data || []).map((row: Record<string, unknown>) => ({
-    id: row.id as number,
-    keyword: row.keyword as string,
-    categoria_id: row.categoria_id as number | null,
-    subcategoria_id: row.subcategoria_id as number | null,
-    subcategoria_filho_id: row.subcategoria_filho_id as number | null,
-    fornecedor_id: null,
-    cliente_id: null,
-    cliente_fornecedor: (row.cliente_fornecedor as string) || "",
-    categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
-    subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
-    filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
+  id: row.id as number,
+  keyword: row.keyword as string,
+  categoria_id: row.categoria_id as number | null,
+  subcategoria_id: row.subcategoria_id as number | null,
+  subcategoria_filho_id: row.subcategoria_filho_id as number | null,
+  fornecedor_id: null,
+  cliente_id: null,
+  cliente_fornecedor: (row.cliente_fornecedor as string) || "",
+  descricao: (row.descricao as string) || "",
+  forma_pagamento: (row.forma_pagamento as string) || "",
+  substituir_descricao: (row.substituir_descricao as boolean) || false,
+  categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
+  subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
+  filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
   }))
-}
+  }
 
 // ---------- Helpers ----------
 
@@ -1052,15 +1058,17 @@ export default function ImportarTransacoesPage() {
     
     const supabase = createClient()
     
-    // Usa apenas colunas que existem na tabela original
-    const ruleData = {
-      keyword: editingRule.keyword.trim(),
-      categoria_id: editingRule.categoria_id,
-      subcategoria_id: editingRule.subcategoria_id,
-      subcategoria_filho_id: editingRule.subcategoria_filho_id,
-      cliente_fornecedor: editingRule.cliente_fornecedor || "",
-      tenant_id: tid,
-    }
+  const ruleData = {
+  keyword: editingRule.keyword.trim(),
+  categoria_id: editingRule.categoria_id,
+  subcategoria_id: editingRule.subcategoria_id,
+  subcategoria_filho_id: editingRule.subcategoria_filho_id,
+  cliente_fornecedor: editingRule.cliente_fornecedor || "",
+  descricao: editingRule.descricao || "",
+  forma_pagamento: editingRule.forma_pagamento || "",
+  substituir_descricao: editingRule.substituir_descricao || false,
+  tenant_id: tid,
+  }
 
     if (editingRule.id === 0) {
       // New rule
@@ -1754,18 +1762,7 @@ export default function ImportarTransacoesPage() {
               </div>
               
               {/* Grid Fields */}
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">Conta</label>
-                  <select
-                    value={editingRule.conta_bancaria_id?.toString() || ""}
-                    onChange={(e) => setEditingRule({ ...editingRule, conta_bancaria_id: e.target.value ? Number(e.target.value) : null })}
-                    className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
-                  >
-                    <option value="">Selecionar...</option>
-                    {contasBancarias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
-                  </select>
-                </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Categoria</label>
                   <select
@@ -1778,19 +1775,7 @@ export default function ImportarTransacoesPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">Contato</label>
-                  <input
-                    type="text"
-                    value={editingRule.cliente_fornecedor || ""}
-                    onChange={(e) => setEditingRule({ ...editingRule, cliente_fornecedor: e.target.value })}
-                    className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
-                  />
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">Centro</label>
+                  <label className="text-xs font-medium text-muted-foreground">Subcategoria</label>
                   <select
                     value={editingRule.subcategoria_id?.toString() || ""}
                     onChange={(e) => setEditingRule({ ...editingRule, subcategoria_id: e.target.value ? Number(e.target.value) : null, subcategoria_filho_id: null })}
@@ -1800,8 +1785,11 @@ export default function ImportarTransacoesPage() {
                     {getSubcatOptions(editingRule.categoria_id?.toString() || "").map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                   </select>
                 </div>
+              </div>
+              
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">Projeto</label>
+                  <label className="text-xs font-medium text-muted-foreground">Subcategoria Filho</label>
                   <select
                     value={editingRule.subcategoria_filho_id?.toString() || ""}
                     onChange={(e) => setEditingRule({ ...editingRule, subcategoria_filho_id: e.target.value ? Number(e.target.value) : null })}
@@ -1812,7 +1800,7 @@ export default function ImportarTransacoesPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">Forma de pagto</label>
+                  <label className="text-xs font-medium text-muted-foreground">Forma de Pagamento</label>
                   <select
                     value={editingRule.forma_pagamento || ""}
                     onChange={(e) => setEditingRule({ ...editingRule, forma_pagamento: e.target.value })}
@@ -1829,16 +1817,6 @@ export default function ImportarTransacoesPage() {
                     <option value="Cheque">Cheque</option>
                   </select>
                 </div>
-              </div>
-              
-              {/* Tags */}
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Tags</label>
-                <input
-                  type="text"
-                  placeholder="Adicionar tags..."
-                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
-                />
               </div>
               
               {/* Toggle */}
