@@ -580,27 +580,26 @@ export default function ImportarTransacoesPage() {
           let subcategoria_filho_id: number | null = null
           let cliente_id: number | null = null
           
-          // 1. Match cliente/fornecedor pelo nome do CSV
-          // Busca em ambas as listas para maior flexibilidade
+          // 1. Match fornecedor pela coluna FORNECEDOR
           if (extra._fornecedor) {
             const searchTerm = extra._fornecedor.trim()
             clienteFornecedor = searchTerm
-            
-            // Tenta encontrar em fornecedores primeiro
             fornecedor_id = matchByName(fornecedorList, searchTerm)
-            
-            // Se não encontrou em fornecedores, tenta em clientes
-            if (!fornecedor_id) {
-              cliente_id = matchByName(clienteList, searchTerm)
-            }
+          }
+          
+          // 2. Match cliente pela coluna CLIENTE (separada)
+          if (extra._cliente) {
+            const searchTerm = extra._cliente.trim()
+            if (!clienteFornecedor) clienteFornecedor = searchTerm
+            cliente_id = matchByName(clienteList, searchTerm)
           }
 
-          // 2. Match categoria pelo plano de conta do CSV
+          // 3. Match categoria pelo plano de conta do CSV
           if (extra._planoConta) {
             categoria_id = matchByName(categoriaList, extra._planoConta)
           }
 
-          // 3. Match subcategoria pelo nome da planilha
+          // 4. Match subcategoria pelo nome da planilha
           if (extra._subcategoria) {
             const subcatSearch = normalizeText(extra._subcategoria)
             // Se já tem categoria, filtra subcategorias dessa categoria
@@ -618,7 +617,7 @@ export default function ImportarTransacoesPage() {
             }
           }
 
-          // 4. Aplica regras automaticas como fallback (se planilha nao mapeou)
+          // 5. Aplica regras automaticas como fallback (se planilha nao mapeou)
           const matched = applyRules(tx)
           if (!fornecedor_id && matched.fornecedor_id) fornecedor_id = matched.fornecedor_id
           if (!cliente_id && matched.cliente_id) cliente_id = matched.cliente_id
