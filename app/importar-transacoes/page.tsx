@@ -222,6 +222,8 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   subcategoria_id,
   subcategoria_filho_id,
   cliente_fornecedor,
+  descricao,
+  substituir_descricao,
   tenant_id,
   categorias(nome),
   subcategorias(nome),
@@ -244,6 +246,8 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   fornecedor_id: null,
   cliente_id: null,
   cliente_fornecedor: (row.cliente_fornecedor as string) || "",
+  descricao: (row.descricao as string) || "",
+  substituir_descricao: (row.substituir_descricao as boolean) || false,
   categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
   subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
   filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
@@ -1058,6 +1062,8 @@ export default function ImportarTransacoesPage() {
   subcategoria_id: editingRule.subcategoria_id,
   subcategoria_filho_id: editingRule.subcategoria_filho_id,
   cliente_fornecedor: editingRule.cliente_fornecedor || "",
+  descricao: editingRule.descricao || "",
+  substituir_descricao: editingRule.substituir_descricao || false,
   tenant_id: tid,
   }
 
@@ -1787,6 +1793,34 @@ export default function ImportarTransacoesPage() {
                   className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
                   placeholder="Nome do cliente ou fornecedor"
                 />
+              </div>
+              
+              {/* Descrição do Lançamento */}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Descricao do lancamento</label>
+                <input
+                  type="text"
+                  value={editingRule.descricao || ""}
+                  onChange={(e) => setEditingRule({ ...editingRule, descricao: e.target.value })}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                  placeholder="Descricao para substituir no extrato"
+                  maxLength={200}
+                />
+                <div className="mt-1 text-right text-xs text-muted-foreground">{(editingRule.descricao || "").length} / 200</div>
+              </div>
+              
+              {/* Toggle Substituir Descrição */}
+              <div className="flex items-center gap-3 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingRule({ ...editingRule, substituir_descricao: !editingRule.substituir_descricao })}
+                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${editingRule.substituir_descricao ? "bg-primary" : "bg-muted"}`}
+                >
+                  <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${editingRule.substituir_descricao ? "translate-x-5" : "translate-x-0"}`} />
+                </button>
+                <span className="text-sm text-card-foreground">
+                  Ao importar lancamentos, substituir a descricao do extrato por <strong>{editingRule.descricao || editingRule.keyword.split(",")[0].trim().toUpperCase()}</strong>.
+                </span>
               </div>
             </div>
           )}
