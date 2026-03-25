@@ -174,10 +174,19 @@ function mapHeaders(headers: string[]): Record<string, number> {
  * Parseia texto CSV/TSV e retorna lista de transações
  */
 export function parseCSV(content: string): ParsedSpreadsheetTransaction[] {
+  // Função para limpar caracteres problemáticos
+  const cleanString = (s: string): string => {
+    return s
+      .replace(/[\uFFFD]/g, "")           // Remove caractere de substituição
+      .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "") // Remove caracteres de controle
+      .trim()
+  }
+  
   // Remove BOM UTF-8, UTF-16, e caracteres de controle no início
   const text = content
     .replace(/^\uFEFF/, "")   // BOM UTF-8
     .replace(/^\uFFFE/, "")   // BOM UTF-16 LE
+    .replace(/[\uFFFD]/g, "") // Remove caracteres de substituição
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
 
@@ -194,14 +203,14 @@ export function parseCSV(content: string): ParsedSpreadsheetTransaction[] {
     const cols = splitLine(lines[i], sep)
     if (cols.every((c) => !c)) continue
 
-    const dataRaw = idx.data !== undefined ? cols[idx.data] || "" : ""
-    const descricao = idx.descricao !== undefined ? cols[idx.descricao] || "" : ""
+    const dataRaw = idx.data !== undefined ? cleanString(cols[idx.data] || "") : ""
+    const descricao = idx.descricao !== undefined ? cleanString(cols[idx.descricao] || "") : ""
     const valorRaw = idx.valor !== undefined ? cols[idx.valor] || "" : ""
-    const fornecedor = idx.fornecedor !== undefined ? cols[idx.fornecedor] || "" : ""
-    const formaPagamento = idx.formaPagamento !== undefined ? cols[idx.formaPagamento] || "" : ""
-    const planoConta = idx.planoConta !== undefined ? cols[idx.planoConta] || "" : ""
-    const subcategoria = idx.subcategoria !== undefined ? cols[idx.subcategoria] || "" : ""
-    const banco = idx.banco !== undefined ? cols[idx.banco] || "" : ""
+    const fornecedor = idx.fornecedor !== undefined ? cleanString(cols[idx.fornecedor] || "") : ""
+    const formaPagamento = idx.formaPagamento !== undefined ? cleanString(cols[idx.formaPagamento] || "") : ""
+    const planoConta = idx.planoConta !== undefined ? cleanString(cols[idx.planoConta] || "") : ""
+    const subcategoria = idx.subcategoria !== undefined ? cleanString(cols[idx.subcategoria] || "") : ""
+    const banco = idx.banco !== undefined ? cleanString(cols[idx.banco] || "") : ""
 
     if (!dataRaw && !descricao && !valorRaw) continue
 
