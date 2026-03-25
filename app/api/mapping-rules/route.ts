@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
     
     console.log("[v0] Body recebido:", JSON.stringify(body))
     
-    const { id, keyword, categoria_id, subcategoria_id, subcategoria_filho_id, cliente_fornecedor, tenant_id } = body
+    const { id, keyword, categoria_id, subcategoria_id, subcategoria_filho_id, cliente_fornecedor, descricao, substituir_descricao, tenant_id } = body
     
     if (!keyword || !tenant_id) {
       console.log("[v0] Faltando keyword ou tenant_id")
@@ -23,6 +23,8 @@ export async function POST(request: NextRequest) {
         subcategoria_id: subcategoria_id || null,
         subcategoria_filho_id: subcategoria_filho_id || null,
         cliente_fornecedor: cliente_fornecedor || '',
+        descricao: descricao || '',
+        substituir_descricao: substituir_descricao || false,
         tenant_id,
       }
       console.log("[v0] Inserindo:", JSON.stringify(insertData))
@@ -43,6 +45,8 @@ export async function POST(request: NextRequest) {
         subcategoria_id: subcategoria_id || null,
         subcategoria_filho_id: subcategoria_filho_id || null,
         cliente_fornecedor: cliente_fornecedor || '',
+        descricao: descricao || '',
+        substituir_descricao: substituir_descricao || false,
       }
       console.log("[v0] Atualizando id:", id, "data:", JSON.stringify(updateData))
       
