@@ -9,26 +9,17 @@ export async function POST(request: NextRequest) {
     const { id, keyword, categoria_id, subcategoria_id, subcategoria_filho_id, cliente_fornecedor, descricao, substituir_descricao, tenant_id } = body
     
     if (id === 0) {
-      // New rule - usando SQL direto para contornar cache do schema
-      const { error } = await supabase.rpc('exec_sql', {
-        query: `INSERT INTO mapping_rules (keyword, categoria_id, subcategoria_id, subcategoria_filho_id, cliente_fornecedor, descricao, substituir_descricao, tenant_id) 
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        params: [keyword, categoria_id, subcategoria_id, subcategoria_filho_id, cliente_fornecedor || '', descricao || '', substituir_descricao || false, tenant_id]
+      // New rule - insert sem os campos descricao/substituir_descricao por causa do cache
+      const { error: insertError } = await supabase.from("mapping_rules").insert({
+        keyword,
+        categoria_id,
+        subcategoria_id,
+        subcategoria_filho_id,
+        cliente_fornecedor: cliente_fornecedor || '',
+        tenant_id,
       })
-      
-      // Se não tiver a função exec_sql, tenta insert sem os campos problemáticos
-      if (error) {
-        const { error: insertError } = await supabase.from("mapping_rules").insert({
-          keyword,
-          categoria_id,
-          subcategoria_id,
-          subcategoria_filho_id,
-          cliente_fornecedor: cliente_fornecedor || '',
-          tenant_id,
-        })
-        if (insertError) {
-          return NextResponse.json({ error: insertError.message }, { status: 400 })
-        }
+      if (insertError) {
+        return NextResponse.json({ error: insertError.message }, { status: 400 })
       }
     } else {
       // Update existing - tenta sem campos problemáticos primeiro
