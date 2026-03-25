@@ -222,9 +222,6 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   subcategoria_id,
   subcategoria_filho_id,
   cliente_fornecedor,
-  descricao,
-  forma_pagamento,
-  substituir_descricao,
   tenant_id,
   categorias(nome),
   subcategorias(nome),
@@ -247,9 +244,6 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   fornecedor_id: null,
   cliente_id: null,
   cliente_fornecedor: (row.cliente_fornecedor as string) || "",
-  descricao: (row.descricao as string) || "",
-  forma_pagamento: (row.forma_pagamento as string) || "",
-  substituir_descricao: (row.substituir_descricao as boolean) || false,
   categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
   subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
   filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
@@ -1064,9 +1058,6 @@ export default function ImportarTransacoesPage() {
   subcategoria_id: editingRule.subcategoria_id,
   subcategoria_filho_id: editingRule.subcategoria_filho_id,
   cliente_fornecedor: editingRule.cliente_fornecedor || "",
-  descricao: editingRule.descricao || "",
-  forma_pagamento: editingRule.forma_pagamento || "",
-  substituir_descricao: editingRule.substituir_descricao || false,
   tenant_id: tid,
   }
 
@@ -1748,19 +1739,6 @@ export default function ImportarTransacoesPage() {
                 <div className="mt-1 text-right text-xs text-muted-foreground">{editingRule.keyword.length} / 200</div>
               </div>
               
-              {/* Description */}
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Descricao dos lancamentos *</label>
-                <input
-                  type="text"
-                  value={editingRule.descricao || ""}
-                  onChange={(e) => setEditingRule({ ...editingRule, descricao: e.target.value })}
-                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
-                  maxLength={200}
-                />
-                <div className="mt-1 text-right text-xs text-muted-foreground">{(editingRule.descricao || "").length} / 200</div>
-              </div>
-              
               {/* Grid Fields */}
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -1787,50 +1765,28 @@ export default function ImportarTransacoesPage() {
                 </div>
               </div>
               
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">Subcategoria Filho</label>
-                  <select
-                    value={editingRule.subcategoria_filho_id?.toString() || ""}
-                    onChange={(e) => setEditingRule({ ...editingRule, subcategoria_filho_id: e.target.value ? Number(e.target.value) : null })}
-                    className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
-                  >
-                    <option value="">Selecionar...</option>
-                    {getFilhoOptions(editingRule.subcategoria_id?.toString() || "").map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">Forma de Pagamento</label>
-                  <select
-                    value={editingRule.forma_pagamento || ""}
-                    onChange={(e) => setEditingRule({ ...editingRule, forma_pagamento: e.target.value })}
-                    className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
-                  >
-                    <option value="">Selecionar...</option>
-                    <option value="PIX">PIX</option>
-                    <option value="Boleto">Boleto</option>
-                    <option value="Cartão de Crédito">Cartao de Credito</option>
-                    <option value="Cartão de Débito">Cartao de Debito</option>
-                    <option value="Transferência">Transferencia</option>
-                    <option value="Débito em Conta">Debito em Conta</option>
-                    <option value="Dinheiro">Dinheiro</option>
-                    <option value="Cheque">Cheque</option>
-                  </select>
-                </div>
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Subcategoria Filho</label>
+                <select
+                  value={editingRule.subcategoria_filho_id?.toString() || ""}
+                  onChange={(e) => setEditingRule({ ...editingRule, subcategoria_filho_id: e.target.value ? Number(e.target.value) : null })}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                >
+                  <option value="">Selecionar...</option>
+                  {getFilhoOptions(editingRule.subcategoria_id?.toString() || "").map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                </select>
               </div>
               
-              {/* Toggle */}
-              <div className="flex items-center gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingRule({ ...editingRule, substituir_descricao: !editingRule.substituir_descricao })}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${editingRule.substituir_descricao ? "bg-primary" : "bg-muted"}`}
-                >
-                  <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${editingRule.substituir_descricao ? "translate-x-5" : "translate-x-0"}`} />
-                </button>
-                <span className="text-sm text-card-foreground">
-                  Ao importar lancamentos, substituir a descricao do extrato por <strong>{editingRule.descricao || editingRule.keyword.split(",")[0].trim().toUpperCase()}</strong>.
-                </span>
+              {/* Cliente/Fornecedor */}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Cliente/Fornecedor</label>
+                <input
+                  type="text"
+                  value={editingRule.cliente_fornecedor || ""}
+                  onChange={(e) => setEditingRule({ ...editingRule, cliente_fornecedor: e.target.value })}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                  placeholder="Nome do cliente ou fornecedor"
+                />
               </div>
             </div>
           )}
