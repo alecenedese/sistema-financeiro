@@ -511,11 +511,19 @@ export default function ImportarTransacoesPage() {
         parsedOFX = parseOFX(content)
         txs = parsedOFX.transactions
       } else if (ext === "csv") {
+        // Tenta UTF-8 primeiro, se tiver caracteres ? ou � tenta ISO-8859-1
         let content = await readFileAsText(file, "UTF-8")
+        // Verifica se tem caracteres de substituição (encoding errado)
+        if (content.includes("�") || content.includes("?") && content.includes("�")) {
+          content = await readFileAsText(file, "ISO-8859-1")
+        }
+        // Se primeira linha não tem separadores válidos, tenta outro encoding
         const firstLine = content.split("\n")[0] || ""
         if (!firstLine.includes(";") && !firstLine.includes(",")) {
           content = await readFileAsText(file, "ISO-8859-1")
         }
+        // Limpa caracteres problemáticos
+        content = content.replace(/[\uFFFD]/g, "")
         const parsed = parseCSV(content)
         txs = spreadsheetToOFXTransactions(parsed)
       } else {
