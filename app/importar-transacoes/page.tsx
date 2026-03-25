@@ -1784,15 +1784,35 @@ export default function ImportarTransacoesPage() {
               </div>
               
               {/* Cliente/Fornecedor */}
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Cliente/Fornecedor</label>
-                <input
-                  type="text"
-                  value={editingRule.cliente_fornecedor || ""}
-                  onChange={(e) => setEditingRule({ ...editingRule, cliente_fornecedor: e.target.value })}
-                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
-                  placeholder="Nome do cliente ou fornecedor"
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Cliente</label>
+                  <select
+                    value={clientesLista.find(c => c.nome === editingRule.cliente_fornecedor)?.id?.toString() || ""}
+                    onChange={(e) => {
+                      const selected = clientesLista.find(c => c.id === Number(e.target.value))
+                      setEditingRule({ ...editingRule, cliente_fornecedor: selected?.nome || "" })
+                    }}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                  >
+                    <option value="">Selecionar cliente...</option>
+                    {clientesLista.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label className="text-xs font-medium text-muted-foreground">Fornecedor</label>
+                  <select
+                    value={fornecedoresLista.find(f => f.nome === editingRule.cliente_fornecedor)?.id?.toString() || ""}
+                    onChange={(e) => {
+                      const selected = fornecedoresLista.find(f => f.id === Number(e.target.value))
+                      setEditingRule({ ...editingRule, cliente_fornecedor: selected?.nome || "" })
+                    }}
+                    className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                  >
+                    <option value="">Selecionar fornecedor...</option>
+                    {fornecedoresLista.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
+                  </select>
+                </div>
               </div>
               
               {/* Descrição do Lançamento */}
