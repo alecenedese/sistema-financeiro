@@ -1779,7 +1779,7 @@ export default function ImportarTransacoesPage() {
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Cliente</label>
                   <select
-                    value={clientesLista.find(c => c.nome === editingRule.cliente_fornecedor)?.id?.toString() || ""}
+                    value={clientesLista.find(c => c.nome?.toLowerCase().trim() === editingRule.cliente_fornecedor?.toLowerCase().trim())?.id?.toString() || ""}
                     onChange={(e) => {
                       const selected = clientesLista.find(c => c.id === Number(e.target.value))
                       setEditingRule({ ...editingRule, cliente_fornecedor: selected?.nome || "" })
@@ -1793,7 +1793,7 @@ export default function ImportarTransacoesPage() {
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Fornecedor</label>
                   <select
-                    value={fornecedoresLista.find(f => f.nome === editingRule.cliente_fornecedor)?.id?.toString() || ""}
+                    value={fornecedoresLista.find(f => f.nome?.toLowerCase().trim() === editingRule.cliente_fornecedor?.toLowerCase().trim())?.id?.toString() || ""}
                     onChange={(e) => {
                       const selected = fornecedoresLista.find(f => f.id === Number(e.target.value))
                       setEditingRule({ ...editingRule, cliente_fornecedor: selected?.nome || "" })
@@ -1804,6 +1804,20 @@ export default function ImportarTransacoesPage() {
                     {fornecedoresLista.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
                   </select>
                 </div>
+              </div>
+              
+              {/* Descrição do Lançamento */}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Descricao do lancamento</label>
+                <input
+                  type="text"
+                  value={editingRule.descricao || ""}
+                  onChange={(e) => setEditingRule({ ...editingRule, descricao: e.target.value })}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                  placeholder="Descricao para substituir no extrato"
+                  maxLength={200}
+                />
+                <p className="mt-1 text-xs text-muted-foreground">Esta descricao sera usada ao importar transacoes que correspondam a palavra-chave</p>
               </div>
               
             </div>
