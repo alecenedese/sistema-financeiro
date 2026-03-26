@@ -227,7 +227,6 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   descricao,
   substituir_descricao,
   forma_pagamento,
-  conta_bancaria_id,
   tenant_id,
   categorias(nome),
   subcategorias(nome),
@@ -255,7 +254,6 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   descricao: (row.descricao as string) || "",
   substituir_descricao: (row.substituir_descricao as boolean) || false,
   forma_pagamento: (row.forma_pagamento as string) || "",
-  conta_bancaria_id: (row.conta_bancaria_id as number | null) || null,
   categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
   subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
   filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
@@ -1077,7 +1075,6 @@ export default function ImportarTransacoesPage() {
       descricao: editingRule.descricao || "",
       substituir_descricao: editingRule.substituir_descricao || false,
       forma_pagamento: editingRule.forma_pagamento || "",
-      conta_bancaria_id: editingRule.conta_bancaria_id || null,
       tenant_id: tid,
     }
 

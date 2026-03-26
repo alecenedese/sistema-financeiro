@@ -14,7 +14,7 @@ export async function GET(request: NextRequest) {
     
     const { data, error } = await supabase
       .from("mapping_rules")
-      .select("id, keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, conta_bancaria_id, tenant_id")
+      .select("id, keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id")
       .eq("id", Number(id))
       .single()
     
@@ -34,7 +34,7 @@ export async function POST(request: NextRequest) {
     const supabase = await createClient()
     const body = await request.json()
     
-    const { id, keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, conta_bancaria_id, tenant_id } = body
+    const { id, keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id } = body
     
     if (!keyword || !tenant_id) {
       return NextResponse.json({ error: "Keyword e tenant_id são obrigatórios" }, { status: 400 })
@@ -51,7 +51,6 @@ export async function POST(request: NextRequest) {
       descricao: descricao || '',
       substituir_descricao: substituir_descricao || false,
       forma_pagamento: forma_pagamento || '',
-      conta_bancaria_id: conta_bancaria_id || null,
       tenant_id,
     }
     
