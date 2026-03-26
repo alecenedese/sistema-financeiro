@@ -58,17 +58,21 @@ export async function POST(request: NextRequest) {
       
       // Atualiza descrição via RPC (contorna cache do schema)
       if (inserted?.id && descricao) {
-        await supabase.rpc('upsert_mapping_rule', {
-          p_id: inserted.id,
-          p_keyword: keyword,
-          p_categoria_id: categoria_id || null,
-          p_subcategoria_id: subcategoria_id || null,
-          p_subcategoria_filho_id: subcategoria_filho_id || null,
-          p_cliente_fornecedor: cliente_fornecedor || '',
-          p_descricao: descricao || '',
-          p_substituir_descricao: false,
-          p_tenant_id: tenant_id,
-        }).catch(() => {})
+        try {
+          await supabase.rpc('upsert_mapping_rule', {
+            p_id: inserted.id,
+            p_keyword: keyword,
+            p_categoria_id: categoria_id || null,
+            p_subcategoria_id: subcategoria_id || null,
+            p_subcategoria_filho_id: subcategoria_filho_id || null,
+            p_cliente_fornecedor: cliente_fornecedor || '',
+            p_descricao: descricao || '',
+            p_substituir_descricao: false,
+            p_tenant_id: tenant_id,
+          })
+        } catch {
+          // Ignora erro se função não existir no cache
+        }
       }
       
       return NextResponse.json({ success: true, data: inserted })
@@ -90,17 +94,21 @@ export async function POST(request: NextRequest) {
       
       // Atualiza descrição via RPC (contorna cache do schema)
       if (descricao !== undefined) {
-        await supabase.rpc('upsert_mapping_rule', {
-          p_id: id,
-          p_keyword: keyword,
-          p_categoria_id: categoria_id || null,
-          p_subcategoria_id: subcategoria_id || null,
-          p_subcategoria_filho_id: subcategoria_filho_id || null,
-          p_cliente_fornecedor: cliente_fornecedor || '',
-          p_descricao: descricao || '',
-          p_substituir_descricao: false,
-          p_tenant_id: tenant_id,
-        }).catch(() => {})
+        try {
+          await supabase.rpc('upsert_mapping_rule', {
+            p_id: id,
+            p_keyword: keyword,
+            p_categoria_id: categoria_id || null,
+            p_subcategoria_id: subcategoria_id || null,
+            p_subcategoria_filho_id: subcategoria_filho_id || null,
+            p_cliente_fornecedor: cliente_fornecedor || '',
+            p_descricao: descricao || '',
+            p_substituir_descricao: false,
+            p_tenant_id: tenant_id,
+          })
+        } catch {
+          // Ignora erro se função não existir no cache
+        }
       }
       
       return NextResponse.json({ success: true })
