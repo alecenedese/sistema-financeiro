@@ -996,20 +996,22 @@ export default function ImportarTransacoesPage() {
   }
   
  async function openEditRule(rule: MappingRule) {
-  // Busca descrição via API (contorna cache do schema)
+  // Busca dados completos via API (contorna cache do schema)
   let descricao = rule.descricao || ""
+  let cliente_fornecedor = rule.cliente_fornecedor || ""
   if (rule.id > 0) {
     try {
       const res = await fetch(`/api/mapping-rules?id=${rule.id}`)
       if (res.ok) {
         const data = await res.json()
         descricao = data.descricao || ""
+        cliente_fornecedor = data.cliente_fornecedor || rule.cliente_fornecedor || ""
       }
     } catch {
       // Ignora erro
     }
   }
-  setEditingRule({ ...rule, descricao })
+  setEditingRule({ ...rule, descricao, cliente_fornecedor })
   setRuleEditDialogOpen(true)
   }
 
