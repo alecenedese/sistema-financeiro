@@ -221,11 +221,19 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   categoria_id,
   subcategoria_id,
   subcategoria_filho_id,
+  fornecedor_id,
+  cliente_id,
   cliente_fornecedor,
+  descricao,
+  substituir_descricao,
+  forma_pagamento,
+  conta_bancaria_id,
   tenant_id,
   categorias(nome),
   subcategorias(nome),
-  subcategorias_filhos(nome)
+  subcategorias_filhos(nome),
+  fornecedores(nome),
+  clientes(nome)
   `)
   .order("keyword")
   
@@ -241,12 +249,18 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   categoria_id: row.categoria_id as number | null,
   subcategoria_id: row.subcategoria_id as number | null,
   subcategoria_filho_id: row.subcategoria_filho_id as number | null,
-  fornecedor_id: null,
-  cliente_id: null,
+  fornecedor_id: (row.fornecedor_id as number | null) || null,
+  cliente_id: (row.cliente_id as number | null) || null,
   cliente_fornecedor: (row.cliente_fornecedor as string) || "",
+  descricao: (row.descricao as string) || "",
+  substituir_descricao: (row.substituir_descricao as boolean) || false,
+  forma_pagamento: (row.forma_pagamento as string) || "",
+  conta_bancaria_id: (row.conta_bancaria_id as number | null) || null,
   categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
   subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
   filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
+  fornecedor_nome: (row.fornecedores as Record<string, string> | null)?.nome || "",
+  cliente_nome: (row.clientes as Record<string, string> | null)?.nome || "",
   }))
   }
 
@@ -995,23 +1009,9 @@ export default function ImportarTransacoesPage() {
   setRuleEditDialogOpen(true)
   }
   
- async function openEditRule(rule: MappingRule) {
-  // Busca dados completos via API (contorna cache do schema)
-  let descricao = rule.descricao || ""
-  let cliente_fornecedor = rule.cliente_fornecedor || ""
-  if (rule.id > 0) {
-    try {
-      const res = await fetch(`/api/mapping-rules?id=${rule.id}`)
-      if (res.ok) {
-        const data = await res.json()
-        descricao = data.descricao || ""
-        cliente_fornecedor = data.cliente_fornecedor || rule.cliente_fornecedor || ""
-      }
-    } catch {
-      // Ignora erro
-    }
-  }
-  setEditingRule({ ...rule, descricao, cliente_fornecedor })
+ function openEditRule(rule: MappingRule) {
+  // Dados completos já vêm do fetchRules (descricao, cliente_id, fornecedor_id, etc.)
+  setEditingRule({ ...rule })
   setRuleEditDialogOpen(true)
   }
 
@@ -1071,9 +1071,13 @@ export default function ImportarTransacoesPage() {
       categoria_id: editingRule.categoria_id,
       subcategoria_id: editingRule.subcategoria_id,
       subcategoria_filho_id: editingRule.subcategoria_filho_id,
+      fornecedor_id: editingRule.fornecedor_id || null,
+      cliente_id: editingRule.cliente_id || null,
       cliente_fornecedor: editingRule.cliente_fornecedor || "",
       descricao: editingRule.descricao || "",
       substituir_descricao: editingRule.substituir_descricao || false,
+      forma_pagamento: editingRule.forma_pagamento || "",
+      conta_bancaria_id: editingRule.conta_bancaria_id || null,
       tenant_id: tid,
     }
 
@@ -1089,9 +1093,7 @@ export default function ImportarTransacoesPage() {
       return
     }
 
-    console.log("[v0] Regra salva com sucesso, atualizando lista...")
     await mutateRules()
-    console.log("[v0] Lista atualizada, fechando dialog")
     setRuleEditDialogOpen(false)
     setEditingRule(null)
   }
@@ -1794,10 +1796,11 @@ export default function ImportarTransacoesPage() {
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Cliente</label>
                   <select
-                    value={clientesLista.find(c => c.nome?.toLowerCase().trim() === editingRule.cliente_fornecedor?.toLowerCase().trim())?.id?.toString() || ""}
+                    value={editingRule.cliente_id?.toString() || ""}
                     onChange={(e) => {
-                      const selected = clientesLista.find(c => c.id === Number(e.target.value))
-                      setEditingRule({ ...editingRule, cliente_fornecedor: selected?.nome || "" })
+                      const selectedId = e.target.value ? Number(e.target.value) : null
+                      const selected = clientesLista.find(c => c.id === selectedId)
+                      setEditingRule({ ...editingRule, cliente_id: selectedId, cliente_fornecedor: selected?.nome || editingRule.cliente_fornecedor })
                     }}
                     className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
                   >
@@ -1808,10 +1811,11 @@ export default function ImportarTransacoesPage() {
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Fornecedor</label>
                   <select
-                    value={fornecedoresLista.find(f => f.nome?.toLowerCase().trim() === editingRule.cliente_fornecedor?.toLowerCase().trim())?.id?.toString() || ""}
+                    value={editingRule.fornecedor_id?.toString() || ""}
                     onChange={(e) => {
-                      const selected = fornecedoresLista.find(f => f.id === Number(e.target.value))
-                      setEditingRule({ ...editingRule, cliente_fornecedor: selected?.nome || "" })
+                      const selectedId = e.target.value ? Number(e.target.value) : null
+                      const selected = fornecedoresLista.find(f => f.id === selectedId)
+                      setEditingRule({ ...editingRule, fornecedor_id: selectedId, cliente_fornecedor: selected?.nome || editingRule.cliente_fornecedor })
                     }}
                     className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
                   >
