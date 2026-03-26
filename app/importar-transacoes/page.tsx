@@ -989,15 +989,28 @@ export default function ImportarTransacoesPage() {
       ...rule,
       id: 0, // Will be assigned by DB
       keyword: rule.keyword + " (copia)",
-      descricao: (rule.descricao || "") + " (copia)",
-    }
-    setEditingRule(cloned)
-    setRuleEditDialogOpen(true)
+  descricao: (rule.descricao || "") + " (copia)",
   }
-
-  function openEditRule(rule: MappingRule) {
-    setEditingRule({ ...rule })
-    setRuleEditDialogOpen(true)
+  setEditingRule(cloned)
+  setRuleEditDialogOpen(true)
+  }
+  
+ async function openEditRule(rule: MappingRule) {
+  // Busca descrição via API (contorna cache do schema)
+  let descricao = rule.descricao || ""
+  if (rule.id > 0) {
+    try {
+      const res = await fetch(`/api/mapping-rules?id=${rule.id}`)
+      if (res.ok) {
+        const data = await res.json()
+        descricao = data.descricao || ""
+      }
+    } catch {
+      // Ignora erro
+    }
+  }
+  setEditingRule({ ...rule, descricao })
+  setRuleEditDialogOpen(true)
   }
 
   function createNewRule() {
