@@ -213,36 +213,15 @@ async function fetchDespesasFixas(): Promise<DespesaFixaRow[]> {
 
 async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   const supabase = createClient()
-  let q = supabase
-  .from("mapping_rules")
-  .select(`
-  id,
-  keyword,
-  categoria_id,
-  subcategoria_id,
-  subcategoria_filho_id,
-  fornecedor_id,
-  cliente_id,
-  cliente_fornecedor,
-  descricao,
-  substituir_descricao,
-  forma_pagamento,
-  tenant_id,
-  categorias(nome),
-  subcategorias(nome),
-  subcategorias_filhos(nome),
-  fornecedores(nome),
-  clientes(nome)
-  `)
-  .order("keyword")
-  
-  if (tid) q = q.eq("tenant_id", tid)
-  
-  const { data, error } = await q
+  // Usa RPC para contornar o cache de schema do PostgREST
+  const { data, error } = await supabase.rpc('get_mapping_rules', {
+    p_tenant_id: tid,
+  })
   
   if (error) throw error
   
-  return (data || []).map((row: Record<string, unknown>) => ({
+  const rows = (data || []) as Record<string, unknown>[]
+  return rows.map((row) => ({
   id: row.id as number,
   keyword: row.keyword as string,
   categoria_id: row.categoria_id as number | null,
@@ -254,11 +233,11 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   descricao: (row.descricao as string) || "",
   substituir_descricao: (row.substituir_descricao as boolean) || false,
   forma_pagamento: (row.forma_pagamento as string) || "",
-  categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
-  subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
-  filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
-  fornecedor_nome: (row.fornecedores as Record<string, string> | null)?.nome || "",
-  cliente_nome: (row.clientes as Record<string, string> | null)?.nome || "",
+  categoria_nome: (row.categoria_nome as string) || "",
+  subcategoria_nome: (row.subcategoria_nome as string) || "",
+  filho_nome: (row.filho_nome as string) || "",
+  fornecedor_nome: (row.fornecedor_nome as string) || "",
+  cliente_nome: (row.cliente_nome as string) || "",
   }))
   }
 
