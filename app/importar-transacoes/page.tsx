@@ -1058,14 +1058,19 @@ export default function ImportarTransacoesPage() {
       return
     }
     
-    // Envia apenas colunas reconhecidas pelo cache do PostgREST
+    // Envia todos os campos - a API usa RPC que contorna o cache do PostgREST
     const ruleData = {
       id: editingRule.id,
       keyword: editingRule.keyword.trim(),
       categoria_id: editingRule.categoria_id,
       subcategoria_id: editingRule.subcategoria_id,
       subcategoria_filho_id: editingRule.subcategoria_filho_id,
+      fornecedor_id: editingRule.fornecedor_id || null,
+      cliente_id: editingRule.cliente_id || null,
       cliente_fornecedor: editingRule.cliente_fornecedor || "",
+      descricao: editingRule.descricao || "",
+      substituir_descricao: editingRule.substituir_descricao || false,
+      forma_pagamento: editingRule.forma_pagamento || "",
       tenant_id: tid,
     }
 
