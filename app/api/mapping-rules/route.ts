@@ -1,88 +1,117 @@
 import { NextRequest, NextResponse } from "next/server"
-
-async function callRpc(functionName: string, params: Record<string, unknown>) {
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
-  
-  if (!supabaseUrl || !serviceKey) {
-    throw new Error('Missing Supabase environment variables')
-  }
-  
-  const res = await fetch(`${supabaseUrl}/rest/v1/rpc/${functionName}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'apikey': serviceKey,
-      'Authorization': `Bearer ${serviceKey}`,
-      'Prefer': 'return=representation',
-    },
-    body: JSON.stringify(params),
-  })
-  
-  if (!res.ok) {
-    const errorText = await res.text()
-    throw new Error(errorText)
-  }
-  
-  return res.json()
-}
+import { createClient } from "@/lib/supabase/server"
 
 export async function GET(request: NextRequest) {
   try {
+    const supabase = await createClient()
     const { searchParams } = new URL(request.url)
-    const id = searchParams.get('id')
     const tenantId = searchParams.get('tenant_id')
 
-    if (id) {
-      const data = await callRpc('get_mapping_rule_by_id', { p_id: Number(id) })
-      return NextResponse.json(data)
+    // Usa apenas colunas que o PostgREST reconhece no cache
+    let q = supabase
+      .from("mapping_rules")
+      .select(`
+        id,
+        keyword,
+        categoria_id,
+        subcategoria_id,
+        subcategoria_filho_id,
+        cliente_fornecedor,
+        tenant_id,
+        categorias(nome),
+        subcategorias(nome),
+        subcategorias_filhos(nome)
+      `)
+      .order("keyword")
+
+    if (tenantId) q = q.eq("tenant_id", Number(tenantId))
+
+    const { data, error } = await q
+
+    if (error) {
+      console.error("GET mapping-rules error:", error.message)
+      return NextResponse.json([], { status: 200 })
     }
 
-    const data = await callRpc('get_mapping_rules', { p_tenant_id: tenantId ? Number(tenantId) : null })
-    return NextResponse.json(data || [])
+    // Mapeia para o formato esperado (campos extras como null/vazio)
+    const rules = (data || []).map((row: Record<string, unknown>) => ({
+      id: row.id,
+      keyword: row.keyword,
+      categoria_id: row.categoria_id,
+      subcategoria_id: row.subcategoria_id,
+      subcategoria_filho_id: row.subcategoria_filho_id,
+      fornecedor_id: null,
+      cliente_id: null,
+      cliente_fornecedor: row.cliente_fornecedor || "",
+      descricao: "",
+      substituir_descricao: false,
+      forma_pagamento: "",
+      categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
+      subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
+      filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
+      fornecedor_nome: "",
+      cliente_nome: "",
+    }))
+
+    return NextResponse.json(rules)
   } catch (e) {
-    console.error("GET mapping-rules error:", e)
+    console.error("GET mapping-rules catch:", e)
     return NextResponse.json([], { status: 200 })
   }
 }
 
 export async function POST(request: NextRequest) {
   try {
+    const supabase = await createClient()
     const body = await request.json()
-    const { id, keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id } = body
+    const { id, keyword, categoria_id, subcategoria_id, subcategoria_filho_id, cliente_fornecedor, tenant_id } = body
 
     if (!keyword || !tenant_id) {
       return NextResponse.json({ error: "Keyword e tenant_id são obrigatórios" }, { status: 400 })
     }
 
-    const data = await callRpc('upsert_mapping_rule', {
-      p_id: id || 0,
-      p_keyword: keyword,
-      p_categoria_id: categoria_id || null,
-      p_subcategoria_id: subcategoria_id || null,
-      p_subcategoria_filho_id: subcategoria_filho_id || null,
-      p_fornecedor_id: fornecedor_id || null,
-      p_cliente_id: cliente_id || null,
-      p_cliente_fornecedor: cliente_fornecedor || '',
-      p_descricao: descricao || '',
-      p_substituir_descricao: substituir_descricao || false,
-      p_forma_pagamento: forma_pagamento || '',
-      p_tenant_id: tenant_id,
-    })
-
-    return NextResponse.json({ success: true, data })
-  } catch (error: unknown) {
-    console.error("POST mapping-rules error:", error)
-    const errMsg = error instanceof Error ? error.message : String(error)
-    if (errMsg.includes('not present in table') || errMsg.includes('violates foreign key')) {
-      return NextResponse.json({ error: `Referência inválida: ${errMsg}` }, { status: 400 })
+    // Usa apenas colunas que o PostgREST reconhece
+    const ruleData = {
+      keyword,
+      categoria_id: categoria_id || null,
+      subcategoria_id: subcategoria_id || null,
+      subcategoria_filho_id: subcategoria_filho_id || null,
+      cliente_fornecedor: cliente_fornecedor || '',
+      tenant_id,
     }
-    return NextResponse.json({ error: errMsg || "Internal server error" }, { status: 500 })
+
+    if (id === 0 || !id) {
+      const { data, error } = await supabase
+        .from("mapping_rules")
+        .insert(ruleData)
+        .select('id')
+        .single()
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 400 })
+      }
+      return NextResponse.json({ success: true, data })
+    } else {
+      const { tenant_id: _tid, ...updateData } = ruleData
+      const { error } = await supabase
+        .from("mapping_rules")
+        .update(updateData)
+        .eq("id", id)
+
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 400 })
+      }
+      return NextResponse.json({ success: true })
+    }
+  } catch (error) {
+    console.error("POST mapping-rules error:", error)
+    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
 
 export async function DELETE(request: NextRequest) {
   try {
+    const supabase = await createClient()
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
 
@@ -90,7 +119,14 @@ export async function DELETE(request: NextRequest) {
       return NextResponse.json({ error: "ID é obrigatório" }, { status: 400 })
     }
 
-    await callRpc('delete_mapping_rule', { p_id: Number(id) })
+    const { error } = await supabase
+      .from("mapping_rules")
+      .delete()
+      .eq("id", Number(id))
+
+    if (error) {
+      return NextResponse.json({ error: error.message }, { status: 400 })
+    }
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error("DELETE mapping-rules error:", error)
