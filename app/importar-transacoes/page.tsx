@@ -212,16 +212,13 @@ async function fetchDespesasFixas(): Promise<DespesaFixaRow[]> {
 }
 
 async function fetchRules(tid: number | null): Promise<MappingRule[]> {
-  const supabase = createClient()
-  // Usa RPC para contornar o cache de schema do PostgREST
-  const { data, error } = await supabase.rpc('get_mapping_rules', {
-    p_tenant_id: tid,
-  })
+  // Usa API route com conexao direta ao Postgres (contorna cache PostgREST)
+  const params = tid ? `?tenant_id=${tid}` : ''
+  const res = await fetch(`/api/mapping-rules${params}`)
+  if (!res.ok) throw new Error('Erro ao buscar regras')
   
-  if (error) throw error
-  
-  const rows = (data || []) as Record<string, unknown>[]
-  return rows.map((row) => ({
+  const rows = (await res.json()) as Record<string, unknown>[]
+  return (rows || []).map((row) => ({
   id: row.id as number,
   keyword: row.keyword as string,
   categoria_id: row.categoria_id as number | null,
