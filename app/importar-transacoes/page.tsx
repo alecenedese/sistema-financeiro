@@ -212,43 +212,31 @@ async function fetchDespesasFixas(): Promise<DespesaFixaRow[]> {
 }
 
 async function fetchRules(tid: number | null): Promise<MappingRule[]> {
-  const supabase = createClient()
-  let q = supabase
-    .from("mapping_rules")
-    .select(`
-      id,
-      keyword,
-      categoria_id,
-      subcategoria_id,
-      subcategoria_filho_id,
-      cliente_fornecedor,
-      tenant_id,
-      categorias(nome),
-      subcategorias(nome),
-      subcategorias_filhos(nome)
-    `)
-    .order("keyword")
+  // Usa API route com conexao direta ao Postgres (contorna cache PostgREST)
+  const params = tid ? `?tenant_id=${tid}` : ''
+  const res = await fetch(`/api/mapping-rules${params}`)
+  if (!res.ok) throw new Error('Erro ao buscar regras')
   
-  if (tid) q = q.eq("tenant_id", tid)
-
-  const { data, error } = await q
-
-  if (error) throw error
-
-  return (data || []).map((row: Record<string, unknown>) => ({
-    id: row.id as number,
-    keyword: row.keyword as string,
-    categoria_id: row.categoria_id as number | null,
-    subcategoria_id: row.subcategoria_id as number | null,
-    subcategoria_filho_id: row.subcategoria_filho_id as number | null,
-    fornecedor_id: null,
-    cliente_id: null,
-    cliente_fornecedor: (row.cliente_fornecedor as string) || "",
-    categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
-    subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
-    filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
+  const rows = (await res.json()) as Record<string, unknown>[]
+  return (rows || []).map((row) => ({
+  id: row.id as number,
+  keyword: row.keyword as string,
+  categoria_id: row.categoria_id as number | null,
+  subcategoria_id: row.subcategoria_id as number | null,
+  subcategoria_filho_id: row.subcategoria_filho_id as number | null,
+  fornecedor_id: (row.fornecedor_id as number | null) || null,
+  cliente_id: (row.cliente_id as number | null) || null,
+  cliente_fornecedor: (row.cliente_fornecedor as string) || "",
+  descricao: (row.descricao as string) || "",
+  substituir_descricao: (row.substituir_descricao as boolean) || false,
+  forma_pagamento: (row.forma_pagamento as string) || "",
+  categoria_nome: (row.categoria_nome as string) || "",
+  subcategoria_nome: (row.subcategoria_nome as string) || "",
+  filho_nome: (row.filho_nome as string) || "",
+  fornecedor_nome: (row.fornecedor_nome as string) || "",
+  cliente_nome: (row.cliente_nome as string) || "",
   }))
-}
+  }
 
 // ---------- Helpers ----------
 
@@ -989,15 +977,16 @@ export default function ImportarTransacoesPage() {
       ...rule,
       id: 0, // Will be assigned by DB
       keyword: rule.keyword + " (copia)",
-      descricao: (rule.descricao || "") + " (copia)",
-    }
-    setEditingRule(cloned)
-    setRuleEditDialogOpen(true)
+  descricao: (rule.descricao || "") + " (copia)",
   }
-
-  function openEditRule(rule: MappingRule) {
-    setEditingRule({ ...rule })
-    setRuleEditDialogOpen(true)
+  setEditingRule(cloned)
+  setRuleEditDialogOpen(true)
+  }
+  
+ function openEditRule(rule: MappingRule) {
+  // Dados completos já vêm do fetchRules (descricao, cliente_id, fornecedor_id, etc.)
+  setEditingRule({ ...rule })
+  setRuleEditDialogOpen(true)
   }
 
   function createNewRule() {
@@ -1050,34 +1039,31 @@ export default function ImportarTransacoesPage() {
       return
     }
     
-    const supabase = createClient()
-    
-    // Usa apenas colunas que existem na tabela original
     const ruleData = {
+      id: editingRule.id,
       keyword: editingRule.keyword.trim(),
       categoria_id: editingRule.categoria_id,
       subcategoria_id: editingRule.subcategoria_id,
       subcategoria_filho_id: editingRule.subcategoria_filho_id,
+      fornecedor_id: editingRule.fornecedor_id || null,
+      cliente_id: editingRule.cliente_id || null,
       cliente_fornecedor: editingRule.cliente_fornecedor || "",
+      descricao: editingRule.descricao || "",
+      substituir_descricao: editingRule.substituir_descricao || false,
+      forma_pagamento: editingRule.forma_pagamento || "",
       tenant_id: tid,
     }
 
-    if (editingRule.id === 0) {
-      // New rule
-      const { error } = await supabase.from("mapping_rules").insert(ruleData)
-      if (error) {
-        console.error("[v0] Erro ao inserir regra:", error)
-        alert("Erro ao salvar regra: " + error.message)
-        return
-      }
-    } else {
-      // Update existing
-      const { error } = await supabase.from("mapping_rules").update(ruleData).eq("id", editingRule.id)
-      if (error) {
-        console.error("[v0] Erro ao atualizar regra:", error)
-        alert("Erro ao atualizar regra: " + error.message)
-        return
-      }
+    const response = await fetch("/api/mapping-rules", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(ruleData),
+    })
+    
+    const result = await response.json()
+    if (!response.ok) {
+      alert("Erro ao salvar regra: " + result.error)
+      return
     }
 
     await mutateRules()
@@ -1740,32 +1726,8 @@ export default function ImportarTransacoesPage() {
                 <div className="mt-1 text-right text-xs text-muted-foreground">{editingRule.keyword.length} / 200</div>
               </div>
               
-              {/* Description */}
-              <div>
-                <label className="text-xs font-medium text-muted-foreground">Descricao dos lancamentos *</label>
-                <input
-                  type="text"
-                  value={editingRule.descricao || ""}
-                  onChange={(e) => setEditingRule({ ...editingRule, descricao: e.target.value })}
-                  className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
-                  maxLength={200}
-                />
-                <div className="mt-1 text-right text-xs text-muted-foreground">{(editingRule.descricao || "").length} / 200</div>
-              </div>
-              
               {/* Grid Fields */}
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">Conta</label>
-                  <select
-                    value={editingRule.conta_bancaria_id?.toString() || ""}
-                    onChange={(e) => setEditingRule({ ...editingRule, conta_bancaria_id: e.target.value ? Number(e.target.value) : null })}
-                    className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
-                  >
-                    <option value="">Selecionar...</option>
-                    {contasBancarias.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
-                  </select>
-                </div>
+              <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="text-xs font-medium text-muted-foreground">Categoria</label>
                   <select
@@ -1778,19 +1740,7 @@ export default function ImportarTransacoesPage() {
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">Contato</label>
-                  <input
-                    type="text"
-                    value={editingRule.cliente_fornecedor || ""}
-                    onChange={(e) => setEditingRule({ ...editingRule, cliente_fornecedor: e.target.value })}
-                    className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
-                  />
-                </div>
-              </div>
-              
-              <div className="grid grid-cols-3 gap-4">
-                <div>
-                  <label className="text-xs font-medium text-muted-foreground">Centro</label>
+                  <label className="text-xs font-medium text-muted-foreground">Subcategoria</label>
                   <select
                     value={editingRule.subcategoria_id?.toString() || ""}
                     onChange={(e) => setEditingRule({ ...editingRule, subcategoria_id: e.target.value ? Number(e.target.value) : null, subcategoria_filho_id: null })}
@@ -1800,60 +1750,68 @@ export default function ImportarTransacoesPage() {
                     {getSubcatOptions(editingRule.categoria_id?.toString() || "").map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                   </select>
                 </div>
+              </div>
+              
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Subcategoria Filho</label>
+                <select
+                  value={editingRule.subcategoria_filho_id?.toString() || ""}
+                  onChange={(e) => setEditingRule({ ...editingRule, subcategoria_filho_id: e.target.value ? Number(e.target.value) : null })}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                >
+                  <option value="">Selecionar...</option>
+                  {getFilhoOptions(editingRule.subcategoria_id?.toString() || "").map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                </select>
+              </div>
+              
+              {/* Cliente/Fornecedor */}
+              <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">Projeto</label>
+                  <label className="text-xs font-medium text-muted-foreground">Cliente</label>
                   <select
-                    value={editingRule.subcategoria_filho_id?.toString() || ""}
-                    onChange={(e) => setEditingRule({ ...editingRule, subcategoria_filho_id: e.target.value ? Number(e.target.value) : null })}
+                    value={editingRule.cliente_id?.toString() || ""}
+                    onChange={(e) => {
+                      const selectedId = e.target.value ? Number(e.target.value) : null
+                      const selected = clientesLista.find(c => c.id === selectedId)
+                      setEditingRule({ ...editingRule, cliente_id: selectedId, cliente_fornecedor: selected?.nome || editingRule.cliente_fornecedor })
+                    }}
                     className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
                   >
-                    <option value="">Selecionar...</option>
-                    {getFilhoOptions(editingRule.subcategoria_id?.toString() || "").map((f) => <option key={f.value} value={f.value}>{f.label}</option>)}
+                    <option value="">Selecionar cliente...</option>
+                    {clientesLista.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
                   </select>
                 </div>
                 <div>
-                  <label className="text-xs font-medium text-muted-foreground">Forma de pagto</label>
+                  <label className="text-xs font-medium text-muted-foreground">Fornecedor</label>
                   <select
-                    value={editingRule.forma_pagamento || ""}
-                    onChange={(e) => setEditingRule({ ...editingRule, forma_pagamento: e.target.value })}
+                    value={editingRule.fornecedor_id?.toString() || ""}
+                    onChange={(e) => {
+                      const selectedId = e.target.value ? Number(e.target.value) : null
+                      const selected = fornecedoresLista.find(f => f.id === selectedId)
+                      setEditingRule({ ...editingRule, fornecedor_id: selectedId, cliente_fornecedor: selected?.nome || editingRule.cliente_fornecedor })
+                    }}
                     className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
                   >
-                    <option value="">Selecionar...</option>
-                    <option value="PIX">PIX</option>
-                    <option value="Boleto">Boleto</option>
-                    <option value="Cartão de Crédito">Cartao de Credito</option>
-                    <option value="Cartão de Débito">Cartao de Debito</option>
-                    <option value="Transferência">Transferencia</option>
-                    <option value="Débito em Conta">Debito em Conta</option>
-                    <option value="Dinheiro">Dinheiro</option>
-                    <option value="Cheque">Cheque</option>
+                    <option value="">Selecionar fornecedor...</option>
+                    {fornecedoresLista.map((f) => <option key={f.id} value={f.id}>{f.nome}</option>)}
                   </select>
                 </div>
               </div>
               
-              {/* Tags */}
+              {/* Descrição do Lançamento */}
               <div>
-                <label className="text-xs font-medium text-muted-foreground">Tags</label>
+                <label className="text-xs font-medium text-muted-foreground">Descricao do lancamento</label>
                 <input
                   type="text"
-                  placeholder="Adicionar tags..."
+                  value={editingRule.descricao || ""}
+                  onChange={(e) => setEditingRule({ ...editingRule, descricao: e.target.value })}
                   className="mt-1 w-full rounded-md border border-border bg-background px-3 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                  placeholder="Descricao para substituir no extrato"
+                  maxLength={200}
                 />
+                <p className="mt-1 text-xs text-muted-foreground">Esta descricao sera usada ao importar transacoes que correspondam a palavra-chave</p>
               </div>
               
-              {/* Toggle */}
-              <div className="flex items-center gap-3 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setEditingRule({ ...editingRule, substituir_descricao: !editingRule.substituir_descricao })}
-                  className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors ${editingRule.substituir_descricao ? "bg-primary" : "bg-muted"}`}
-                >
-                  <span className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${editingRule.substituir_descricao ? "translate-x-5" : "translate-x-0"}`} />
-                </button>
-                <span className="text-sm text-card-foreground">
-                  Ao importar lancamentos, substituir a descricao do extrato por <strong>{editingRule.descricao || editingRule.keyword.split(",")[0].trim().toUpperCase()}</strong>.
-                </span>
-              </div>
             </div>
           )}
           <DialogFooter>
