@@ -1,15 +1,19 @@
 import { NextRequest, NextResponse } from "next/server"
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!
-const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!
-
 async function callRpc(functionName: string, params: Record<string, unknown>) {
-  const res = await fetch(`${SUPABASE_URL}/rest/v1/rpc/${functionName}`, {
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY
+  
+  if (!supabaseUrl || !serviceKey) {
+    throw new Error('Missing Supabase environment variables')
+  }
+  
+  const res = await fetch(`${supabaseUrl}/rest/v1/rpc/${functionName}`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'apikey': SUPABASE_SERVICE_KEY,
-      'Authorization': `Bearer ${SUPABASE_SERVICE_KEY}`,
+      'apikey': serviceKey,
+      'Authorization': `Bearer ${serviceKey}`,
       'Prefer': 'return=representation',
     },
     body: JSON.stringify(params),
