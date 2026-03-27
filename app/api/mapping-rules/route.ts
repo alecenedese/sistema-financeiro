@@ -122,8 +122,13 @@ export async function POST(request: NextRequest) {
       )
       return NextResponse.json({ success: true })
     }
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("POST mapping-rules error:", error)
+    const pgError = error as { code?: string; detail?: string; constraint?: string }
+    if (pgError.code === '23503') {
+      // Foreign key violation - categoria/subcategoria/etc não existe
+      return NextResponse.json({ error: `Referência inválida: ${pgError.detail || 'verifique categoria, subcategoria, cliente ou fornecedor'}` }, { status: 400 })
+    }
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   }
 }
