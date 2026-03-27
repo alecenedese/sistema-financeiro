@@ -3,8 +3,15 @@ import { Pool } from "pg"
 
 const pool = new Pool({
   connectionString: process.env.POSTGRES_URL,
-  ssl: { rejectUnauthorized: false },
+  ssl: process.env.POSTGRES_URL?.includes('sslmode=')
+    ? undefined
+    : { rejectUnauthorized: false },
 })
+
+// Workaround para certificados Supabase em ambientes Node.js restritivos
+if (typeof process !== 'undefined') {
+  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+}
 
 export async function GET(request: NextRequest) {
   try {
