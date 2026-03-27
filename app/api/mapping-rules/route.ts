@@ -8,12 +8,14 @@ export async function GET(request: NextRequest) {
     const tenantId = searchParams.get('tenant_id')
 
     // Usa RPC para buscar todos os campos (contorna cache do PostgREST)
+    console.log("[v0] GET mapping-rules: calling RPC get_mapping_rules with tenant_id:", tenantId)
     const { data, error } = await supabase.rpc('get_mapping_rules', {
       p_tenant_id: tenantId ? Number(tenantId) : null
     })
+    console.log("[v0] GET mapping-rules RPC result - error:", error?.message, "data type:", typeof data, "data length:", Array.isArray(data) ? data.length : 'not array', "first item:", data?.[0] ? JSON.stringify(data[0]).substring(0, 200) : 'null')
 
     if (error) {
-      console.error("GET mapping-rules RPC error:", error.message)
+      console.error("[v0] GET mapping-rules RPC error:", error.message, error.code, error.details)
       // Fallback: busca apenas colunas básicas
       let q = supabase
         .from("mapping_rules")
@@ -74,6 +76,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Usa RPC para salvar todos os campos (contorna cache do PostgREST)
+    console.log("[v0] POST mapping-rules: calling RPC upsert_mapping_rule with id:", id, "keyword:", keyword)
     const { data, error } = await supabase.rpc('upsert_mapping_rule', {
       p_id: id || 0,
       p_keyword: keyword,
@@ -89,8 +92,9 @@ export async function POST(request: NextRequest) {
       p_tenant_id: tenant_id,
     })
 
+    console.log("[v0] POST mapping-rules RPC result - error:", error?.message, "data:", JSON.stringify(data))
     if (error) {
-      console.error("POST mapping-rules RPC error:", error.message)
+      console.error("[v0] POST mapping-rules RPC error:", error.message, error.code, error.details)
       // Fallback: tenta insert/update apenas com colunas básicas
       const ruleData = {
         keyword,
