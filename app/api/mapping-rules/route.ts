@@ -1,17 +1,13 @@
 import { NextRequest, NextResponse } from "next/server"
 import { Pool } from "pg"
 
+// Workaround para certificados Supabase - DEVE vir ANTES da criação do Pool
+process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+
 const pool = new Pool({
   connectionString: process.env.POSTGRES_URL,
-  ssl: process.env.POSTGRES_URL?.includes('sslmode=')
-    ? undefined
-    : { rejectUnauthorized: false },
+  ssl: { rejectUnauthorized: false },
 })
-
-// Workaround para certificados Supabase em ambientes Node.js restritivos
-if (typeof process !== 'undefined') {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
-}
 
 export async function GET(request: NextRequest) {
   try {
