@@ -1,163 +1,122 @@
 import { NextRequest, NextResponse } from "next/server"
-import { createClient } from "@/lib/supabase/server"
+import { Client } from "pg"
+
+async function getClient() {
+  const client = new Client({
+    connectionString: process.env.POSTGRES_URL_NON_POOLING || process.env.POSTGRES_URL,
+  })
+  await client.connect()
+  return client
+}
 
 export async function GET(request: NextRequest) {
+  let client: Client | null = null
   try {
-    const supabase = await createClient()
+    client = await getClient()
     const { searchParams } = new URL(request.url)
     const tenantId = searchParams.get('tenant_id')
 
-    // Usa RPC para buscar todos os campos (contorna cache do PostgREST)
-    console.log("[v0] GET mapping-rules: calling RPC get_mapping_rules with tenant_id:", tenantId)
-    const { data, error } = await supabase.rpc('get_mapping_rules', {
-      p_tenant_id: tenantId ? Number(tenantId) : null
-    })
-    console.log("[v0] GET mapping-rules RPC result - error:", error?.message, "data type:", typeof data, "data length:", Array.isArray(data) ? data.length : 'not array', "first item:", data?.[0] ? JSON.stringify(data[0]).substring(0, 200) : 'null')
+    const query = `
+      SELECT 
+        mr.id,
+        mr.keyword,
+        mr.categoria_id,
+        mr.subcategoria_id,
+        mr.subcategoria_filho_id,
+        mr.fornecedor_id,
+        mr.cliente_id,
+        mr.cliente_fornecedor,
+        mr.descricao,
+        mr.substituir_descricao,
+        mr.forma_pagamento,
+        mr.tenant_id,
+        c.nome as categoria_nome,
+        s.nome as subcategoria_nome,
+        sf.nome as filho_nome,
+        f.nome as fornecedor_nome,
+        cl.nome as cliente_nome
+      FROM public.mapping_rules mr
+      LEFT JOIN public.categorias c ON c.id = mr.categoria_id
+      LEFT JOIN public.subcategorias s ON s.id = mr.subcategoria_id
+      LEFT JOIN public.subcategorias_filhos sf ON sf.id = mr.subcategoria_filho_id
+      LEFT JOIN public.fornecedores f ON f.id = mr.fornecedor_id
+      LEFT JOIN public.clientes cl ON cl.id = mr.cliente_id
+      ${tenantId ? 'WHERE mr.tenant_id = $1' : ''}
+      ORDER BY mr.keyword
+    `
 
-    if (error) {
-      console.error("[v0] GET mapping-rules RPC error:", error.message, error.code, error.details)
-      // Fallback: busca apenas colunas básicas
-      let q = supabase
-        .from("mapping_rules")
-        .select(`
-          id,
-          keyword,
-          categoria_id,
-          subcategoria_id,
-          subcategoria_filho_id,
-          cliente_fornecedor,
-          tenant_id,
-          categorias(nome),
-          subcategorias(nome),
-          subcategorias_filhos(nome)
-        `)
-        .order("keyword")
+    const params = tenantId ? [Number(tenantId)] : []
+    const result = await client.query(query, params)
 
-      if (tenantId) q = q.eq("tenant_id", Number(tenantId))
-      const { data: fallbackData } = await q
-      
-      const rules = (fallbackData || []).map((row: Record<string, unknown>) => ({
-        id: row.id,
-        keyword: row.keyword,
-        categoria_id: row.categoria_id,
-        subcategoria_id: row.subcategoria_id,
-        subcategoria_filho_id: row.subcategoria_filho_id,
-        fornecedor_id: null,
-        cliente_id: null,
-        cliente_fornecedor: row.cliente_fornecedor || "",
-        descricao: "",
-        substituir_descricao: false,
-        forma_pagamento: "",
-        categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
-        subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
-        filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
-        fornecedor_nome: "",
-        cliente_nome: "",
-      }))
-      return NextResponse.json(rules)
-    }
-
-    // RPC retorna JSON com todos os campos e joins
-    return NextResponse.json(data || [])
+    return NextResponse.json(result.rows)
   } catch (e) {
-    console.error("GET mapping-rules catch:", e)
+    console.error("GET mapping-rules error:", e)
     return NextResponse.json([], { status: 200 })
+  } finally {
+    if (client) await client.end().catch(() => {})
   }
 }
 
 export async function POST(request: NextRequest) {
+  let client: Client | null = null
   try {
-    const supabase = await createClient()
+    client = await getClient()
     const body = await request.json()
     const { id, keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id } = body
 
     if (!keyword || !tenant_id) {
-      return NextResponse.json({ error: "Keyword e tenant_id são obrigatórios" }, { status: 400 })
+      return NextResponse.json({ error: "Keyword e tenant_id sao obrigatorios" }, { status: 400 })
     }
 
-    // Usa RPC para salvar todos os campos (contorna cache do PostgREST)
-    console.log("[v0] POST mapping-rules: calling RPC upsert_mapping_rule with id:", id, "keyword:", keyword)
-    const { data, error } = await supabase.rpc('upsert_mapping_rule', {
-      p_id: id || 0,
-      p_keyword: keyword,
-      p_categoria_id: categoria_id || null,
-      p_subcategoria_id: subcategoria_id || null,
-      p_subcategoria_filho_id: subcategoria_filho_id || null,
-      p_fornecedor_id: fornecedor_id || null,
-      p_cliente_id: cliente_id || null,
-      p_cliente_fornecedor: cliente_fornecedor || '',
-      p_descricao: descricao || '',
-      p_substituir_descricao: substituir_descricao || false,
-      p_forma_pagamento: forma_pagamento || '',
-      p_tenant_id: tenant_id,
-    })
-
-    console.log("[v0] POST mapping-rules RPC result - error:", error?.message, "data:", JSON.stringify(data))
-    if (error) {
-      console.error("[v0] POST mapping-rules RPC error:", error.message, error.code, error.details)
-      // Fallback: tenta insert/update apenas com colunas básicas
-      const ruleData = {
-        keyword,
-        categoria_id: categoria_id || null,
-        subcategoria_id: subcategoria_id || null,
-        subcategoria_filho_id: subcategoria_filho_id || null,
-        cliente_fornecedor: cliente_fornecedor || '',
-        tenant_id,
-      }
-
-      if (id === 0 || !id) {
-        const { data: insertData, error: insertError } = await supabase
-          .from("mapping_rules")
-          .insert(ruleData)
-          .select('id')
-          .single()
-
-        if (insertError) {
-          return NextResponse.json({ error: insertError.message }, { status: 400 })
-        }
-        return NextResponse.json({ success: true, data: insertData })
-      } else {
-        const { tenant_id: _tid, ...updateData } = ruleData
-        const { error: updateError } = await supabase
-          .from("mapping_rules")
-          .update(updateData)
-          .eq("id", id)
-
-        if (updateError) {
-          return NextResponse.json({ error: updateError.message }, { status: 400 })
-        }
-        return NextResponse.json({ success: true })
-      }
+    if (id === 0 || !id) {
+      const result = await client.query(
+        `INSERT INTO public.mapping_rules 
+          (keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         RETURNING id`,
+        [keyword, categoria_id || null, subcategoria_id || null, subcategoria_filho_id || null, fornecedor_id || null, cliente_id || null, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', tenant_id]
+      )
+      return NextResponse.json({ success: true, data: result.rows[0] })
+    } else {
+      await client.query(
+        `UPDATE public.mapping_rules SET
+          keyword = $1, categoria_id = $2, subcategoria_id = $3, subcategoria_filho_id = $4,
+          fornecedor_id = $5, cliente_id = $6, cliente_fornecedor = $7,
+          descricao = $8, substituir_descricao = $9, forma_pagamento = $10
+         WHERE id = $11`,
+        [keyword, categoria_id || null, subcategoria_id || null, subcategoria_filho_id || null, fornecedor_id || null, cliente_id || null, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', id]
+      )
+      return NextResponse.json({ success: true })
     }
-
-    return NextResponse.json({ success: true, data })
-  } catch (error) {
+  } catch (error: unknown) {
     console.error("POST mapping-rules error:", error)
+    const pgError = error as { code?: string; detail?: string }
+    if (pgError.code === '23503') {
+      return NextResponse.json({ error: `Referencia invalida: ${pgError.detail || 'verifique categoria, subcategoria, cliente ou fornecedor'}` }, { status: 400 })
+    }
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  } finally {
+    if (client) await client.end().catch(() => {})
   }
 }
 
 export async function DELETE(request: NextRequest) {
+  let client: Client | null = null
   try {
-    const supabase = await createClient()
+    client = await getClient()
     const { searchParams } = new URL(request.url)
     const id = searchParams.get('id')
 
     if (!id) {
-      return NextResponse.json({ error: "ID é obrigatório" }, { status: 400 })
+      return NextResponse.json({ error: "ID e obrigatorio" }, { status: 400 })
     }
 
-    const { error } = await supabase
-      .from("mapping_rules")
-      .delete()
-      .eq("id", Number(id))
-
-    if (error) {
-      return NextResponse.json({ error: error.message }, { status: 400 })
-    }
+    await client.query('DELETE FROM public.mapping_rules WHERE id = $1', [Number(id)])
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error("DELETE mapping-rules error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  } finally {
+    if (client) await client.end().catch(() => {})
   }
 }
