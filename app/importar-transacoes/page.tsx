@@ -1074,6 +1074,7 @@ export default function ImportarTransacoesPage() {
       tenant_id: tid,
     }
 
+    console.log("[v0] saveEditedRule ruleData:", JSON.stringify(ruleData))
     const response = await fetch("/api/mapping-rules", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
