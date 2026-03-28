@@ -984,6 +984,7 @@ export default function ImportarTransacoesPage() {
   }
   
  function openEditRule(rule: MappingRule) {
+  console.log("[v0] openEditRule - rule data:", JSON.stringify({ id: rule.id, keyword: rule.keyword, cliente_id: rule.cliente_id, fornecedor_id: rule.fornecedor_id, descricao: rule.descricao, categoria_id: rule.categoria_id }))
   // Dados completos já vêm do fetchRules (descricao, cliente_id, fornecedor_id, etc.)
   // Limpa referências inválidas (IDs que não existem mais nas listas carregadas)
   const cats = hierarchy?.categorias || []
