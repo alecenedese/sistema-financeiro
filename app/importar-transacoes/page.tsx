@@ -798,9 +798,16 @@ export default function ImportarTransacoesPage() {
   // Save rules from current mapping to Supabase
   async function saveNewRules() {
     if (!tid) return // Não salva regras sem tenant
-    const supabase = createClient()
     const existingKeywords = new Set(allRules.map((r) => r.keyword.toUpperCase()))
-    const newRuleInserts: { keyword: string; categoria_id: number | null; subcategoria_id: number | null; subcategoria_filho_id: number | null; fornecedor_id: number | null; cliente_id: number | null; cliente_fornecedor: string; tenant_id: number }[] = []
+    // Valida IDs contra listas carregadas
+    const cats = hierarchy?.categorias || []
+    const subs = hierarchy?.subcategorias || []
+    const catIds = new Set(cats.map(c => c.id))
+    const subIds = new Set(subs.map(s => s.id))
+    const fornIds = new Set(fornecedoresLista.map(f => f.id))
+    const cliIds = new Set(clientesLista.map(c => c.id))
+
+    const newRuleInserts: Record<string, unknown>[] = []
 
     for (const tx of transactions) {
       if (tx.categoria_id && tx.memo) {
@@ -810,12 +817,15 @@ export default function ImportarTransacoesPage() {
             existingKeywords.add(kw.toUpperCase())
             newRuleInserts.push({
               keyword: kw,
-              categoria_id: tx.categoria_id,
-              subcategoria_id: tx.subcategoria_id,
-              subcategoria_filho_id: tx.subcategoria_filho_id,
-              fornecedor_id: tx.fornecedor_id,
-              cliente_id: tx.cliente_id,
-              cliente_fornecedor: tx.clienteFornecedor,
+              categoria_id: catIds.has(tx.categoria_id) ? tx.categoria_id : null,
+              subcategoria_id: subIds.has(tx.subcategoria_id as number) ? tx.subcategoria_id : null,
+              subcategoria_filho_id: tx.subcategoria_filho_id || null,
+              fornecedor_id: fornIds.has(tx.fornecedor_id as number) ? tx.fornecedor_id : null,
+              cliente_id: cliIds.has(tx.cliente_id as number) ? tx.cliente_id : null,
+              cliente_fornecedor: tx.clienteFornecedor || "",
+              descricao: tx.descricao_editada || "",
+              substituir_descricao: false,
+              forma_pagamento: "",
               tenant_id: tid,
             })
           }
@@ -824,7 +834,14 @@ export default function ImportarTransacoesPage() {
     }
 
     if (newRuleInserts.length > 0) {
-      await supabase.from("mapping_rules").insert(newRuleInserts)
+      // Usa API route com conexão direta ao PostgreSQL
+      for (const rule of newRuleInserts) {
+        await fetch("/api/mapping-rules", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ ...rule, id: 0 }),
+        })
+      }
       await mutateRules()
     }
   }
@@ -984,7 +1001,6 @@ export default function ImportarTransacoesPage() {
   }
   
  function openEditRule(rule: MappingRule) {
-  console.log("[v0] openEditRule - rule data:", JSON.stringify({ id: rule.id, keyword: rule.keyword, cliente_id: rule.cliente_id, fornecedor_id: rule.fornecedor_id, descricao: rule.descricao, categoria_id: rule.categoria_id }))
   // Dados completos já vêm do fetchRules (descricao, cliente_id, fornecedor_id, etc.)
   // Limpa referências inválidas (IDs que não existem mais nas listas carregadas)
   const cats = hierarchy?.categorias || []
@@ -1075,7 +1091,6 @@ export default function ImportarTransacoesPage() {
       tenant_id: tid,
     }
 
-    console.log("[v0] saveEditedRule ruleData:", JSON.stringify(ruleData))
     const response = await fetch("/api/mapping-rules", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
