@@ -68,20 +68,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Keyword e tenant_id sao obrigatorios" }, { status: 400 })
     }
 
-    // Valida foreign keys antes de inserir/atualizar
-    const validatedCatId = categoria_id ? (await client.query('SELECT id FROM categorias WHERE id = $1', [categoria_id])).rows[0]?.id || null : null
-    const validatedSubId = subcategoria_id ? (await client.query('SELECT id FROM subcategorias WHERE id = $1', [subcategoria_id])).rows[0]?.id || null : null
-    const validatedSubFilhoId = subcategoria_filho_id ? (await client.query('SELECT id FROM subcategorias_filhos WHERE id = $1', [subcategoria_filho_id])).rows[0]?.id || null : null
-    const validatedFornId = fornecedor_id ? (await client.query('SELECT id FROM fornecedores WHERE id = $1', [fornecedor_id])).rows[0]?.id || null : null
-    const validatedCliId = cliente_id ? (await client.query('SELECT id FROM clientes WHERE id = $1', [cliente_id])).rows[0]?.id || null : null
-
+    // Usa os IDs diretamente - a validação no frontend já garantiu que são válidos
+    // Não validamos via SQL porque o RLS bloqueia as queries sem contexto de usuário
     if (id === 0 || !id) {
       const result = await client.query(
         `INSERT INTO public.mapping_rules 
           (keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
          RETURNING id`,
-        [keyword, validatedCatId, validatedSubId, validatedSubFilhoId, validatedFornId, validatedCliId, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', tenant_id]
+        [keyword, categoria_id || null, subcategoria_id || null, subcategoria_filho_id || null, fornecedor_id || null, cliente_id || null, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', tenant_id]
       )
       return NextResponse.json({ success: true, data: result.rows[0] })
     } else {
@@ -91,7 +86,7 @@ export async function POST(request: NextRequest) {
           fornecedor_id = $5, cliente_id = $6, cliente_fornecedor = $7,
           descricao = $8, substituir_descricao = $9, forma_pagamento = $10
          WHERE id = $11`,
-        [keyword, validatedCatId, validatedSubId, validatedSubFilhoId, validatedFornId, validatedCliId, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', id]
+        [keyword, categoria_id || null, subcategoria_id || null, subcategoria_filho_id || null, fornecedor_id || null, cliente_id || null, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', id]
       )
       return NextResponse.json({ success: true })
     }
