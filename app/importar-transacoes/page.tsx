@@ -1122,8 +1122,7 @@ export default function ImportarTransacoesPage() {
         if (error) throw error
       }
 
-      // Salva descricao, substituir_descricao e forma_pagamento via API route (pg client direto)
-      // pois o PostgREST não reconhece essas colunas no cache
+      // Salva descricao via API route passando APENAS os campos de texto (sem FKs)
       if (savedId) {
         await fetch("/api/mapping-rules", {
           method: "POST",
@@ -1131,11 +1130,11 @@ export default function ImportarTransacoesPage() {
           body: JSON.stringify({
             id: savedId,
             keyword: editingRule.keyword.trim(),
-            categoria_id: editingRule.categoria_id || null,
-            subcategoria_id: editingRule.subcategoria_id || null,
-            subcategoria_filho_id: editingRule.subcategoria_filho_id || null,
-            fornecedor_id: editingRule.fornecedor_id || null,
-            cliente_id: editingRule.cliente_id || null,
+            categoria_id: null,
+            subcategoria_id: null,
+            subcategoria_filho_id: null,
+            fornecedor_id: null,
+            cliente_id: null,
             cliente_fornecedor: editingRule.cliente_fornecedor || "",
             descricao: editingRule.descricao || "",
             substituir_descricao: editingRule.substituir_descricao || false,

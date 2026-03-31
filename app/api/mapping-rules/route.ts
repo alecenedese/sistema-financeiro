@@ -64,22 +64,22 @@ export async function POST(request: NextRequest) {
     pgClient = await createPgClient()
 
     if (id === 0 || !id) {
+      // INSERT sem FKs - apenas campos de texto e tenant
       const result = await pgClient.query(
         `INSERT INTO public.mapping_rules 
-          (keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          (keyword, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id)
+         VALUES ($1, $2, $3, $4, $5, $6)
          RETURNING id`,
-        [keyword, categoria_id || null, subcategoria_id || null, subcategoria_filho_id || null, fornecedor_id || null, cliente_id || null, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', tenant_id]
+        [keyword, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', tenant_id]
       )
       return NextResponse.json({ success: true, data: result.rows[0] })
     } else {
+      // UPDATE apenas dos campos de texto que o PostgREST não reconhece no cache
       await pgClient.query(
         `UPDATE public.mapping_rules SET
-          keyword = $1, categoria_id = $2, subcategoria_id = $3, subcategoria_filho_id = $4,
-          fornecedor_id = $5, cliente_id = $6, cliente_fornecedor = $7,
-          descricao = $8, substituir_descricao = $9, forma_pagamento = $10
-         WHERE id = $11`,
-        [keyword, categoria_id || null, subcategoria_id || null, subcategoria_filho_id || null, fornecedor_id || null, cliente_id || null, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', id]
+          descricao = $1, substituir_descricao = $2, forma_pagamento = $3
+         WHERE id = $4`,
+        [descricao || '', substituir_descricao || false, forma_pagamento || '', id]
       )
       return NextResponse.json({ success: true })
     }
