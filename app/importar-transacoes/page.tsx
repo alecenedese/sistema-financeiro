@@ -212,31 +212,53 @@ async function fetchDespesasFixas(): Promise<DespesaFixaRow[]> {
 }
 
 async function fetchRules(tid: number | null): Promise<MappingRule[]> {
-  // Usa API route com conexao direta ao Postgres (contorna cache PostgREST)
-  const params = tid ? `?tenant_id=${tid}` : ''
-  const res = await fetch(`/api/mapping-rules${params}`)
-  if (!res.ok) throw new Error('Erro ao buscar regras')
+  // Usa Supabase client diretamente (mesma conexão que funciona para categorias)
+  const supabase = createClient()
   
-  const rows = (await res.json()) as Record<string, unknown>[]
-  return (rows || []).map((row) => ({
-  id: row.id as number,
-  keyword: row.keyword as string,
-  categoria_id: row.categoria_id as number | null,
-  subcategoria_id: row.subcategoria_id as number | null,
-  subcategoria_filho_id: row.subcategoria_filho_id as number | null,
-  fornecedor_id: (row.fornecedor_id as number | null) || null,
-  cliente_id: (row.cliente_id as number | null) || null,
-  cliente_fornecedor: (row.cliente_fornecedor as string) || "",
-  descricao: (row.descricao as string) || "",
-  substituir_descricao: (row.substituir_descricao as boolean) || false,
-  forma_pagamento: (row.forma_pagamento as string) || "",
-  categoria_nome: (row.categoria_nome as string) || "",
-  subcategoria_nome: (row.subcategoria_nome as string) || "",
-  filho_nome: (row.filho_nome as string) || "",
-  fornecedor_nome: (row.fornecedor_nome as string) || "",
-  cliente_nome: (row.cliente_nome as string) || "",
+  let query = supabase
+    .from("mapping_rules")
+    .select(`
+      id,
+      keyword,
+      categoria_id,
+      subcategoria_id,
+      subcategoria_filho_id,
+      fornecedor_id,
+      cliente_id,
+      cliente_fornecedor,
+      tenant_id,
+      categorias(nome),
+      subcategorias(nome),
+      subcategorias_filhos(nome),
+      fornecedores(nome),
+      clientes(nome)
+    `)
+    .order("keyword")
+  
+  if (tid) query = query.eq("tenant_id", tid)
+  
+  const { data, error } = await query
+  if (error) throw error
+  
+  return (data || []).map((row: Record<string, unknown>) => ({
+    id: row.id as number,
+    keyword: row.keyword as string,
+    categoria_id: row.categoria_id as number | null,
+    subcategoria_id: row.subcategoria_id as number | null,
+    subcategoria_filho_id: row.subcategoria_filho_id as number | null,
+    fornecedor_id: (row.fornecedor_id as number | null) || null,
+    cliente_id: (row.cliente_id as number | null) || null,
+    cliente_fornecedor: (row.cliente_fornecedor as string) || "",
+    descricao: "",
+    substituir_descricao: false,
+    forma_pagamento: "",
+    categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
+    subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
+    filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
+    fornecedor_nome: (row.fornecedores as Record<string, string> | null)?.nome || "",
+    cliente_nome: (row.clientes as Record<string, string> | null)?.nome || "",
   }))
-  }
+}
 
 // ---------- Helpers ----------
 
@@ -1001,37 +1023,20 @@ export default function ImportarTransacoesPage() {
   }
   
  function openEditRule(rule: MappingRule) {
-  console.log("[v0] openEditRule - rule from fetchRules:", JSON.stringify({
-    id: rule.id, keyword: rule.keyword,
-    categoria_id: rule.categoria_id, subcategoria_id: rule.subcategoria_id,
-    fornecedor_id: rule.fornecedor_id, cliente_id: rule.cliente_id,
-    descricao: rule.descricao
-  }))
-  console.log("[v0] openEditRule - cats count:", (hierarchy?.categorias || []).length, "first cat:", JSON.stringify((hierarchy?.categorias || [])[0]))
-  console.log("[v0] openEditRule - fornecedores count:", fornecedoresLista.length, "clientes count:", clientesLista.length)
-  // Dados completos já vêm do fetchRules (descricao, cliente_id, fornecedor_id, etc.)
   // Limpa referências inválidas (IDs que não existem mais nas listas carregadas)
   const cats = hierarchy?.categorias || []
-  const subs = hierarchy?.subcategorias || []
   const cleaned = { ...rule }
   if (cleaned.categoria_id && !cats.some(c => c.id === cleaned.categoria_id)) {
-    console.log("[v0] openEditRule - LIMPANDO categoria_id:", cleaned.categoria_id, "não encontrada em cats IDs:", cats.map(c => c.id).slice(0, 5))
     cleaned.categoria_id = null
     cleaned.subcategoria_id = null
     cleaned.subcategoria_filho_id = null
   }
   if (cleaned.fornecedor_id && !fornecedoresLista.some(f => f.id === cleaned.fornecedor_id)) {
-    console.log("[v0] openEditRule - LIMPANDO fornecedor_id:", cleaned.fornecedor_id)
     cleaned.fornecedor_id = null
   }
   if (cleaned.cliente_id && !clientesLista.some(c => c.id === cleaned.cliente_id)) {
-    console.log("[v0] openEditRule - LIMPANDO cliente_id:", cleaned.cliente_id)
     cleaned.cliente_id = null
   }
-  console.log("[v0] openEditRule - cleaned result:", JSON.stringify({
-    categoria_id: cleaned.categoria_id, fornecedor_id: cleaned.fornecedor_id,
-    cliente_id: cleaned.cliente_id, descricao: cleaned.descricao
-  }))
   setEditingRule(cleaned)
   setRuleEditDialogOpen(true)
   }
@@ -1086,37 +1091,38 @@ export default function ImportarTransacoesPage() {
       return
     }
     
-    // Envia todos os campos - a API usa RPC que contorna o cache do PostgREST
-    const ruleData = {
-      id: editingRule.id,
+    const supabase = createClient()
+    
+    // Dados básicos que o PostgREST reconhece no cache
+    const basicData = {
       keyword: editingRule.keyword.trim(),
-      categoria_id: editingRule.categoria_id,
-      subcategoria_id: editingRule.subcategoria_id,
-      subcategoria_filho_id: editingRule.subcategoria_filho_id,
+      categoria_id: editingRule.categoria_id || null,
+      subcategoria_id: editingRule.subcategoria_id || null,
+      subcategoria_filho_id: editingRule.subcategoria_filho_id || null,
       fornecedor_id: editingRule.fornecedor_id || null,
       cliente_id: editingRule.cliente_id || null,
       cliente_fornecedor: editingRule.cliente_fornecedor || "",
-      descricao: editingRule.descricao || "",
-      substituir_descricao: editingRule.substituir_descricao || false,
-      forma_pagamento: editingRule.forma_pagamento || "",
       tenant_id: tid,
     }
 
-    const response = await fetch("/api/mapping-rules", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(ruleData),
-    })
-    
-    const result = await response.json()
-    if (!response.ok) {
-      alert("Erro ao salvar regra: " + result.error)
-      return
+    try {
+      if (editingRule.id === 0 || !editingRule.id) {
+        // INSERT
+        const { error } = await supabase.from("mapping_rules").insert(basicData)
+        if (error) throw error
+      } else {
+        // UPDATE
+        const { error } = await supabase.from("mapping_rules").update(basicData).eq("id", editingRule.id)
+        if (error) throw error
+      }
+      
+      await mutateRules()
+      setRuleEditDialogOpen(false)
+      setEditingRule(null)
+    } catch (err: unknown) {
+      const error = err as { message?: string }
+      alert("Erro ao salvar regra: " + (error.message || "Erro desconhecido"))
     }
-
-    await mutateRules()
-    setRuleEditDialogOpen(false)
-    setEditingRule(null)
   }
 
   function reapplyRules() {
