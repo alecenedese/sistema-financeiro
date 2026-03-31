@@ -46,6 +46,10 @@ export async function GET(request: NextRequest) {
     `
     const params = tenantId ? [Number(tenantId)] : []
     const result = await pgClient.query(sql, params)
+    console.log("[v0] GET mapping-rules: returning", result.rows.length, "rules")
+    if (result.rows[0]) {
+      console.log("[v0] GET first rule:", JSON.stringify({ id: result.rows[0].id, keyword: result.rows[0].keyword, categoria_id: result.rows[0].categoria_id, fornecedor_id: result.rows[0].fornecedor_id, cliente_id: result.rows[0].cliente_id, descricao: result.rows[0].descricao, categoria_nome: result.rows[0].categoria_nome }))
+    }
     return NextResponse.json(result.rows)
   } catch (e) {
     console.error("GET mapping-rules error:", e)
@@ -63,6 +67,8 @@ export async function POST(request: NextRequest) {
   if (!keyword || !tenant_id) {
     return NextResponse.json({ error: "Keyword e tenant_id sao obrigatorios" }, { status: 400 })
   }
+
+  console.log("[v0] POST mapping-rules: id=", id, "keyword=", keyword, "categoria_id=", categoria_id, "fornecedor_id=", fornecedor_id, "cliente_id=", cliente_id, "descricao=", descricao)
 
   try {
     pgClient = await createPgClient()
