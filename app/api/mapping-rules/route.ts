@@ -59,17 +59,18 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   let client: Client | null = null
+  // Lê o body uma única vez no início
+  const body = await request.json()
+  const { id, keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id } = body
+
+  if (!keyword || !tenant_id) {
+    return NextResponse.json({ error: "Keyword e tenant_id sao obrigatorios" }, { status: 400 })
+  }
+
   try {
     client = await getClient()
-    const body = await request.json()
-    const { id, keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id } = body
-
-    if (!keyword || !tenant_id) {
-      return NextResponse.json({ error: "Keyword e tenant_id sao obrigatorios" }, { status: 400 })
-    }
 
     // Usa os IDs diretamente - a validação no frontend já garantiu que são válidos
-    // Não validamos via SQL porque o RLS bloqueia as queries sem contexto de usuário
     if (id === 0 || !id) {
       const result = await client.query(
         `INSERT INTO public.mapping_rules 
@@ -94,10 +95,7 @@ export async function POST(request: NextRequest) {
     const pgError = error as { code?: string; detail?: string }
     // FK violation - tenta novamente sem os campos de referência
     if (pgError.code === '23503' && client) {
-      console.log("POST mapping-rules: FK error, retrying with null references")
       try {
-        const body = await request.clone().json()
-        const { id, keyword, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id } = body
         if (id === 0 || !id) {
           const result = await client.query(
             `INSERT INTO public.mapping_rules 
