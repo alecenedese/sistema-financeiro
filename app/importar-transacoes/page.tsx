@@ -1122,25 +1122,13 @@ export default function ImportarTransacoesPage() {
         if (error) throw error
       }
 
-      // Salva descricao via API route passando APENAS os campos de texto (sem FKs)
-      if (savedId) {
-        await fetch("/api/mapping-rules", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: savedId,
-            keyword: editingRule.keyword.trim(),
-            categoria_id: null,
-            subcategoria_id: null,
-            subcategoria_filho_id: null,
-            fornecedor_id: null,
-            cliente_id: null,
-            cliente_fornecedor: editingRule.cliente_fornecedor || "",
-            descricao: editingRule.descricao || "",
-            substituir_descricao: editingRule.substituir_descricao || false,
-            forma_pagamento: editingRule.forma_pagamento || "",
-            tenant_id: tid,
-          }),
+      // Salva descricao via RPC que bypassa o cache do PostgREST
+      if (savedId && editingRule.descricao) {
+        await supabase.rpc('update_mapping_rule_descricao', {
+          p_id: savedId,
+          p_descricao: editingRule.descricao || "",
+          p_substituir_descricao: editingRule.substituir_descricao || false,
+          p_forma_pagamento: editingRule.forma_pagamento || "",
         })
       }
 
