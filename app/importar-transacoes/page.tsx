@@ -212,9 +212,9 @@ async function fetchDespesasFixas(): Promise<DespesaFixaRow[]> {
 }
 
 async function fetchRules(tid: number | null): Promise<MappingRule[]> {
-  // Usa Supabase client diretamente (mesma conexão que funciona para categorias)
   const supabase = createClient()
-  
+
+  // Busca campos básicos reconhecidos pelo cache do PostgREST
   let query = supabase
     .from("mapping_rules")
     .select(`
@@ -226,9 +226,6 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
       fornecedor_id,
       cliente_id,
       cliente_fornecedor,
-      descricao,
-      substituir_descricao,
-      forma_pagamento,
       tenant_id,
       categorias(nome),
       subcategorias(nome),
@@ -237,13 +234,13 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
       clientes(nome)
     `)
     .order("keyword")
-  
+
   if (tid) query = query.eq("tenant_id", tid)
-  
+
   const { data, error } = await query
   if (error) throw error
-  
-  return (data || []).map((row: Record<string, unknown>) => ({
+
+  const basicRules = (data || []).map((row: Record<string, unknown>) => ({
     id: row.id as number,
     keyword: row.keyword as string,
     categoria_id: row.categoria_id as number | null,
@@ -252,15 +249,35 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
     fornecedor_id: (row.fornecedor_id as number | null) || null,
     cliente_id: (row.cliente_id as number | null) || null,
     cliente_fornecedor: (row.cliente_fornecedor as string) || "",
-    descricao: (row.descricao as string) || "",
-    substituir_descricao: (row.substituir_descricao as boolean) || false,
-    forma_pagamento: (row.forma_pagamento as string) || "",
+    descricao: "",
+    substituir_descricao: false,
+    forma_pagamento: "",
     categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
     subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
     filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
     fornecedor_nome: (row.fornecedores as Record<string, string> | null)?.nome || "",
     cliente_nome: (row.clientes as Record<string, string> | null)?.nome || "",
   }))
+
+  // Busca descricao via RPC (bypassa cache do PostgREST)
+  if (basicRules.length > 0) {
+    const { data: descData } = await supabase.rpc('get_mapping_rules_descricao', {
+      p_tenant_id: tid
+    })
+    if (descData && Array.isArray(descData)) {
+      const descMap = new Map(descData.map((d: { id: number; descricao: string; substituir_descricao: boolean; forma_pagamento: string }) => [d.id, d]))
+      for (const rule of basicRules) {
+        const d = descMap.get(rule.id)
+        if (d) {
+          rule.descricao = d.descricao || ""
+          rule.substituir_descricao = d.substituir_descricao || false
+          rule.forma_pagamento = d.forma_pagamento || ""
+        }
+      }
+    }
+  }
+
+  return basicRules
 }
 
 // ---------- Helpers ----------
