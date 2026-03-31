@@ -1001,26 +1001,37 @@ export default function ImportarTransacoesPage() {
   }
   
  function openEditRule(rule: MappingRule) {
+  console.log("[v0] openEditRule - rule from fetchRules:", JSON.stringify({
+    id: rule.id, keyword: rule.keyword,
+    categoria_id: rule.categoria_id, subcategoria_id: rule.subcategoria_id,
+    fornecedor_id: rule.fornecedor_id, cliente_id: rule.cliente_id,
+    descricao: rule.descricao
+  }))
+  console.log("[v0] openEditRule - cats count:", (hierarchy?.categorias || []).length, "first cat:", JSON.stringify((hierarchy?.categorias || [])[0]))
+  console.log("[v0] openEditRule - fornecedores count:", fornecedoresLista.length, "clientes count:", clientesLista.length)
   // Dados completos já vêm do fetchRules (descricao, cliente_id, fornecedor_id, etc.)
   // Limpa referências inválidas (IDs que não existem mais nas listas carregadas)
   const cats = hierarchy?.categorias || []
   const subs = hierarchy?.subcategorias || []
   const cleaned = { ...rule }
   if (cleaned.categoria_id && !cats.some(c => c.id === cleaned.categoria_id)) {
+    console.log("[v0] openEditRule - LIMPANDO categoria_id:", cleaned.categoria_id, "não encontrada em cats IDs:", cats.map(c => c.id).slice(0, 5))
     cleaned.categoria_id = null
     cleaned.subcategoria_id = null
     cleaned.subcategoria_filho_id = null
   }
-  if (cleaned.subcategoria_id && !subs.some(s => s.id === cleaned.subcategoria_id)) {
-    cleaned.subcategoria_id = null
-    cleaned.subcategoria_filho_id = null
-  }
   if (cleaned.fornecedor_id && !fornecedoresLista.some(f => f.id === cleaned.fornecedor_id)) {
+    console.log("[v0] openEditRule - LIMPANDO fornecedor_id:", cleaned.fornecedor_id)
     cleaned.fornecedor_id = null
   }
   if (cleaned.cliente_id && !clientesLista.some(c => c.id === cleaned.cliente_id)) {
+    console.log("[v0] openEditRule - LIMPANDO cliente_id:", cleaned.cliente_id)
     cleaned.cliente_id = null
   }
+  console.log("[v0] openEditRule - cleaned result:", JSON.stringify({
+    categoria_id: cleaned.categoria_id, fornecedor_id: cleaned.fornecedor_id,
+    cliente_id: cleaned.cliente_id, descricao: cleaned.descricao
+  }))
   setEditingRule(cleaned)
   setRuleEditDialogOpen(true)
   }
