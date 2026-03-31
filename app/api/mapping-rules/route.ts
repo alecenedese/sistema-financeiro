@@ -91,11 +91,39 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ success: true })
     }
   } catch (error: unknown) {
-    console.error("POST mapping-rules error:", error)
     const pgError = error as { code?: string; detail?: string }
-    if (pgError.code === '23503') {
-      return NextResponse.json({ error: `Referencia invalida: ${pgError.detail || 'verifique categoria, subcategoria, cliente ou fornecedor'}` }, { status: 400 })
+    // FK violation - tenta novamente sem os campos de referência
+    if (pgError.code === '23503' && client) {
+      console.log("POST mapping-rules: FK error, retrying with null references")
+      try {
+        const body = await request.clone().json()
+        const { id, keyword, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id } = body
+        if (id === 0 || !id) {
+          const result = await client.query(
+            `INSERT INTO public.mapping_rules 
+              (keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id)
+             VALUES ($1, NULL, NULL, NULL, NULL, NULL, $2, $3, $4, $5, $6)
+             RETURNING id`,
+            [keyword, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', tenant_id]
+          )
+          return NextResponse.json({ success: true, data: result.rows[0] })
+        } else {
+          await client.query(
+            `UPDATE public.mapping_rules SET
+              keyword = $1, categoria_id = NULL, subcategoria_id = NULL, subcategoria_filho_id = NULL,
+              fornecedor_id = NULL, cliente_id = NULL, cliente_fornecedor = $2,
+              descricao = $3, substituir_descricao = $4, forma_pagamento = $5
+             WHERE id = $6`,
+            [keyword, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', id]
+          )
+          return NextResponse.json({ success: true })
+        }
+      } catch (retryError) {
+        console.error("POST mapping-rules retry error:", retryError)
+        return NextResponse.json({ error: `Referencia invalida: ${pgError.detail || 'verifique categoria, subcategoria, cliente ou fornecedor'}` }, { status: 400 })
+      }
     }
+    console.error("POST mapping-rules error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   } finally {
     if (client) await client.end().catch(() => {})
