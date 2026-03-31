@@ -265,9 +265,10 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
       p_tenant_id: tid
     })
     if (descData && Array.isArray(descData)) {
-      const descMap = new Map(descData.map((d: { id: number; descricao: string; substituir_descricao: boolean; forma_pagamento: string }) => [d.id, d]))
+      // Converte ID para number para garantir match correto
+      const descMap = new Map(descData.map((d: { id: number; descricao: string; substituir_descricao: boolean; forma_pagamento: string }) => [Number(d.id), d]))
       for (const rule of basicRules) {
-        const d = descMap.get(rule.id)
+        const d = descMap.get(Number(rule.id))
         if (d) {
           rule.descricao = d.descricao || ""
           rule.substituir_descricao = d.substituir_descricao || false
