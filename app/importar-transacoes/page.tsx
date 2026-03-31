@@ -226,6 +226,9 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
       fornecedor_id,
       cliente_id,
       cliente_fornecedor,
+      descricao,
+      substituir_descricao,
+      forma_pagamento,
       tenant_id,
       categorias(nome),
       subcategorias(nome),
@@ -249,9 +252,9 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
     fornecedor_id: (row.fornecedor_id as number | null) || null,
     cliente_id: (row.cliente_id as number | null) || null,
     cliente_fornecedor: (row.cliente_fornecedor as string) || "",
-    descricao: "",
-    substituir_descricao: false,
-    forma_pagamento: "",
+    descricao: (row.descricao as string) || "",
+    substituir_descricao: (row.substituir_descricao as boolean) || false,
+    forma_pagamento: (row.forma_pagamento as string) || "",
     categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
     subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
     filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
@@ -1093,7 +1096,6 @@ export default function ImportarTransacoesPage() {
     
     const supabase = createClient()
     
-    // Dados básicos que o PostgREST reconhece no cache
     const basicData = {
       keyword: editingRule.keyword.trim(),
       categoria_id: editingRule.categoria_id || null,
@@ -1102,6 +1104,9 @@ export default function ImportarTransacoesPage() {
       fornecedor_id: editingRule.fornecedor_id || null,
       cliente_id: editingRule.cliente_id || null,
       cliente_fornecedor: editingRule.cliente_fornecedor || "",
+      descricao: editingRule.descricao || "",
+      substituir_descricao: editingRule.substituir_descricao || false,
+      forma_pagamento: editingRule.forma_pagamento || "",
       tenant_id: tid,
     }
 
