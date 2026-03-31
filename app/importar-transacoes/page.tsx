@@ -877,13 +877,33 @@ export default function ImportarTransacoesPage() {
     }
 
     if (newRuleInserts.length > 0) {
-      // Usa API route com conexão direta ao PostgreSQL
+      const supabase = createClient()
       for (const rule of newRuleInserts) {
-        await fetch("/api/mapping-rules", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ ...rule, id: 0 }),
-        })
+        // Salva campos básicos via Supabase client
+        const { data: inserted, error } = await supabase
+          .from("mapping_rules")
+          .insert({
+            keyword: rule.keyword,
+            categoria_id: rule.categoria_id || null,
+            subcategoria_id: rule.subcategoria_id || null,
+            subcategoria_filho_id: rule.subcategoria_filho_id || null,
+            fornecedor_id: rule.fornecedor_id || null,
+            cliente_id: rule.cliente_id || null,
+            cliente_fornecedor: rule.cliente_fornecedor || "",
+            tenant_id: rule.tenant_id,
+          })
+          .select("id")
+          .single()
+
+        // Salva descricao via RPC se houver
+        if (!error && inserted?.id && rule.descricao) {
+          await supabase.rpc('update_mapping_rule_descricao', {
+            p_id: inserted.id,
+            p_descricao: rule.descricao as string || "",
+            p_substituir_descricao: false,
+            p_forma_pagamento: "",
+          })
+        }
       }
       await mutateRules()
     }
