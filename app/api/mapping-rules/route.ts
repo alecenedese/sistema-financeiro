@@ -42,11 +42,6 @@ export async function GET(request: NextRequest) {
     const params = tenantId ? [Number(tenantId)] : []
     const result = await pgClient.query(sql, params)
     
-    console.log("[v0] GET mapping-rules: returning", result.rows.length, "rules")
-    if (result.rows[0]) {
-      console.log("[v0] GET first rule:", JSON.stringify(result.rows[0]))
-    }
-    
     return NextResponse.json(result.rows)
   } catch (error) {
     console.error("GET mapping-rules error:", error)
@@ -65,8 +60,6 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Keyword e tenant_id sao obrigatorios" }, { status: 400 })
   }
 
-  console.log("[v0] POST mapping-rules: id=", id, "keyword=", keyword, "categoria_id=", categoria_id, "fornecedor_id=", fornecedor_id, "cliente_id=", cliente_id, "descricao=", descricao)
-
   try {
     pgClient = await createPgClient()
 
@@ -78,7 +71,6 @@ export async function POST(request: NextRequest) {
          RETURNING id`,
         [keyword, categoria_id || null, subcategoria_id || null, subcategoria_filho_id || null, fornecedor_id || null, cliente_id || null, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', tenant_id]
       )
-      console.log("[v0] POST insert success, id=", result.rows[0]?.id)
       return NextResponse.json({ success: true, data: result.rows[0] })
     } else {
       await pgClient.query(
@@ -89,7 +81,6 @@ export async function POST(request: NextRequest) {
          WHERE id = $11`,
         [keyword, categoria_id || null, subcategoria_id || null, subcategoria_filho_id || null, fornecedor_id || null, cliente_id || null, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', id]
       )
-      console.log("[v0] POST update success")
       return NextResponse.json({ success: true })
     }
   } catch (error: unknown) {

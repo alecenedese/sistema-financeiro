@@ -1095,7 +1095,8 @@ export default function ImportarTransacoesPage() {
     }
     
     const supabase = createClient()
-    
+
+    // Campos reconhecidos pelo cache do PostgREST
     const basicData = {
       keyword: editingRule.keyword.trim(),
       categoria_id: editingRule.categoria_id || null,
@@ -1104,23 +1105,46 @@ export default function ImportarTransacoesPage() {
       fornecedor_id: editingRule.fornecedor_id || null,
       cliente_id: editingRule.cliente_id || null,
       cliente_fornecedor: editingRule.cliente_fornecedor || "",
-      descricao: editingRule.descricao || "",
-      substituir_descricao: editingRule.substituir_descricao || false,
-      forma_pagamento: editingRule.forma_pagamento || "",
       tenant_id: tid,
     }
 
     try {
+      let savedId = editingRule.id
+
       if (editingRule.id === 0 || !editingRule.id) {
-        // INSERT
-        const { error } = await supabase.from("mapping_rules").insert(basicData)
+        // INSERT via Supabase client
+        const { data, error } = await supabase.from("mapping_rules").insert(basicData).select("id").single()
         if (error) throw error
+        savedId = data.id
       } else {
-        // UPDATE
+        // UPDATE via Supabase client
         const { error } = await supabase.from("mapping_rules").update(basicData).eq("id", editingRule.id)
         if (error) throw error
       }
-      
+
+      // Salva descricao, substituir_descricao e forma_pagamento via API route (pg client direto)
+      // pois o PostgREST não reconhece essas colunas no cache
+      if (savedId) {
+        await fetch("/api/mapping-rules", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: savedId,
+            keyword: editingRule.keyword.trim(),
+            categoria_id: editingRule.categoria_id || null,
+            subcategoria_id: editingRule.subcategoria_id || null,
+            subcategoria_filho_id: editingRule.subcategoria_filho_id || null,
+            fornecedor_id: editingRule.fornecedor_id || null,
+            cliente_id: editingRule.cliente_id || null,
+            cliente_fornecedor: editingRule.cliente_fornecedor || "",
+            descricao: editingRule.descricao || "",
+            substituir_descricao: editingRule.substituir_descricao || false,
+            forma_pagamento: editingRule.forma_pagamento || "",
+            tenant_id: tid,
+          }),
+        })
+      }
+
       await mutateRules()
       setRuleEditDialogOpen(false)
       setEditingRule(null)
