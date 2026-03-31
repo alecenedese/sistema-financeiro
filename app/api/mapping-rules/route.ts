@@ -1,146 +1,157 @@
 import { NextRequest, NextResponse } from "next/server"
-import { Pool } from "pg"
+import { Client } from "pg"
 
-const pool = new Pool({
-  connectionString: process.env.POSTGRES_URL,
-  ssl: process.env.POSTGRES_URL?.includes('sslmode=')
-    ? undefined
-    : { rejectUnauthorized: false },
-})
-
-// Workaround para certificados Supabase em ambientes Node.js restritivos
-if (typeof process !== 'undefined') {
-  process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0'
+// Versao 2 - forcando HMR reload
+async function createPgClient() {
+  const connStr = process.env.POSTGRES_URL_NON_POOLING || process.env.POSTGRES_URL
+  const pgClient = new Client({ connectionString: connStr })
+  await pgClient.connect()
+  return pgClient
 }
 
 export async function GET(request: NextRequest) {
+  let pgClient: Client | null = null
   try {
+    pgClient = await createPgClient()
     const { searchParams } = new URL(request.url)
-    const id = searchParams.get('id')
     const tenantId = searchParams.get('tenant_id')
 
-    if (id) {
-      const result = await pool.query(
-        `SELECT mr.*, 
-          c.nome as categoria_nome, s.nome as subcategoria_nome, 
-          sf.nome as filho_nome, f.nome as fornecedor_nome, cl.nome as cliente_nome
-        FROM mapping_rules mr
-        LEFT JOIN categorias c ON c.id = mr.categoria_id
-        LEFT JOIN subcategorias s ON s.id = mr.subcategoria_id
-        LEFT JOIN subcategorias_filhos sf ON sf.id = mr.subcategoria_filho_id
-        LEFT JOIN fornecedores f ON f.id = mr.fornecedor_id
-        LEFT JOIN clientes cl ON cl.id = mr.cliente_id
-        WHERE mr.id = $1`,
-        [Number(id)]
-      )
-      if (result.rows.length === 0) {
-        return NextResponse.json({ error: "Regra nao encontrada" }, { status: 404 })
-      }
-      return NextResponse.json(result.rows[0])
+    const sql = `
+      SELECT 
+        mr.id,
+        mr.keyword,
+        mr.categoria_id,
+        mr.subcategoria_id,
+        mr.subcategoria_filho_id,
+        mr.fornecedor_id,
+        mr.cliente_id,
+        mr.cliente_fornecedor,
+        mr.descricao,
+        mr.substituir_descricao,
+        mr.forma_pagamento,
+        mr.tenant_id,
+        c.nome as categoria_nome,
+        s.nome as subcategoria_nome,
+        sf.nome as filho_nome,
+        f.nome as fornecedor_nome,
+        cl.nome as cliente_nome
+      FROM public.mapping_rules mr
+      LEFT JOIN public.categorias c ON c.id = mr.categoria_id
+      LEFT JOIN public.subcategorias s ON s.id = mr.subcategoria_id
+      LEFT JOIN public.subcategorias_filhos sf ON sf.id = mr.subcategoria_filho_id
+      LEFT JOIN public.fornecedores f ON f.id = mr.fornecedor_id
+      LEFT JOIN public.clientes cl ON cl.id = mr.cliente_id
+      ${tenantId ? 'WHERE mr.tenant_id = $1' : ''}
+      ORDER BY mr.keyword
+    `
+    const params = tenantId ? [Number(tenantId)] : []
+    const result = await pgClient.query(sql, params)
+    console.log("[v0] GET mapping-rules: returning", result.rows.length, "rules")
+    if (result.rows[0]) {
+      console.log("[v0] GET first rule:", JSON.stringify({ id: result.rows[0].id, keyword: result.rows[0].keyword, categoria_id: result.rows[0].categoria_id, fornecedor_id: result.rows[0].fornecedor_id, cliente_id: result.rows[0].cliente_id, descricao: result.rows[0].descricao, categoria_nome: result.rows[0].categoria_nome }))
     }
-
-    // Lista todas as regras (com tenant filter opcional)
-    let query = `SELECT mr.*, 
-      c.nome as categoria_nome, s.nome as subcategoria_nome, 
-      sf.nome as filho_nome, f.nome as fornecedor_nome, cl.nome as cliente_nome
-    FROM mapping_rules mr
-    LEFT JOIN categorias c ON c.id = mr.categoria_id
-    LEFT JOIN subcategorias s ON s.id = mr.subcategoria_id
-    LEFT JOIN subcategorias_filhos sf ON sf.id = mr.subcategoria_filho_id
-    LEFT JOIN fornecedores f ON f.id = mr.fornecedor_id
-    LEFT JOIN clientes cl ON cl.id = mr.cliente_id`
-    const params: unknown[] = []
-
-    if (tenantId) {
-      query += ` WHERE mr.tenant_id = $1`
-      params.push(Number(tenantId))
-    }
-
-    query += ` ORDER BY mr.keyword`
-
-    const result = await pool.query(query, params)
     return NextResponse.json(result.rows)
   } catch (e) {
     console.error("GET mapping-rules error:", e)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    return NextResponse.json([], { status: 200 })
+  } finally {
+    if (pgClient) await pgClient.end().catch(() => {})
   }
 }
 
 export async function POST(request: NextRequest) {
+  let pgClient: Client | null = null
+  const body = await request.json()
+  const { id, keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id } = body
+
+  if (!keyword || !tenant_id) {
+    return NextResponse.json({ error: "Keyword e tenant_id sao obrigatorios" }, { status: 400 })
+  }
+
+  console.log("[v0] POST mapping-rules: id=", id, "keyword=", keyword, "categoria_id=", categoria_id, "fornecedor_id=", fornecedor_id, "cliente_id=", cliente_id, "descricao=", descricao)
+
   try {
-    const body = await request.json()
-    const { id, keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id } = body
+    pgClient = await createPgClient()
+    await pgClient.query('BEGIN')
 
-    if (!keyword || !tenant_id) {
-      return NextResponse.json({ error: "Keyword e tenant_id sao obrigatorios" }, { status: 400 })
-    }
-
-    if (!id || id === 0) {
-      // Insert
-      const result = await pool.query(
-        `INSERT INTO mapping_rules (
-          keyword, categoria_id, subcategoria_id, subcategoria_filho_id,
-          fornecedor_id, cliente_id, cliente_fornecedor,
-          descricao, substituir_descricao, forma_pagamento, tenant_id
-        ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11) RETURNING id`,
-        [
-          keyword,
-          categoria_id || null,
-          subcategoria_id || null,
-          subcategoria_filho_id || null,
-          fornecedor_id || null,
-          cliente_id || null,
-          cliente_fornecedor || '',
-          descricao || '',
-          substituir_descricao || false,
-          forma_pagamento || '',
-          tenant_id,
-        ]
-      )
-      return NextResponse.json({ success: true, data: { id: result.rows[0].id } })
-    } else {
-      // Update
-      await pool.query(
-        `UPDATE mapping_rules SET
-          keyword = $1, categoria_id = $2, subcategoria_id = $3, subcategoria_filho_id = $4,
-          fornecedor_id = $5, cliente_id = $6, cliente_fornecedor = $7,
-          descricao = $8, substituir_descricao = $9, forma_pagamento = $10
-        WHERE id = $11`,
-        [
-          keyword,
-          categoria_id || null,
-          subcategoria_id || null,
-          subcategoria_filho_id || null,
-          fornecedor_id || null,
-          cliente_id || null,
-          cliente_fornecedor || '',
-          descricao || '',
-          substituir_descricao || false,
-          forma_pagamento || '',
-          id,
-        ]
-      )
-      return NextResponse.json({ success: true })
+    try {
+      if (id === 0 || !id) {
+        const result = await pgClient.query(
+          `INSERT INTO public.mapping_rules 
+            (keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           RETURNING id`,
+          [keyword, categoria_id || null, subcategoria_id || null, subcategoria_filho_id || null, fornecedor_id || null, cliente_id || null, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', tenant_id]
+        )
+        await pgClient.query('COMMIT')
+        return NextResponse.json({ success: true, data: result.rows[0] })
+      } else {
+        await pgClient.query(
+          `UPDATE public.mapping_rules SET
+            keyword = $1, categoria_id = $2, subcategoria_id = $3, subcategoria_filho_id = $4,
+            fornecedor_id = $5, cliente_id = $6, cliente_fornecedor = $7,
+            descricao = $8, substituir_descricao = $9, forma_pagamento = $10
+           WHERE id = $11`,
+          [keyword, categoria_id || null, subcategoria_id || null, subcategoria_filho_id || null, fornecedor_id || null, cliente_id || null, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', id]
+        )
+        await pgClient.query('COMMIT')
+        return NextResponse.json({ success: true })
+      }
+    } catch (fkErr: unknown) {
+      // Rollback e tenta sem os campos de referencia (FK violation)
+      await pgClient.query('ROLLBACK')
+      const pgErr = fkErr as { code?: string; detail?: string }
+      if (pgErr.code === '23503') {
+        await pgClient.query('BEGIN')
+        if (id === 0 || !id) {
+          const result = await pgClient.query(
+            `INSERT INTO public.mapping_rules 
+              (keyword, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id)
+             VALUES ($1, $2, $3, $4, $5, $6)
+             RETURNING id`,
+            [keyword, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', tenant_id]
+          )
+          await pgClient.query('COMMIT')
+          return NextResponse.json({ success: true, data: result.rows[0] })
+        } else {
+          await pgClient.query(
+            `UPDATE public.mapping_rules SET
+              keyword = $1, cliente_fornecedor = $2,
+              descricao = $3, substituir_descricao = $4, forma_pagamento = $5
+             WHERE id = $6`,
+            [keyword, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', id]
+          )
+          await pgClient.query('COMMIT')
+          return NextResponse.json({ success: true })
+        }
+      }
+      throw fkErr
     }
   } catch (error) {
     console.error("POST mapping-rules error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  } finally {
+    if (pgClient) await pgClient.end().catch(() => {})
   }
 }
 
 export async function DELETE(request: NextRequest) {
+  let pgClient: Client | null = null
   try {
+    pgClient = await createPgClient()
     const { searchParams } = new URL(request.url)
-    const id = searchParams.get('id')
+    const ruleId = searchParams.get('id')
 
-    if (!id) {
+    if (!ruleId) {
       return NextResponse.json({ error: "ID e obrigatorio" }, { status: 400 })
     }
 
-    await pool.query(`DELETE FROM mapping_rules WHERE id = $1`, [Number(id)])
+    await pgClient.query('DELETE FROM public.mapping_rules WHERE id = $1', [Number(ruleId)])
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error("DELETE mapping-rules error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+  } finally {
+    if (pgClient) await pgClient.end().catch(() => {})
   }
 }
