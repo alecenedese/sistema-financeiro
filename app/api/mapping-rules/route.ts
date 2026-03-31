@@ -1,24 +1,22 @@
 import { NextRequest, NextResponse } from "next/server"
 import { Client } from "pg"
 
-async function getClient() {
-  const client = new Client({
-    connectionString: process.env.POSTGRES_URL_NON_POOLING || process.env.POSTGRES_URL,
-  })
-  await client.connect()
-  // Desabilita RLS para que queries diretas vejam todos os dados
-  await client.query('SET LOCAL row_security = off')
-  return client
+// Versao 2 - forcando HMR reload
+async function createPgClient() {
+  const connStr = process.env.POSTGRES_URL_NON_POOLING || process.env.POSTGRES_URL
+  const pgClient = new Client({ connectionString: connStr })
+  await pgClient.connect()
+  return pgClient
 }
 
 export async function GET(request: NextRequest) {
-  let client: Client | null = null
+  let pgClient: Client | null = null
   try {
-    client = await getClient()
+    pgClient = await createPgClient()
     const { searchParams } = new URL(request.url)
     const tenantId = searchParams.get('tenant_id')
 
-    const query = `
+    const sql = `
       SELECT 
         mr.id,
         mr.keyword,
@@ -46,22 +44,19 @@ export async function GET(request: NextRequest) {
       ${tenantId ? 'WHERE mr.tenant_id = $1' : ''}
       ORDER BY mr.keyword
     `
-
     const params = tenantId ? [Number(tenantId)] : []
-    const result = await client.query(query, params)
-
+    const result = await pgClient.query(sql, params)
     return NextResponse.json(result.rows)
   } catch (e) {
     console.error("GET mapping-rules error:", e)
     return NextResponse.json([], { status: 200 })
   } finally {
-    if (client) await client.end().catch(() => {})
+    if (pgClient) await pgClient.end().catch(() => {})
   }
 }
 
 export async function POST(request: NextRequest) {
-  let client: Client | null = null
-  // Lê o body uma única vez no início
+  let pgClient: Client | null = null
   const body = await request.json()
   const { id, keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id } = body
 
@@ -70,83 +65,87 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    client = await getClient()
+    pgClient = await createPgClient()
+    await pgClient.query('BEGIN')
 
-    // Usa os IDs diretamente - a validação no frontend já garantiu que são válidos
-    if (id === 0 || !id) {
-      const result = await client.query(
-        `INSERT INTO public.mapping_rules 
-          (keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
-         RETURNING id`,
-        [keyword, categoria_id || null, subcategoria_id || null, subcategoria_filho_id || null, fornecedor_id || null, cliente_id || null, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', tenant_id]
-      )
-      return NextResponse.json({ success: true, data: result.rows[0] })
-    } else {
-      await client.query(
-        `UPDATE public.mapping_rules SET
-          keyword = $1, categoria_id = $2, subcategoria_id = $3, subcategoria_filho_id = $4,
-          fornecedor_id = $5, cliente_id = $6, cliente_fornecedor = $7,
-          descricao = $8, substituir_descricao = $9, forma_pagamento = $10
-         WHERE id = $11`,
-        [keyword, categoria_id || null, subcategoria_id || null, subcategoria_filho_id || null, fornecedor_id || null, cliente_id || null, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', id]
-      )
-      return NextResponse.json({ success: true })
-    }
-  } catch (error: unknown) {
-    const pgError = error as { code?: string; detail?: string }
-    // FK violation - tenta novamente sem os campos de referência
-    if (pgError.code === '23503' && client) {
-      try {
+    try {
+      if (id === 0 || !id) {
+        const result = await pgClient.query(
+          `INSERT INTO public.mapping_rules 
+            (keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+           RETURNING id`,
+          [keyword, categoria_id || null, subcategoria_id || null, subcategoria_filho_id || null, fornecedor_id || null, cliente_id || null, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', tenant_id]
+        )
+        await pgClient.query('COMMIT')
+        return NextResponse.json({ success: true, data: result.rows[0] })
+      } else {
+        await pgClient.query(
+          `UPDATE public.mapping_rules SET
+            keyword = $1, categoria_id = $2, subcategoria_id = $3, subcategoria_filho_id = $4,
+            fornecedor_id = $5, cliente_id = $6, cliente_fornecedor = $7,
+            descricao = $8, substituir_descricao = $9, forma_pagamento = $10
+           WHERE id = $11`,
+          [keyword, categoria_id || null, subcategoria_id || null, subcategoria_filho_id || null, fornecedor_id || null, cliente_id || null, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', id]
+        )
+        await pgClient.query('COMMIT')
+        return NextResponse.json({ success: true })
+      }
+    } catch (fkErr: unknown) {
+      // Rollback e tenta sem os campos de referencia (FK violation)
+      await pgClient.query('ROLLBACK')
+      const pgErr = fkErr as { code?: string; detail?: string }
+      if (pgErr.code === '23503') {
+        await pgClient.query('BEGIN')
         if (id === 0 || !id) {
-          const result = await client.query(
+          const result = await pgClient.query(
             `INSERT INTO public.mapping_rules 
-              (keyword, categoria_id, subcategoria_id, subcategoria_filho_id, fornecedor_id, cliente_id, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id)
-             VALUES ($1, NULL, NULL, NULL, NULL, NULL, $2, $3, $4, $5, $6)
+              (keyword, cliente_fornecedor, descricao, substituir_descricao, forma_pagamento, tenant_id)
+             VALUES ($1, $2, $3, $4, $5, $6)
              RETURNING id`,
             [keyword, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', tenant_id]
           )
+          await pgClient.query('COMMIT')
           return NextResponse.json({ success: true, data: result.rows[0] })
         } else {
-          await client.query(
+          await pgClient.query(
             `UPDATE public.mapping_rules SET
-              keyword = $1, categoria_id = NULL, subcategoria_id = NULL, subcategoria_filho_id = NULL,
-              fornecedor_id = NULL, cliente_id = NULL, cliente_fornecedor = $2,
+              keyword = $1, cliente_fornecedor = $2,
               descricao = $3, substituir_descricao = $4, forma_pagamento = $5
              WHERE id = $6`,
             [keyword, cliente_fornecedor || '', descricao || '', substituir_descricao || false, forma_pagamento || '', id]
           )
+          await pgClient.query('COMMIT')
           return NextResponse.json({ success: true })
         }
-      } catch (retryError) {
-        console.error("POST mapping-rules retry error:", retryError)
-        return NextResponse.json({ error: `Referencia invalida: ${pgError.detail || 'verifique categoria, subcategoria, cliente ou fornecedor'}` }, { status: 400 })
       }
+      throw fkErr
     }
+  } catch (error) {
     console.error("POST mapping-rules error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   } finally {
-    if (client) await client.end().catch(() => {})
+    if (pgClient) await pgClient.end().catch(() => {})
   }
 }
 
 export async function DELETE(request: NextRequest) {
-  let client: Client | null = null
+  let pgClient: Client | null = null
   try {
-    client = await getClient()
+    pgClient = await createPgClient()
     const { searchParams } = new URL(request.url)
-    const id = searchParams.get('id')
+    const ruleId = searchParams.get('id')
 
-    if (!id) {
+    if (!ruleId) {
       return NextResponse.json({ error: "ID e obrigatorio" }, { status: 400 })
     }
 
-    await client.query('DELETE FROM public.mapping_rules WHERE id = $1', [Number(id)])
+    await pgClient.query('DELETE FROM public.mapping_rules WHERE id = $1', [Number(ruleId)])
     return NextResponse.json({ success: true })
   } catch (error) {
     console.error("DELETE mapping-rules error:", error)
     return NextResponse.json({ error: "Internal server error" }, { status: 500 })
   } finally {
-    if (client) await client.end().catch(() => {})
+    if (pgClient) await pgClient.end().catch(() => {})
   }
 }
