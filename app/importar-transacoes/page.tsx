@@ -895,13 +895,17 @@ export default function ImportarTransacoesPage() {
           .select("id")
           .single()
 
-        // Salva descricao via RPC se houver
+        // Salva descricao via nova rota (pg direto, bypassa cache PostgREST)
         if (!error && inserted?.id && rule.descricao) {
-          await supabase.rpc('update_mapping_rule_descricao', {
-            p_id: inserted.id,
-            p_descricao: rule.descricao as string || "",
-            p_substituir_descricao: false,
-            p_forma_pagamento: "",
+          await fetch("/api/mapping-rules-v2", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: inserted.id,
+              descricao: rule.descricao as string || "",
+              substituir_descricao: false,
+              forma_pagamento: "",
+            }),
           })
         }
       }
@@ -1160,13 +1164,17 @@ export default function ImportarTransacoesPage() {
         if (error) throw error
       }
 
-      // Salva descricao via RPC que bypassa o cache do PostgREST
-      if (savedId && editingRule.descricao) {
-        await supabase.rpc('update_mapping_rule_descricao', {
-          p_id: savedId,
-          p_descricao: editingRule.descricao || "",
-          p_substituir_descricao: editingRule.substituir_descricao || false,
-          p_forma_pagamento: editingRule.forma_pagamento || "",
+      // Salva descricao via nova rota (pg direto, bypassa cache PostgREST)
+      if (savedId) {
+        await fetch("/api/mapping-rules-v2", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: savedId,
+            descricao: editingRule.descricao || "",
+            substituir_descricao: editingRule.substituir_descricao || false,
+            forma_pagamento: editingRule.forma_pagamento || "",
+          }),
         })
       }
 
