@@ -6,6 +6,8 @@ async function getClient() {
     connectionString: process.env.POSTGRES_URL_NON_POOLING || process.env.POSTGRES_URL,
   })
   await client.connect()
+  // Desabilita RLS para que queries diretas vejam todos os dados
+  await client.query('SET LOCAL row_security = off')
   return client
 }
 
