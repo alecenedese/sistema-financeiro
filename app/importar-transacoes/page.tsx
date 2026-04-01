@@ -259,22 +259,26 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
     cliente_nome: (row.clientes as Record<string, string> | null)?.nome || "",
   }))
 
-  // Busca descricao via RPC (bypassa cache do PostgREST)
-  if (basicRules.length > 0) {
-    const { data: descData } = await supabase.rpc('get_mapping_rules_descricao', {
-      p_tenant_id: tid
-    })
-    if (descData && Array.isArray(descData)) {
-      // Converte ID para number para garantir match correto
-      const descMap = new Map(descData.map((d: { id: number; descricao: string; substituir_descricao: boolean; forma_pagamento: string }) => [Number(d.id), d]))
-      for (const rule of basicRules) {
-        const d = descMap.get(Number(rule.id))
-        if (d) {
-          rule.descricao = d.descricao || ""
-          rule.substituir_descricao = d.substituir_descricao || false
-          rule.forma_pagamento = d.forma_pagamento || ""
+  // Busca descricao via API v2 (pg direto, bypassa cache do PostgREST)
+  if (basicRules.length > 0 && tid) {
+    try {
+      const descRes = await fetch(`/api/mapping-rules-v2?tenant_id=${tid}`)
+      if (descRes.ok) {
+        const descData = await descRes.json()
+        if (Array.isArray(descData)) {
+          const descMap = new Map(descData.map((d: { id: number; descricao: string; substituir_descricao: boolean; forma_pagamento: string }) => [Number(d.id), d]))
+          for (const rule of basicRules) {
+            const d = descMap.get(Number(rule.id))
+            if (d) {
+              rule.descricao = d.descricao || ""
+              rule.substituir_descricao = d.substituir_descricao || false
+              rule.forma_pagamento = d.forma_pagamento || ""
+            }
+          }
         }
       }
+    } catch {
+      // Se falhar, continua sem descricao
     }
   }
 

@@ -9,6 +9,27 @@ async function createPgClient() {
   return client
 }
 
+// GET: Retorna descricao, substituir_descricao e forma_pagamento de todas as regras do tenant
+export async function GET(request: NextRequest) {
+  let pgClient: Client | null = null
+  const { searchParams } = new URL(request.url)
+  const tenant_id = searchParams.get("tenant_id")
+
+  try {
+    pgClient = await createPgClient()
+    const result = await pgClient.query(
+      `SELECT id, descricao, substituir_descricao, forma_pagamento FROM public.mapping_rules WHERE tenant_id = $1`,
+      [tenant_id]
+    )
+    return NextResponse.json(result.rows)
+  } catch (error) {
+    console.error("GET mapping-rules-v2 error:", error)
+    return NextResponse.json({ error: "Erro ao buscar" }, { status: 500 })
+  } finally {
+    if (pgClient) await pgClient.end().catch(() => {})
+  }
+}
+
 // POST: Atualiza APENAS descricao, substituir_descricao e forma_pagamento
 // Os outros campos são salvos via Supabase client no frontend
 export async function POST(request: NextRequest) {
