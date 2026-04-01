@@ -1164,17 +1164,22 @@ export default function ImportarTransacoesPage() {
       }
 
       // Salva descricao via nova rota (pg direto, bypassa cache PostgREST)
-      if (savedId) {
-        await fetch("/api/mapping-rules-v2", {
+      // Só chama se savedId for um número válido maior que 0
+      if (savedId && Number(savedId) > 0) {
+        const descRes = await fetch("/api/mapping-rules-v2", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            id: savedId,
+            id: Number(savedId),
             descricao: editingRule.descricao || "",
             substituir_descricao: editingRule.substituir_descricao || false,
             forma_pagamento: editingRule.forma_pagamento || "",
           }),
         })
+        if (!descRes.ok) {
+          const descError = await descRes.json()
+          console.error("Erro ao salvar descricao:", descError)
+        }
       }
 
       await mutateRules()

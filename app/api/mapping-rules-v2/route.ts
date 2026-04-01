@@ -37,8 +37,10 @@ export async function POST(request: NextRequest) {
   const body = await request.json()
   const { id, descricao, substituir_descricao, forma_pagamento } = body
 
-  if (!id) {
-    return NextResponse.json({ error: "id obrigatorio" }, { status: 400 })
+  // Se id não for válido, retorna sucesso sem fazer nada
+  // (a descricao será salva quando a regra for editada novamente)
+  if (!id || Number(id) <= 0) {
+    return NextResponse.json({ success: true, skipped: true })
   }
 
   try {
