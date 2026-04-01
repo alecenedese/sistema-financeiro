@@ -259,28 +259,21 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
     cliente_nome: (row.clientes as Record<string, string> | null)?.nome || "",
   }))
 
-  // Busca descricao via API v2 (pg direto, bypassa cache do PostgREST)
+  // Busca descricao via RPC do Supabase (mesmo banco que o frontend usa)
   if (basicRules.length > 0 && tid) {
-    try {
-      const descRes = await fetch(`/api/mapping-rules-v2?tenant_id=${tid}`)
-      console.log("[v0] fetchRules descricao fetch status:", descRes.status)
-      if (descRes.ok) {
-        const descData = await descRes.json()
-        console.log("[v0] fetchRules descData:", JSON.stringify(descData).slice(0, 200))
-        if (Array.isArray(descData)) {
-          const descMap = new Map(descData.map((d: { id: number; descricao: string; substituir_descricao: boolean; forma_pagamento: string }) => [Number(d.id), d]))
-          for (const rule of basicRules) {
-            const d = descMap.get(Number(rule.id))
-            if (d) {
-              rule.descricao = d.descricao || ""
-              rule.substituir_descricao = d.substituir_descricao || false
-              rule.forma_pagamento = d.forma_pagamento || ""
-            }
-          }
+    const { data: descData, error: descError } = await supabase.rpc('get_mapping_rules_descricao', {
+      p_tenant_id: tid
+    })
+    if (!descError && descData && Array.isArray(descData)) {
+      const descMap = new Map(descData.map((d: { id: number; descricao: string; substituir_descricao: boolean; forma_pagamento: string }) => [Number(d.id), d]))
+      for (const rule of basicRules) {
+        const d = descMap.get(Number(rule.id))
+        if (d) {
+          rule.descricao = d.descricao || ""
+          rule.substituir_descricao = d.substituir_descricao || false
+          rule.forma_pagamento = d.forma_pagamento || ""
         }
       }
-    } catch (err) {
-      console.log("[v0] fetchRules descricao error:", err)
     }
   }
 
