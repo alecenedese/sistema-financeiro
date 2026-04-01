@@ -263,8 +263,10 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   if (basicRules.length > 0 && tid) {
     try {
       const descRes = await fetch(`/api/mapping-rules-v2?tenant_id=${tid}`)
+      console.log("[v0] fetchRules descricao fetch status:", descRes.status)
       if (descRes.ok) {
         const descData = await descRes.json()
+        console.log("[v0] fetchRules descData:", JSON.stringify(descData).slice(0, 200))
         if (Array.isArray(descData)) {
           const descMap = new Map(descData.map((d: { id: number; descricao: string; substituir_descricao: boolean; forma_pagamento: string }) => [Number(d.id), d]))
           for (const rule of basicRules) {
@@ -277,8 +279,8 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
           }
         }
       }
-    } catch {
-      // Se falhar, continua sem descricao
+    } catch (err) {
+      console.log("[v0] fetchRules descricao error:", err)
     }
   }
 
@@ -557,7 +559,7 @@ export default function ImportarTransacoesPage() {
         if (!firstLine.includes(";") && !firstLine.includes(",")) {
           content = await readFileAsText(file, "ISO-8859-1")
         }
-        // Limpa caracteres problemáticos
+        // Limpa caracteres problem��ticos
         content = content.replace(/[\uFFFD]/g, "")
         const parsed = parseCSV(content)
         txs = spreadsheetToOFXTransactions(parsed)
