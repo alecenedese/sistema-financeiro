@@ -894,17 +894,13 @@ export default function ImportarTransacoesPage() {
           .select("id")
           .single()
 
-        // Salva descricao via nova rota (pg direto, bypassa cache PostgREST)
+        // Salva descricao via RPC do Supabase (mesmo banco que o frontend usa)
         if (!error && inserted?.id && rule.descricao) {
-          await fetch("/api/mapping-rules-v2", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              id: inserted.id,
-              descricao: rule.descricao as string || "",
-              substituir_descricao: false,
-              forma_pagamento: "",
-            }),
+          await supabase.rpc('update_mapping_rule_descricao', {
+            p_id: inserted.id,
+            p_descricao: rule.descricao as string || "",
+            p_substituir_descricao: false,
+            p_forma_pagamento: "",
           })
         }
       }
@@ -1163,22 +1159,16 @@ export default function ImportarTransacoesPage() {
         if (error) throw error
       }
 
-      // Salva descricao via nova rota (pg direto, bypassa cache PostgREST)
-      // Só chama se savedId for um número válido maior que 0
+      // Salva descricao via RPC do Supabase (mesmo banco que o frontend usa)
       if (savedId && Number(savedId) > 0) {
-        const descRes = await fetch("/api/mapping-rules-v2", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: Number(savedId),
-            descricao: editingRule.descricao || "",
-            substituir_descricao: editingRule.substituir_descricao || false,
-            forma_pagamento: editingRule.forma_pagamento || "",
-          }),
+        const { error: rpcError } = await supabase.rpc('update_mapping_rule_descricao', {
+          p_id: Number(savedId),
+          p_descricao: editingRule.descricao || "",
+          p_substituir_descricao: editingRule.substituir_descricao || false,
+          p_forma_pagamento: editingRule.forma_pagamento || "",
         })
-        if (!descRes.ok) {
-          const descError = await descRes.json()
-          console.error("Erro ao salvar descricao:", descError)
+        if (rpcError) {
+          console.error("Erro ao salvar descricao:", rpcError)
         }
       }
 
