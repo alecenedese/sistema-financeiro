@@ -261,10 +261,13 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
 
   // Busca descricao via RPC do Supabase (mesmo banco que o frontend usa)
   if (basicRules.length > 0 && tid) {
+    console.log("[v0] fetchRules - chamando RPC get_mapping_rules_descricao, tid:", tid)
     const { data: descData, error: descError } = await supabase.rpc('get_mapping_rules_descricao', {
       p_tenant_id: tid
     })
+    console.log("[v0] fetchRules - RPC result:", descData?.length, "items, error:", descError)
     if (!descError && descData && Array.isArray(descData)) {
+      console.log("[v0] fetchRules - descData sample:", JSON.stringify(descData.slice(0, 2)))
       const descMap = new Map(descData.map((d: { id: number; descricao: string; substituir_descricao: boolean; forma_pagamento: string }) => [Number(d.id), d]))
       for (const rule of basicRules) {
         const d = descMap.get(Number(rule.id))
@@ -1160,16 +1163,21 @@ export default function ImportarTransacoesPage() {
       }
 
       // Salva descricao via RPC do Supabase (mesmo banco que o frontend usa)
+      console.log("[v0] saveEditedRule - savedId:", savedId, "descricao:", editingRule.descricao)
       if (savedId && Number(savedId) > 0) {
-        const { error: rpcError } = await supabase.rpc('update_mapping_rule_descricao', {
+        console.log("[v0] saveEditedRule - chamando RPC update_mapping_rule_descricao")
+        const { error: rpcError, data: rpcData } = await supabase.rpc('update_mapping_rule_descricao', {
           p_id: Number(savedId),
           p_descricao: editingRule.descricao || "",
           p_substituir_descricao: editingRule.substituir_descricao || false,
           p_forma_pagamento: editingRule.forma_pagamento || "",
         })
+        console.log("[v0] saveEditedRule - RPC result:", rpcData, "error:", rpcError)
         if (rpcError) {
           console.error("Erro ao salvar descricao:", rpcError)
         }
+      } else {
+        console.log("[v0] saveEditedRule - SKIP RPC, savedId invalido")
       }
 
       await mutateRules()
