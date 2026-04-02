@@ -214,7 +214,7 @@ async function fetchDespesasFixas(): Promise<DespesaFixaRow[]> {
 async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   const supabase = createClient()
 
-  // Busca campos básicos reconhecidos pelo cache do PostgREST
+  // Busca todos os campos incluindo descricao
   let query = supabase
     .from("mapping_rules")
     .select(`
@@ -226,6 +226,9 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
       fornecedor_id,
       cliente_id,
       cliente_fornecedor,
+      descricao,
+      substituir_descricao,
+      forma_pagamento,
       tenant_id,
       categorias(nome),
       subcategorias(nome),
@@ -240,7 +243,7 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   const { data, error } = await query
   if (error) throw error
 
-  const basicRules = (data || []).map((row: Record<string, unknown>) => ({
+  return (data || []).map((row: Record<string, unknown>) => ({
     id: row.id as number,
     keyword: row.keyword as string,
     categoria_id: row.categoria_id as number | null,
@@ -249,38 +252,15 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
     fornecedor_id: (row.fornecedor_id as number | null) || null,
     cliente_id: (row.cliente_id as number | null) || null,
     cliente_fornecedor: (row.cliente_fornecedor as string) || "",
-    descricao: "",
-    substituir_descricao: false,
-    forma_pagamento: "",
+    descricao: (row.descricao as string) || "",
+    substituir_descricao: (row.substituir_descricao as boolean) || false,
+    forma_pagamento: (row.forma_pagamento as string) || "",
     categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
     subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
     filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
     fornecedor_nome: (row.fornecedores as Record<string, string> | null)?.nome || "",
     cliente_nome: (row.clientes as Record<string, string> | null)?.nome || "",
   }))
-
-  // Busca descricao via RPC do Supabase (mesmo banco que o frontend usa)
-  if (basicRules.length > 0 && tid) {
-    console.log("[v0] fetchRules - chamando RPC get_mapping_rules_descricao, tid:", tid)
-    const { data: descData, error: descError } = await supabase.rpc('get_mapping_rules_descricao', {
-      p_tenant_id: tid
-    })
-    console.log("[v0] fetchRules - RPC result:", descData?.length, "items, error:", descError)
-    if (!descError && descData && Array.isArray(descData)) {
-      console.log("[v0] fetchRules - descData sample:", JSON.stringify(descData.slice(0, 2)))
-      const descMap = new Map(descData.map((d: { id: number; descricao: string; substituir_descricao: boolean; forma_pagamento: string }) => [Number(d.id), d]))
-      for (const rule of basicRules) {
-        const d = descMap.get(Number(rule.id))
-        if (d) {
-          rule.descricao = d.descricao || ""
-          rule.substituir_descricao = d.substituir_descricao || false
-          rule.forma_pagamento = d.forma_pagamento || ""
-        }
-      }
-    }
-  }
-
-  return basicRules
 }
 
 // ---------- Helpers ----------
@@ -881,8 +861,8 @@ export default function ImportarTransacoesPage() {
     if (newRuleInserts.length > 0) {
       const supabase = createClient()
       for (const rule of newRuleInserts) {
-        // Salva campos básicos via Supabase client
-        const { data: inserted, error } = await supabase
+        // Salva todos os campos incluindo descricao
+        await supabase
           .from("mapping_rules")
           .insert({
             keyword: rule.keyword,
@@ -892,20 +872,11 @@ export default function ImportarTransacoesPage() {
             fornecedor_id: rule.fornecedor_id || null,
             cliente_id: rule.cliente_id || null,
             cliente_fornecedor: rule.cliente_fornecedor || "",
+            descricao: rule.descricao as string || "",
+            substituir_descricao: false,
+            forma_pagamento: "",
             tenant_id: rule.tenant_id,
           })
-          .select("id")
-          .single()
-
-        // Salva descricao via RPC do Supabase (mesmo banco que o frontend usa)
-        if (!error && inserted?.id && rule.descricao) {
-          await supabase.rpc('update_mapping_rule_descricao', {
-            p_id: inserted.id,
-            p_descricao: rule.descricao as string || "",
-            p_substituir_descricao: false,
-            p_forma_pagamento: "",
-          })
-        }
       }
       await mutateRules()
     }
@@ -1136,8 +1107,8 @@ export default function ImportarTransacoesPage() {
     
     const supabase = createClient()
 
-    // Campos reconhecidos pelo cache do PostgREST
-    const basicData = {
+    // Todos os campos incluindo descricao
+    const fullData = {
       keyword: editingRule.keyword.trim(),
       categoria_id: editingRule.categoria_id || null,
       subcategoria_id: editingRule.subcategoria_id || null,
@@ -1145,39 +1116,21 @@ export default function ImportarTransacoesPage() {
       fornecedor_id: editingRule.fornecedor_id || null,
       cliente_id: editingRule.cliente_id || null,
       cliente_fornecedor: editingRule.cliente_fornecedor || "",
+      descricao: editingRule.descricao || "",
+      substituir_descricao: editingRule.substituir_descricao || false,
+      forma_pagamento: editingRule.forma_pagamento || "",
       tenant_id: tid,
     }
 
     try {
-      let savedId = editingRule.id
-
       if (editingRule.id === 0 || !editingRule.id) {
         // INSERT via Supabase client
-        const { data, error } = await supabase.from("mapping_rules").insert(basicData).select("id").single()
+        const { error } = await supabase.from("mapping_rules").insert(fullData)
         if (error) throw error
-        savedId = data.id
       } else {
         // UPDATE via Supabase client
-        const { error } = await supabase.from("mapping_rules").update(basicData).eq("id", editingRule.id)
+        const { error } = await supabase.from("mapping_rules").update(fullData).eq("id", editingRule.id)
         if (error) throw error
-      }
-
-      // Salva descricao via RPC do Supabase (mesmo banco que o frontend usa)
-      console.log("[v0] saveEditedRule - savedId:", savedId, "descricao:", editingRule.descricao)
-      if (savedId && Number(savedId) > 0) {
-        console.log("[v0] saveEditedRule - chamando RPC update_mapping_rule_descricao")
-        const { error: rpcError, data: rpcData } = await supabase.rpc('update_mapping_rule_descricao', {
-          p_id: Number(savedId),
-          p_descricao: editingRule.descricao || "",
-          p_substituir_descricao: editingRule.substituir_descricao || false,
-          p_forma_pagamento: editingRule.forma_pagamento || "",
-        })
-        console.log("[v0] saveEditedRule - RPC result:", rpcData, "error:", rpcError)
-        if (rpcError) {
-          console.error("Erro ao salvar descricao:", rpcError)
-        }
-      } else {
-        console.log("[v0] saveEditedRule - SKIP RPC, savedId invalido")
       }
 
       await mutateRules()
