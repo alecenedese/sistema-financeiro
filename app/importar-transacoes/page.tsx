@@ -214,9 +214,9 @@ async function fetchDespesasFixas(): Promise<DespesaFixaRow[]> {
 async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   const supabase = createClient()
 
-  // Busca todos os campos usando select("*") - não especifica colunas para evitar erro de cache
+  // Busca via VIEW que inclui descricao (bypassa cache do PostgREST)
   let query = supabase
-    .from("mapping_rules")
+    .from("mapping_rules_view")
     .select("*")
     .order("keyword")
 
@@ -887,19 +887,16 @@ export default function ImportarTransacoesPage() {
           .single()
 
         // Tenta atualizar descricao diretamente via Supabase client
+        // Atualiza descricao via VIEW (bypassa cache do PostgREST)
         if (!error && inserted?.id && rule.descricao) {
-          try {
-            await supabase
-              .from("mapping_rules")
-              .update({
-                descricao: rule.descricao as string || "",
-                substituir_descricao: false,
-                forma_pagamento: "",
-              })
-              .eq("id", inserted.id)
-          } catch {
-            // Ignora erro de cache
-          }
+          await supabase
+            .from("mapping_rules_view")
+            .update({
+              descricao: rule.descricao as string || "",
+              substituir_descricao: false,
+              forma_pagamento: "",
+            })
+            .eq("id", inserted.id)
         }
       }
       await mutateRules()
@@ -1163,7 +1160,7 @@ export default function ImportarTransacoesPage() {
       if (savedId && Number(savedId) > 0 && editingRule.descricao) {
         try {
           const { error: descError } = await supabase
-            .from("mapping_rules")
+            .from("mapping_rules_view")
             .update({
               descricao: editingRule.descricao || "",
               substituir_descricao: editingRule.substituir_descricao || false,
