@@ -214,9 +214,9 @@ async function fetchDespesasFixas(): Promise<DespesaFixaRow[]> {
 async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   const supabase = createClient()
 
-  // Busca via view que inclui descricao (contorna cache do PostgREST)
+  // Busca todos os campos usando select("*") - não especifica colunas para evitar erro de cache
   let query = supabase
-    .from("mapping_rules_view")
+    .from("mapping_rules")
     .select("*")
     .order("keyword")
 
@@ -864,9 +864,9 @@ export default function ImportarTransacoesPage() {
     if (newRuleInserts.length > 0) {
       const supabase = createClient()
       for (const rule of newRuleInserts) {
-        // Usa mapping_rules_view para contornar o cache do PostgREST
-        await supabase
-          .from("mapping_rules_view")
+        // INSERT campos básicos
+        const { data: inserted, error } = await supabase
+          .from("mapping_rules")
           .insert({
             keyword: rule.keyword,
             categoria_id: rule.categoria_id || null,
@@ -875,11 +875,24 @@ export default function ImportarTransacoesPage() {
             fornecedor_id: rule.fornecedor_id || null,
             cliente_id: rule.cliente_id || null,
             cliente_fornecedor: rule.cliente_fornecedor || "",
-            descricao: rule.descricao as string || "",
-            substituir_descricao: false,
-            forma_pagamento: "",
             tenant_id: rule.tenant_id,
           })
+          .select("id")
+          .single()
+
+        // Atualiza descricao via API (bypassa cache do PostgREST)
+        if (!error && inserted?.id && rule.descricao) {
+          await fetch("/api/mapping-rules-v2", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              id: inserted.id,
+              descricao: rule.descricao as string || "",
+              substituir_descricao: false,
+              forma_pagamento: "",
+            }),
+          })
+        }
       }
       await mutateRules()
     }
@@ -1110,8 +1123,8 @@ export default function ImportarTransacoesPage() {
     
     const supabase = createClient()
 
-    // Todos os campos incluindo descricao
-    const fullData = {
+    // Campos básicos (sem descricao para evitar erro de cache)
+    const basicData = {
       keyword: editingRule.keyword.trim(),
       categoria_id: editingRule.categoria_id || null,
       subcategoria_id: editingRule.subcategoria_id || null,
@@ -1119,21 +1132,35 @@ export default function ImportarTransacoesPage() {
       fornecedor_id: editingRule.fornecedor_id || null,
       cliente_id: editingRule.cliente_id || null,
       cliente_fornecedor: editingRule.cliente_fornecedor || "",
-      descricao: editingRule.descricao || "",
-      substituir_descricao: editingRule.substituir_descricao || false,
-      forma_pagamento: editingRule.forma_pagamento || "",
       tenant_id: tid,
     }
 
     try {
+      let savedId = editingRule.id
+
       if (editingRule.id === 0 || !editingRule.id) {
-        // INSERT via view (contorna cache do PostgREST)
-        const { error } = await supabase.from("mapping_rules_view").insert(fullData)
+        // INSERT campos básicos
+        const { data, error } = await supabase.from("mapping_rules").insert(basicData).select("id").single()
         if (error) throw error
+        savedId = data.id
       } else {
-        // UPDATE via view (contorna cache do PostgREST)
-        const { error } = await supabase.from("mapping_rules_view").update(fullData).eq("id", editingRule.id)
+        // UPDATE campos básicos
+        const { error } = await supabase.from("mapping_rules").update(basicData).eq("id", editingRule.id)
         if (error) throw error
+      }
+
+      // Atualiza descricao via SQL raw (bypassa cache do PostgREST)
+      if (savedId && Number(savedId) > 0) {
+        await fetch("/api/mapping-rules-v2", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            id: Number(savedId),
+            descricao: editingRule.descricao || "",
+            substituir_descricao: editingRule.substituir_descricao || false,
+            forma_pagamento: editingRule.forma_pagamento || "",
+          }),
+        })
       }
 
       await mutateRules()
