@@ -225,6 +225,12 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   const { data, error } = await query
   if (error) throw error
 
+  // Log para debug - verifica se descricao está vindo do banco
+  if (data && data.length > 0) {
+    console.log("[v0] fetchRules - total regras:", data.length)
+    console.log("[v0] fetchRules - primeira regra descricao:", data[0].descricao, "id:", data[0].id)
+  }
+
   // Busca nomes das categorias, fornecedores e clientes
   const catIds = [...new Set((data || []).map(r => r.categoria_id).filter(Boolean))]
   const subIds = [...new Set((data || []).map(r => r.subcategoria_id).filter(Boolean))]
@@ -1149,9 +1155,10 @@ export default function ImportarTransacoesPage() {
         if (error) throw error
       }
 
-      // Atualiza descricao via SQL raw (bypassa cache do PostgREST)
+      // Atualiza descricao via API (bypassa cache do PostgREST)
+      console.log("[v0] saveEditedRule - savedId:", savedId, "descricao:", editingRule.descricao)
       if (savedId && Number(savedId) > 0) {
-        await fetch("/api/mapping-rules-v2", {
+        const descRes = await fetch("/api/mapping-rules-v2", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1161,6 +1168,8 @@ export default function ImportarTransacoesPage() {
             forma_pagamento: editingRule.forma_pagamento || "",
           }),
         })
+        const descResult = await descRes.json()
+        console.log("[v0] saveEditedRule - descricao API result:", descResult)
       }
 
       await mutateRules()
