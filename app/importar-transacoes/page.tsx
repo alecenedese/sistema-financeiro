@@ -214,34 +214,37 @@ async function fetchDespesasFixas(): Promise<DespesaFixaRow[]> {
 async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   const supabase = createClient()
 
-  // Busca todos os campos incluindo descricao
+  // Busca via view que inclui descricao (contorna cache do PostgREST)
   let query = supabase
-    .from("mapping_rules")
-    .select(`
-      id,
-      keyword,
-      categoria_id,
-      subcategoria_id,
-      subcategoria_filho_id,
-      fornecedor_id,
-      cliente_id,
-      cliente_fornecedor,
-      descricao,
-      substituir_descricao,
-      forma_pagamento,
-      tenant_id,
-      categorias(nome),
-      subcategorias(nome),
-      subcategorias_filhos(nome),
-      fornecedores(nome),
-      clientes(nome)
-    `)
+    .from("mapping_rules_view")
+    .select("*")
     .order("keyword")
 
   if (tid) query = query.eq("tenant_id", tid)
 
   const { data, error } = await query
   if (error) throw error
+
+  // Busca nomes das categorias, fornecedores e clientes
+  const catIds = [...new Set((data || []).map(r => r.categoria_id).filter(Boolean))]
+  const subIds = [...new Set((data || []).map(r => r.subcategoria_id).filter(Boolean))]
+  const filhoIds = [...new Set((data || []).map(r => r.subcategoria_filho_id).filter(Boolean))]
+  const fornIds = [...new Set((data || []).map(r => r.fornecedor_id).filter(Boolean))]
+  const cliIds = [...new Set((data || []).map(r => r.cliente_id).filter(Boolean))]
+
+  const [catsRes, subsRes, filhosRes, fornsRes, clisRes] = await Promise.all([
+    catIds.length > 0 ? supabase.from("categorias").select("id,nome").in("id", catIds) : { data: [] },
+    subIds.length > 0 ? supabase.from("subcategorias").select("id,nome").in("id", subIds) : { data: [] },
+    filhoIds.length > 0 ? supabase.from("subcategorias_filhos").select("id,nome").in("id", filhoIds) : { data: [] },
+    fornIds.length > 0 ? supabase.from("fornecedores").select("id,nome").in("id", fornIds) : { data: [] },
+    cliIds.length > 0 ? supabase.from("clientes").select("id,nome").in("id", cliIds) : { data: [] },
+  ])
+
+  const catMap = new Map((catsRes.data || []).map(c => [c.id, c.nome]))
+  const subMap = new Map((subsRes.data || []).map(s => [s.id, s.nome]))
+  const filhoMap = new Map((filhosRes.data || []).map(f => [f.id, f.nome]))
+  const fornMap = new Map((fornsRes.data || []).map(f => [f.id, f.nome]))
+  const cliMap = new Map((clisRes.data || []).map(c => [c.id, c.nome]))
 
   return (data || []).map((row: Record<string, unknown>) => ({
     id: row.id as number,
@@ -255,11 +258,11 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
     descricao: (row.descricao as string) || "",
     substituir_descricao: (row.substituir_descricao as boolean) || false,
     forma_pagamento: (row.forma_pagamento as string) || "",
-    categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
-    subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
-    filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
-    fornecedor_nome: (row.fornecedores as Record<string, string> | null)?.nome || "",
-    cliente_nome: (row.clientes as Record<string, string> | null)?.nome || "",
+    categoria_nome: catMap.get(row.categoria_id as number) || "",
+    subcategoria_nome: subMap.get(row.subcategoria_id as number) || "",
+    filho_nome: filhoMap.get(row.subcategoria_filho_id as number) || "",
+    fornecedor_nome: fornMap.get(row.fornecedor_id as number) || "",
+    cliente_nome: cliMap.get(row.cliente_id as number) || "",
   }))
 }
 
@@ -861,9 +864,9 @@ export default function ImportarTransacoesPage() {
     if (newRuleInserts.length > 0) {
       const supabase = createClient()
       for (const rule of newRuleInserts) {
-        // Salva todos os campos incluindo descricao
+        // Usa mapping_rules_view para contornar o cache do PostgREST
         await supabase
-          .from("mapping_rules")
+          .from("mapping_rules_view")
           .insert({
             keyword: rule.keyword,
             categoria_id: rule.categoria_id || null,
@@ -1124,12 +1127,12 @@ export default function ImportarTransacoesPage() {
 
     try {
       if (editingRule.id === 0 || !editingRule.id) {
-        // INSERT via Supabase client
-        const { error } = await supabase.from("mapping_rules").insert(fullData)
+        // INSERT via view (contorna cache do PostgREST)
+        const { error } = await supabase.from("mapping_rules_view").insert(fullData)
         if (error) throw error
       } else {
-        // UPDATE via Supabase client
-        const { error } = await supabase.from("mapping_rules").update(fullData).eq("id", editingRule.id)
+        // UPDATE via view (contorna cache do PostgREST)
+        const { error } = await supabase.from("mapping_rules_view").update(fullData).eq("id", editingRule.id)
         if (error) throw error
       }
 
