@@ -139,8 +139,9 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
         </p>
       )}
 
-      <div className="flex flex-col items-center gap-6 xl:flex-row xl:items-center">
-        <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <div className="flex flex-col gap-6 lg:flex-row lg:items-start">
+        {/* Grafico de rosca - fixo na esquerda */}
+        <div className="relative shrink-0 self-center lg:self-start" style={{ width: size, height: size }}>
           <PieChart width={size} height={size}>
             <Pie
               data={displayData}
@@ -171,39 +172,44 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
           </div>
         </div>
 
-        <div className="flex flex-1 flex-col gap-2 min-w-0 w-full">
-          {displayData.map((item, idx) => {
-            const pct = displayTotal > 0 ? (item.value / displayTotal) * 100 : 0
-            return (
-              <button
-                key={item.name}
-                type="button"
-                onClick={() => { if (!drillCategory && coloredExpenses[idx]?.subcategorias?.length) { setDrillCategory(coloredExpenses[idx]); setActiveIndex(undefined) } }}
-                onMouseEnter={() => { if (!drillCategory) setActiveIndex(idx) }}
-                onMouseLeave={() => { if (!drillCategory) setActiveIndex(undefined) }}
-                className={`group flex items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
-                  !drillCategory ? "hover:bg-muted cursor-pointer" : "cursor-default"
-                } ${activeIndex === idx && !drillCategory ? "bg-muted" : ""}`}
-              >
-                <div className="h-6 w-20 overflow-hidden rounded-full bg-muted">
-                  <div
-                    className="h-full rounded-full transition-all duration-300"
-                    style={{ width: `${pct}%`, backgroundColor: item.color }}
-                  />
-                </div>
-                <span className="flex-1 text-sm text-card-foreground">
-                  {item.name}: {fmt(item.value)}
-                </span>
-                <span className="text-sm text-muted-foreground">-</span>
-                <span className="w-16 text-right text-sm text-muted-foreground">{pct.toFixed(2)}%</span>
-              </button>
-            )
-          })}
+        {/* Lista de categorias - com scroll */}
+        <div className="flex flex-1 flex-col min-w-0 w-full">
+          <div className="max-h-80 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent">
+            <div className="flex flex-col gap-2">
+              {displayData.map((item, idx) => {
+                const pct = displayTotal > 0 ? (item.value / displayTotal) * 100 : 0
+                return (
+                  <button
+                    key={item.name}
+                    type="button"
+                    onClick={() => { if (!drillCategory && coloredExpenses[idx]?.subcategorias?.length) { setDrillCategory(coloredExpenses[idx]); setActiveIndex(undefined) } }}
+                    onMouseEnter={() => { if (!drillCategory) setActiveIndex(idx) }}
+                    onMouseLeave={() => { if (!drillCategory) setActiveIndex(undefined) }}
+                    className={`group flex items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
+                      !drillCategory ? "hover:bg-muted cursor-pointer" : "cursor-default"
+                    } ${activeIndex === idx && !drillCategory ? "bg-muted" : ""}`}
+                  >
+                    <div className="h-6 w-20 shrink-0 overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full transition-all duration-300"
+                        style={{ width: `${pct}%`, backgroundColor: item.color }}
+                      />
+                    </div>
+                    <span className="flex-1 truncate text-sm text-card-foreground">
+                      {item.name}: {fmt(item.value)}
+                    </span>
+                    <span className="text-sm text-muted-foreground">-</span>
+                    <span className="w-16 shrink-0 text-right text-sm text-muted-foreground">{pct.toFixed(2)}%</span>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
           {drillCategory && (
             <button
               type="button"
               onClick={handleBack}
-              className="mt-2 flex items-center gap-1 text-xs font-medium text-primary hover:underline"
+              className="mt-3 flex items-center gap-1 text-xs font-medium text-primary hover:underline"
             >
               <ArrowLeft className="h-3 w-3" />
               Voltar para todas as categorias
