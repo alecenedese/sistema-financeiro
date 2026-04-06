@@ -16,27 +16,33 @@ export async function GET(request: NextRequest) {
   console.log("[v0] API dashboard-data - from:", from, "to:", to)
 
   try {
-    // Busca contas a receber
+    // Busca contas a receber - tenta por vencimento primeiro
     let qReceber = supabase
       .from("contas_receber")
-      .select("id, valor, status, vencimento, categoria_id, categorias(nome)")
-      .gte("vencimento", from)
-      .lte("vencimento", to)
-    
-    if (tenantId) {
-      qReceber = qReceber.eq("tenant_id", tenantId)
-    }
+      .select("id, valor, status, vencimento, data_vencimento, categoria_id, categorias(nome)")
+    if (tenantId) qReceber = qReceber.eq("tenant_id", tenantId)
+
+    // Busca contas a receber por data_vencimento também
+    let qReceberDataVenc = supabase
+      .from("contas_receber")
+      .select("id, valor, status, vencimento, data_vencimento, categoria_id, categorias(nome)")
+      .gte("data_vencimento", from)
+      .lte("data_vencimento", to)
+    if (tenantId) qReceberDataVenc = qReceberDataVenc.eq("tenant_id", tenantId)
 
     // Busca contas a pagar
     let qPagar = supabase
       .from("contas_pagar")
-      .select("id, valor, status, vencimento, categoria_id, categorias(nome)")
-      .gte("vencimento", from)
-      .lte("vencimento", to)
-    
-    if (tenantId) {
-      qPagar = qPagar.eq("tenant_id", tenantId)
-    }
+      .select("id, valor, status, vencimento, data_vencimento, categoria_id, categorias(nome)")
+    if (tenantId) qPagar = qPagar.eq("tenant_id", tenantId)
+
+    // Busca contas a pagar por data_vencimento também
+    let qPagarDataVenc = supabase
+      .from("contas_pagar")
+      .select("id, valor, status, vencimento, data_vencimento, categoria_id, categorias(nome)")
+      .gte("data_vencimento", from)
+      .lte("data_vencimento", to)
+    if (tenantId) qPagarDataVenc = qPagarDataVenc.eq("tenant_id", tenantId)
 
     // Busca saldo das contas
     let qContas = supabase.from("contas_bancarias").select("id, nome, saldo")
@@ -66,18 +72,26 @@ export async function GET(request: NextRequest) {
       .lte("data", to)
     if (tenantId) qLancamentos = qLancamentos.eq("tenant_id", tenantId)
 
-    const [receberResult, pagarResult, contasResult, capResult, carResult, lancResult] = await Promise.all([
+    const [receberResult, receberDataVencResult, pagarResult, pagarDataVencResult, contasResult, capResult, carResult, lancResult] = await Promise.all([
       qReceber,
+      qReceberDataVenc,
       qPagar,
+      qPagarDataVenc,
       qContas,
       qContasAPagar,
       qContasAReceber,
       qLancamentos,
     ])
 
-    console.log("[v0] API dashboard-data - VERIFICANDO TODAS AS TABELAS:")
-    console.log("[v0] contas_receber:", receberResult.data?.length ?? 0, "error:", receberResult.error?.message ?? "none")
-    console.log("[v0] contas_pagar:", pagarResult.data?.length ?? 0, "error:", pagarResult.error?.message ?? "none")
+    // Log de todos os registros sem filtro de data para debug
+    console.log("[v0] API dashboard-data - TOTAL SEM FILTRO DE DATA:")
+    console.log("[v0] contas_receber (all):", receberResult.data?.length ?? 0)
+    console.log("[v0] contas_pagar (all):", pagarResult.data?.length ?? 0)
+    
+    // Log com filtro por data_vencimento
+    console.log("[v0] API dashboard-data - FILTRADO POR DATA_VENCIMENTO:")
+    console.log("[v0] contas_receber (data_vencimento):", receberDataVencResult.data?.length ?? 0, "error:", receberDataVencResult.error?.message ?? "none")
+    console.log("[v0] contas_pagar (data_vencimento):", pagarDataVencResult.data?.length ?? 0, "error:", pagarDataVencResult.error?.message ?? "none")
     console.log("[v0] contas_bancarias:", contasResult.data?.length ?? 0, "error:", contasResult.error?.message ?? "none")
     console.log("[v0] contas_a_pagar:", capResult.data?.length ?? 0, "error:", capResult.error?.message ?? "none")
     console.log("[v0] contas_a_receber:", carResult.data?.length ?? 0, "error:", carResult.error?.message ?? "none")
@@ -93,16 +107,44 @@ export async function GET(request: NextRequest) {
       console.log("[v0] Exemplo lancamentos:", JSON.stringify(lancResult.data.slice(0, 2)))
     }
 
+    // Mostra exemplos de registros para debug
     if (receberResult.data?.length) {
-      console.log("[v0] API dashboard-data - sample receber:", JSON.stringify(receberResult.data.slice(0, 2)))
+      console.log("[v0] Sample receber (all):", JSON.stringify(receberResult.data.slice(0, 2)))
+    }
+    if (receberDataVencResult.data?.length) {
+      console.log("[v0] Sample receber (data_vencimento filtered):", JSON.stringify(receberDataVencResult.data.slice(0, 2)))
     }
     if (pagarResult.data?.length) {
-      console.log("[v0] API dashboard-data - sample pagar:", JSON.stringify(pagarResult.data.slice(0, 2)))
+      console.log("[v0] Sample pagar (all):", JSON.stringify(pagarResult.data.slice(0, 2)))
+    }
+    if (pagarDataVencResult.data?.length) {
+      console.log("[v0] Sample pagar (data_vencimento filtered):", JSON.stringify(pagarDataVencResult.data.slice(0, 2)))
     }
 
-    const receber = receberResult.data || []
-    const pagar = pagarResult.data || []
+    // Usa dados filtrados por data_vencimento (que parece ser o campo correto)
+    // Se não houver, tenta filtrar por vencimento localmente
+    let receber = receberDataVencResult.data || []
+    let pagar = pagarDataVencResult.data || []
+    
+    // Se não encontrou por data_vencimento, filtra localmente por vencimento
+    if (receber.length === 0 && receberResult.data?.length) {
+      receber = receberResult.data.filter(r => {
+        const venc = r.vencimento || r.data_vencimento
+        return venc && venc >= from && venc <= to
+      })
+      console.log("[v0] Filtered receber by vencimento locally:", receber.length)
+    }
+    if (pagar.length === 0 && pagarResult.data?.length) {
+      pagar = pagarResult.data.filter(p => {
+        const venc = p.vencimento || p.data_vencimento
+        return venc && venc >= from && venc <= to
+      })
+      console.log("[v0] Filtered pagar by vencimento locally:", pagar.length)
+    }
+
     const contas = contasResult.data || []
+    
+    console.log("[v0] FINAL - receber:", receber.length, "pagar:", pagar.length)
 
     // Calcula metricas
     const faturamento = receber.reduce((acc, r) => acc + Number(r.valor), 0)
@@ -129,16 +171,22 @@ export async function GET(request: NextRequest) {
       despesasPorCategoria[cat] = (despesasPorCategoria[cat] || 0) + Number(p.valor)
     }
 
-    // Fluxo de caixa diario
+    // Fluxo de caixa diario - usa vencimento ou data_vencimento
     const daysInMonth = new Date(year, month, 0).getDate()
     const fluxoCaixaDiario: { dia: number; valor: number }[] = []
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`
       const recDia = receber
-        .filter(r => r.vencimento === dateStr && (r.status === "recebido" || r.status === "confirmado"))
+        .filter(r => {
+          const venc = r.vencimento || r.data_vencimento
+          return venc === dateStr && (r.status === "recebido" || r.status === "confirmado")
+        })
         .reduce((acc, r) => acc + Number(r.valor), 0)
       const pagDia = pagar
-        .filter(r => r.vencimento === dateStr && (r.status === "pago" || r.status === "confirmado"))
+        .filter(r => {
+          const venc = r.vencimento || r.data_vencimento
+          return venc === dateStr && (r.status === "pago" || r.status === "confirmado")
+        })
         .reduce((acc, r) => acc + Number(r.valor), 0)
       fluxoCaixaDiario.push({ dia: d, valor: recDia - pagDia })
     }
@@ -148,7 +196,10 @@ export async function GET(request: NextRequest) {
     for (let d = 1; d <= daysInMonth; d++) {
       const dateStr = `${year}-${String(month).padStart(2, "0")}-${String(d).padStart(2, "0")}`
       const vendasDia = receber
-        .filter(r => r.vencimento === dateStr)
+        .filter(r => {
+          const venc = r.vencimento || r.data_vencimento
+          return venc === dateStr
+        })
         .reduce((acc, r) => acc + Number(r.valor), 0)
       fluxoVendasDiario.push({ dia: d, valor: vendasDia })
     }
