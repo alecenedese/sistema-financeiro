@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { PieChart, Pie, Cell, Tooltip, Sector } from "recharts"
 import { ArrowLeft, PieChartIcon } from "lucide-react"
-import { useCategoryCharts, fmt, type CategoryPoint } from "@/hooks/use-dashboard-data"
+import { useCategoryChartsMonth, fmt, type CategoryPoint } from "@/hooks/use-dashboard-data"
 
 function CustomTooltip({
   active,
@@ -42,8 +42,13 @@ function renderActiveShape(props: Record<string, unknown>) {
 
 const COLORS = ["#1B4B8A", "#2196F3", "#4FC3F7", "#81D4FA", "#B3E5FC"]
 
-export function DespesasPorCategoria() {
-  const { data, isLoading } = useCategoryCharts()
+interface DespesasPorCategoriaProps {
+  month: number
+  year: number
+}
+
+export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps) {
+  const { data, isLoading } = useCategoryChartsMonth(month, year)
   const [drillCategory, setDrillCategory] = useState<CategoryPoint | null>(null)
   const [activeIndex, setActiveIndex] = useState<number | undefined>(undefined)
 

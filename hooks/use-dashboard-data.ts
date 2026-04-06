@@ -310,6 +310,67 @@ export function useCategoryCharts() {
   return useSWR(key, fetchCategoryCharts, { revalidateOnFocus: false })
 }
 
+// Versão com mês/ano específico para o novo dashboard
+async function fetchCategoryChartsMonth([, tid, month, year]: [string, number | null, number, number]): Promise<{ expenses: CategoryPoint[]; incomes: CategoryPoint[] }> {
+  const supabase = createClient()
+  const from = `${year}-${String(month).padStart(2, "0")}-01`
+  const to = `${year}-${String(month).padStart(2, "0")}-31`
+
+  let qP = supabase
+    .from("contas_pagar")
+    .select("valor, categoria_id, categorias(nome), subcategorias(nome)")
+    .gte("vencimento", from).lte("vencimento", to)
+  let qR = supabase
+    .from("contas_receber")
+    .select("valor, categoria_id, categorias(nome), subcategorias(nome)")
+    .gte("vencimento", from).lte("vencimento", to)
+
+  if (tid) { qP = qP.eq("tenant_id", tid); qR = qR.eq("tenant_id", tid) }
+
+  const [{ data: pagar }, { data: receber }] = await Promise.all([qP, qR])
+
+  type Map = Record<string, { value: number; subs: Record<string, number> }>
+
+  function buildMap(rows: typeof pagar): Map {
+    const map: Map = {}
+    for (const r of (rows || [])) {
+      const cat = (r.categorias as { nome: string } | null)?.nome || "Sem categoria"
+      const sub = (r.subcategorias as { nome: string } | null)?.nome || "Geral"
+      const v = Number(r.valor)
+      if (!map[cat]) map[cat] = { value: 0, subs: {} }
+      map[cat].value += v
+      map[cat].subs[sub] = (map[cat].subs[sub] || 0) + v
+    }
+    return map
+  }
+
+  function toPoints(map: Map): CategoryPoint[] {
+    return Object.entries(map)
+      .sort((a, b) => b[1].value - a[1].value)
+      .map(([name, { value, subs }], i) => ({
+        name, value,
+        color: colorForIndex(i),
+        subcategorias: Object.entries(subs)
+          .sort((a, b) => b[1] - a[1])
+          .map(([sName, sVal], j) => ({
+            name: sName, value: sVal, color: colorForIndex(i + j + 1),
+          })),
+      }))
+  }
+
+  return {
+    expenses: toPoints(buildMap(pagar)),
+    incomes: toPoints(buildMap(receber)),
+  }
+}
+
+export function useCategoryChartsMonth(month: number, year: number) {
+  const { tenant } = useTenant()
+  console.log("[v0] useCategoryChartsMonth - tenant:", tenant?.id, "month:", month, "year:", year)
+  const key = ["dashboard-category-charts-month", tenant?.id ?? null, month, year] as [string, number | null, number, number]
+  return useSWR(key, fetchCategoryChartsMonth, { revalidateOnFocus: false })
+}
+
 // ─── Dashboard Mensal ─────────────────────────────────────────────────────────
 
 export interface DashboardMensalData {
@@ -406,8 +467,6 @@ async function fetchFluxoCaixaDiario([, tid, month, year]: [string, number | nul
   const from = `${year}-${String(month).padStart(2, "0")}-01`
   const to = `${year}-${String(month).padStart(2, "0")}-31`
 
-  console.log("[v0] fetchFluxoCaixaDiario - tid:", tid, "month:", month, "year:", year, "from:", from, "to:", to)
-
   // Recebimentos por dia - busca todos os status para ter dados
   let qRec = supabase
     .from("contas_receber")
@@ -424,9 +483,7 @@ async function fetchFluxoCaixaDiario([, tid, month, year]: [string, number | nul
     .lte("vencimento", to)
   if (tid) qPag = qPag.eq("tenant_id", tid)
 
-  const [{ data: recData, error: recError }, { data: pagData, error: pagError }] = await Promise.all([qRec, qPag])
-  
-  console.log("[v0] fetchFluxoCaixaDiario - recData:", recData?.length, "pagData:", pagData?.length, "recError:", recError, "pagError:", pagError)
+  const [{ data: recData }, { data: pagData }] = await Promise.all([qRec, qPag])
 
   // Mapeia por dia
   const daysInMonth = new Date(year, month, 0).getDate()
@@ -454,6 +511,7 @@ async function fetchFluxoCaixaDiario([, tid, month, year]: [string, number | nul
 
 export function useFluxoCaixaDiario(month: number, year: number) {
   const { tenant } = useTenant()
+  console.log("[v0] useFluxoCaixaDiario - tenant:", tenant?.id, "month:", month, "year:", year)
   const key = ["fluxo-caixa-diario", tenant?.id ?? null, month, year] as [string, number | null, number, number]
   return useSWR(key, fetchFluxoCaixaDiario, { revalidateOnFocus: false })
 }

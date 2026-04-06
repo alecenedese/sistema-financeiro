@@ -141,6 +141,9 @@ export default function Page() {
     setSelectedYear(year)
   }
 
+  // Debug - verificar se tenant está setado
+  console.log("[v0] Page - tenant:", tenant, "selectedMonth:", selectedMonth, "selectedYear:", selectedYear)
+
   return (
     <div className="flex min-h-screen bg-[#E8EDF2]">
       <AppSidebar />
@@ -160,7 +163,7 @@ export default function Page() {
             />
 
             {/* 2. Despesas por Categoria */}
-            <DespesasPorCategoria />
+            <DespesasPorCategoria month={selectedMonth} year={selectedYear} />
 
             {/* 3. Fluxo de Caixa Diario */}
             <FluxoCaixaDiario month={selectedMonth} year={selectedYear} />
@@ -196,26 +199,32 @@ function DashboardMensalWithCallback({
   initialMonth: number
   initialYear: number
 }) {
+  const { tenant } = useTenant()
   const [selectedMonth, setSelectedMonth] = useState(initialMonth - 1) // 0-indexed
   const [selectedYear, setSelectedYear] = useState(initialYear)
   const [showMonthDropdown, setShowMonthDropdown] = useState(false)
   const [showYearDropdown, setShowYearDropdown] = useState(false)
 
   const { data, isLoading } = useSWR(
-    ["dashboard-mensal-wrapper", selectedMonth + 1, selectedYear],
-    async () => {
+    ["dashboard-mensal-wrapper", tenant?.id ?? null, selectedMonth + 1, selectedYear],
+    async ([, tid, month, year]) => {
       // Importa dinamicamente para evitar dependencia circular
       const { createClient } = await import("@/lib/supabase/client")
       const supabase = createClient()
-      const month = selectedMonth + 1
-      const from = `${selectedYear}-${String(month).padStart(2, "0")}-01`
-      const to = `${selectedYear}-${String(month).padStart(2, "0")}-31`
+      const from = `${year}-${String(month).padStart(2, "0")}-01`
+      const to = `${year}-${String(month).padStart(2, "0")}-31`
 
-      const [{ data: receber }, { data: pagar }, { data: contas }] = await Promise.all([
-        supabase.from("contas_receber").select("valor, status").gte("vencimento", from).lte("vencimento", to),
-        supabase.from("contas_pagar").select("valor, status").gte("vencimento", from).lte("vencimento", to),
-        supabase.from("contas_bancarias").select("saldo"),
-      ])
+      let qReceber = supabase.from("contas_receber").select("valor, status").gte("vencimento", from).lte("vencimento", to)
+      let qPagar = supabase.from("contas_pagar").select("valor, status").gte("vencimento", from).lte("vencimento", to)
+      let qContas = supabase.from("contas_bancarias").select("saldo")
+
+      if (tid) {
+        qReceber = qReceber.eq("tenant_id", tid)
+        qPagar = qPagar.eq("tenant_id", tid)
+        qContas = qContas.eq("tenant_id", tid)
+      }
+
+      const [{ data: receber }, { data: pagar }, { data: contas }] = await Promise.all([qReceber, qPagar, qContas])
 
       const faturamento = (receber || []).reduce((acc, r) => acc + Number(r.valor), 0)
       const recebimentos = (receber || []).filter(r => r.status === "recebido" || r.status === "confirmado").reduce((acc, r) => acc + Number(r.valor), 0)
