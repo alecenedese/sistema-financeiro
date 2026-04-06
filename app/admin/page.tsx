@@ -16,6 +16,9 @@ import {
   LogIn,
   RefreshCw,
   X,
+  Link2,
+  Copy,
+  Check,
 } from "lucide-react"
 import { useState, useCallback } from "react"
 import { useRouter } from "next/navigation"
@@ -105,9 +108,38 @@ export default function AdminPage() {
   const router = useRouter()
   const { tenant, setTenant, clearTenant } = useTenant()
 
+  const [copiedId, setCopiedId] = useState<number | null>(null)
+
   function acessarCliente(item: Cliente) {
     setTenant({ id: item.id, nome: item.nome, cnpj: item.cnpj })
     router.push("/")
+  }
+
+  function generateDashboardLink(clienteId: number): string {
+    // Gera token base64 do ID do cliente
+    const token = btoa(`tenant:${clienteId}`)
+    // URL de produção
+    const baseUrl = typeof window !== "undefined" ? window.location.origin : "https://sistema-financeiro.vercel.app"
+    return `${baseUrl}/dashboard/${token}`
+  }
+
+  async function copyDashboardLink(item: Cliente) {
+    const link = generateDashboardLink(item.id)
+    try {
+      await navigator.clipboard.writeText(link)
+      setCopiedId(item.id)
+      setTimeout(() => setCopiedId(null), 2000)
+    } catch {
+      // Fallback para navegadores antigos
+      const textarea = document.createElement("textarea")
+      textarea.value = link
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand("copy")
+      document.body.removeChild(textarea)
+      setCopiedId(item.id)
+      setTimeout(() => setCopiedId(null), 2000)
+    }
   }
 
   const filtered = clientes
@@ -356,11 +388,19 @@ export default function AdminPage() {
                       >
                         <LogIn className="h-3.5 w-3.5" />
                         {tenant?.id === item.id ? "Ativo" : "Acessar"}
-                      </button>
-                      <button type="button" onClick={() => openEdit(item)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground opacity-0 group-hover:opacity-100">
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button type="button" onClick={() => setDeleteConfirm(item)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive opacity-0 group-hover:opacity-100">
+  </button>
+  <button 
+    type="button" 
+    onClick={() => copyDashboardLink(item)} 
+    title="Copiar link da dashboard"
+    className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground opacity-0 group-hover:opacity-100"
+  >
+    {copiedId === item.id ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Link2 className="h-3.5 w-3.5" />}
+  </button>
+  <button type="button" onClick={() => openEdit(item)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground opacity-0 group-hover:opacity-100">
+  <Pencil className="h-3.5 w-3.5" />
+  </button>
+  <button type="button" onClick={() => setDeleteConfirm(item)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive opacity-0 group-hover:opacity-100">
                         <Trash2 className="h-3.5 w-3.5" />
                       </button>
                     </div>

@@ -235,7 +235,7 @@ function DashboardMensalWithCallback({
   const fmt = (v: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v)
 
   const cards = [
-    { label: "Vendas", value: data?.faturamento ?? 0 },
+    { label: "Vendas", value: data?.totalVendas ?? 0 },
     { label: "Pagamentos", value: data?.pagamentos ?? 0 },
     { label: "Lucro Bruto", value: data?.lucroBruto ?? 0 },
     { label: "% Lucro Bruto", value: data?.percLucroBruto ?? 0, isPercent: true },
