@@ -11,9 +11,11 @@ export async function GET(request: NextRequest) {
 
   const supabase = await createClient()
   const from = `${year}-${String(month).padStart(2, "0")}-01`
-  const to = `${year}-${String(month).padStart(2, "0")}-31`
+  // Calcula o ultimo dia do mes corretamente (new Date(year, month, 0) retorna o ultimo dia do mes anterior)
+  const lastDay = new Date(year, month, 0).getDate()
+  const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
 
-  console.log("[v0] API dashboard-data - from:", from, "to:", to)
+  console.log("[v0] API dashboard-data - from:", from, "to:", to, "lastDay:", lastDay)
 
   try {
     // Busca contas a receber - tenta por vencimento primeiro

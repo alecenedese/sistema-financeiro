@@ -314,7 +314,8 @@ export function useCategoryCharts() {
 async function fetchCategoryChartsMonth([, tid, month, year]: [string, number | null, number, number]): Promise<{ expenses: CategoryPoint[]; incomes: CategoryPoint[] }> {
   const supabase = createClient()
   const from = `${year}-${String(month).padStart(2, "0")}-01`
-  const to = `${year}-${String(month).padStart(2, "0")}-31`
+  const lastDay = new Date(year, month, 0).getDate()
+  const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
 
   let qP = supabase
     .from("contas_pagar")
@@ -387,7 +388,8 @@ export interface DashboardMensalData {
 async function fetchDashboardMensal([, tid, month, year]: [string, number | null, number, number]): Promise<DashboardMensalData> {
   const supabase = createClient()
   const from = `${year}-${String(month).padStart(2, "0")}-01`
-  const to = `${year}-${String(month).padStart(2, "0")}-31`
+  const lastDay = new Date(year, month, 0).getDate()
+  const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
 
   // Faturamento (vendas - contas a receber com status confirmado/recebido)
   let qFat = supabase
@@ -465,7 +467,8 @@ export interface FluxoCaixaDiarioPoint {
 async function fetchFluxoCaixaDiario([, tid, month, year]: [string, number | null, number, number]): Promise<FluxoCaixaDiarioPoint[]> {
   const supabase = createClient()
   const from = `${year}-${String(month).padStart(2, "0")}-01`
-  const to = `${year}-${String(month).padStart(2, "0")}-31`
+  const lastDay = new Date(year, month, 0).getDate()
+  const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
 
   // Recebimentos por dia - busca todos os status para ter dados
   let qRec = supabase
@@ -525,7 +528,8 @@ export interface FluxoVendasDiarioPoint {
 async function fetchFluxoVendasDiario([, tid, month, year]: [string, number | null, number, number]): Promise<FluxoVendasDiarioPoint[]> {
   const supabase = createClient()
   const from = `${year}-${String(month).padStart(2, "0")}-01`
-  const to = `${year}-${String(month).padStart(2, "0")}-31`
+  const lastDay = new Date(year, month, 0).getDate()
+  const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
 
   let qRec = supabase
     .from("contas_receber")
@@ -579,7 +583,8 @@ export interface DREData {
 async function fetchDRE([, tid, month, year]: [string, number | null, number, number]): Promise<DREData> {
   const supabase = createClient()
   const from = `${year}-${String(month).padStart(2, "0")}-01`
-  const to = `${year}-${String(month).padStart(2, "0")}-31`
+  const lastDay = new Date(year, month, 0).getDate()
+  const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
 
   // Busca contas a receber com categoria e grupo DRE
   let qRec = supabase
