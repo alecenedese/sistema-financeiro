@@ -8,7 +8,7 @@ import { FluxoCaixaDiario } from "@/components/dashboard/fluxo-caixa-diario"
 import { FluxoVendasDiario } from "@/components/dashboard/fluxo-vendas-diario"
 import { RecentTransactions } from "@/components/dashboard/recent-transactions"
 import { AccountsCard } from "@/components/dashboard/accounts-card"
-import { CategoryCharts } from "@/components/dashboard/category-charts"
+import { DespesasPorCategoria } from "@/components/dashboard/despesas-categoria"
 import { LucroCharts } from "@/components/dashboard/lucro-charts"
 import { DRECard } from "@/components/dashboard/dre-card"
 import { useTenant } from "@/hooks/use-tenant"
@@ -152,32 +152,32 @@ export default function Page() {
       <div className="ml-[72px] flex flex-1 flex-col">
         <main className="flex-1 overflow-y-auto p-6">
           <div className="mx-auto max-w-7xl space-y-6">
-            {/* Dashboard Mensal - Cards de metricas */}
+            {/* 1. Dashboard Mensal - Cards de metricas */}
             <DashboardMensalWithCallback
               onPeriodChange={handlePeriodChange}
               initialMonth={selectedMonth}
               initialYear={selectedYear}
             />
 
-            {/* Fluxo de Caixa Diario */}
+            {/* 2. Despesas por Categoria */}
+            <DespesasPorCategoria />
+
+            {/* 3. Fluxo de Caixa Diario */}
             <FluxoCaixaDiario month={selectedMonth} year={selectedYear} />
 
-            {/* Transacoes Recentes + Contas Bancarias */}
+            {/* 4. Transacoes Recentes + Contas Bancarias */}
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
               <RecentTransactions />
               <AccountsCard />
             </div>
 
-            {/* Despesas por Categoria (apenas despesas conforme print) */}
-            <CategoryCharts />
-
-            {/* DRE */}
+            {/* 5. DRE */}
             <DRECard month={selectedMonth} year={selectedYear} />
 
-            {/* Lucro Bruto + Lucro Liquido */}
+            {/* 6. Lucro Bruto + Lucro Liquido */}
             <LucroCharts month={selectedMonth} year={selectedYear} />
 
-            {/* Fluxo de Vendas Diario */}
+            {/* 7. Fluxo de Vendas Diario */}
             <FluxoVendasDiario month={selectedMonth} year={selectedYear} />
           </div>
         </main>

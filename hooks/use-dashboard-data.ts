@@ -72,8 +72,6 @@ function mesRange(offset = 0) {
 
 type TidKey = [string, number | null]
 
-type TidKey = [string, number | null]
-
 // ─── fetchers ─────────────────────────────────────────────────────────────────
 
 async function fetchSummary([, tid]: TidKey): Promise<SummaryData> {
@@ -408,25 +406,27 @@ async function fetchFluxoCaixaDiario([, tid, month, year]: [string, number | nul
   const from = `${year}-${String(month).padStart(2, "0")}-01`
   const to = `${year}-${String(month).padStart(2, "0")}-31`
 
-  // Recebimentos por dia
+  console.log("[v0] fetchFluxoCaixaDiario - tid:", tid, "month:", month, "year:", year, "from:", from, "to:", to)
+
+  // Recebimentos por dia - busca todos os status para ter dados
   let qRec = supabase
     .from("contas_receber")
-    .select("valor, vencimento")
-    .in("status", ["recebido", "confirmado"])
+    .select("valor, vencimento, status")
     .gte("vencimento", from)
     .lte("vencimento", to)
   if (tid) qRec = qRec.eq("tenant_id", tid)
 
-  // Pagamentos por dia
+  // Pagamentos por dia - busca todos os status para ter dados
   let qPag = supabase
     .from("contas_pagar")
-    .select("valor, vencimento")
-    .in("status", ["pago", "confirmado"])
+    .select("valor, vencimento, status")
     .gte("vencimento", from)
     .lte("vencimento", to)
   if (tid) qPag = qPag.eq("tenant_id", tid)
 
-  const [{ data: recData }, { data: pagData }] = await Promise.all([qRec, qPag])
+  const [{ data: recData, error: recError }, { data: pagData, error: pagError }] = await Promise.all([qRec, qPag])
+  
+  console.log("[v0] fetchFluxoCaixaDiario - recData:", recData?.length, "pagData:", pagData?.length, "recError:", recError, "pagError:", pagError)
 
   // Mapeia por dia
   const daysInMonth = new Date(year, month, 0).getDate()
@@ -458,7 +458,7 @@ export function useFluxoCaixaDiario(month: number, year: number) {
   return useSWR(key, fetchFluxoCaixaDiario, { revalidateOnFocus: false })
 }
 
-// ─── Fluxo de Vendas Diário ───────────────────────────────────────────────────
+// ─── Fluxo de Vendas Diário ────────────────────────��──────────────────────────
 
 export interface FluxoVendasDiarioPoint {
   dia: number
