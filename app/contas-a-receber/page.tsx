@@ -8,7 +8,7 @@ import { createClient } from "@/lib/supabase/client"
 import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
-import { FileUp, Plus, TrendingUp, Clock, CheckCircle2, AlertTriangle, Pencil, Trash2, Loader2, Search, X, ChevronDown, Calendar, ChevronLeft, ChevronRight } from "lucide-react"
+import { FileUp, Plus, TrendingUp, Clock, CheckCircle2, AlertTriangle, Pencil, Trash2, Loader2, Search, X, ChevronDown, Calendar, ChevronLeft, ChevronRight, Download } from "lucide-react"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
@@ -19,6 +19,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { handleCurrencyInput, parseBRL, formatBRL } from "@/lib/currency-input"
+import { exportToExcel, formatters } from "@/lib/export-excel"
 
 interface CategoriaRow { id: number; nome: string; tipo: string }
 interface SubcategoriaRow { id: number; nome: string; categoria_id: number }
@@ -402,6 +403,25 @@ function openEdit(conta: ContaReceber) {
     setSelectedIds(newSet)
   }
 
+  async function handleExportExcel() {
+    const dataToExport = filtered.length > 0 ? filtered : contas
+    await exportToExcel(
+      dataToExport,
+      [
+        { header: "Descrição", key: "descricao", width: 30 },
+        { header: "Cliente", key: "cliente_nome", width: 25 },
+        { header: "Categoria", key: "categoria_nome", width: 20 },
+        { header: "Subcategoria", key: "subcategoria_nome", width: 20 },
+        { header: "Valor", key: "valor", width: 15, format: formatters.currency },
+        { header: "Vencimento", key: "vencimento", width: 12, format: formatters.date },
+        { header: "Status", key: "status", width: 12, format: formatters.status },
+        { header: "Forma Pagamento", key: "forma_pagamento", width: 18 },
+        { header: "Conta Bancária", key: "conta_bancaria_nome", width: 20 },
+      ],
+      `contas-a-receber-${new Date().toISOString().split("T")[0]}`
+    )
+  }
+
   async function handleDeleteMultiple() {
     if (selectedIds.size === 0) return
     setSaving(true)
@@ -442,6 +462,10 @@ function openEdit(conta: ContaReceber) {
                 <button type="button" onClick={openNew}
                   className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
                   <Plus className="h-4 w-4" />Adicionar
+                </button>
+                <button type="button" onClick={handleExportExcel}
+                  className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-card-foreground transition-colors hover:bg-muted">
+                  <Download className="h-4 w-4" />Exportar Excel
                 </button>
                 {selectedIds.size > 0 && (
                   <button type="button" onClick={() => setDeleteMultiConfirm(true)}

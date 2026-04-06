@@ -169,7 +169,7 @@ export default function Page() {
 
             {/* 4. Transacoes Recentes + Contas Bancarias */}
             <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-              <RecentTransactions />
+              <RecentTransactions month={selectedMonth} year={selectedYear} />
               <AccountsCard />
             </div>
 
