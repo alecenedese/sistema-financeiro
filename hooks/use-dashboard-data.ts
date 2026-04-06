@@ -179,6 +179,60 @@ async function fetchRecentTx([, tid]: TidKey): Promise<RecentTx[]> {
     .slice(0, 8)
 }
 
+// Versão com filtro de mês/ano para a dashboard
+async function fetchRecentTxMonth([, tid, month, year]: [string, number | null, number, number]): Promise<RecentTx[]> {
+  const supabase = createClient()
+  const from = `${year}-${String(month).padStart(2, "0")}-01`
+  const lastDay = new Date(year, month, 0).getDate()
+  const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
+
+  let qP = supabase
+    .from("contas_pagar")
+    .select("id, descricao, valor, vencimento, status, categoria_id, categorias(nome)")
+    .gte("vencimento", from)
+    .lte("vencimento", to)
+    .order("vencimento", { ascending: false })
+    .limit(10)
+  if (tid) qP = qP.eq("tenant_id", tid)
+
+  let qR = supabase
+    .from("contas_receber")
+    .select("id, descricao, valor, vencimento, status, categoria_id, categorias(nome)")
+    .gte("vencimento", from)
+    .lte("vencimento", to)
+    .order("vencimento", { ascending: false })
+    .limit(10)
+  if (tid) qR = qR.eq("tenant_id", tid)
+
+  const [{ data: pagar }, { data: receber }] = await Promise.all([qP, qR])
+
+  const toPagar = (pagar || []).map((r) => ({
+    id: `p-${r.id}`,
+    descricao: r.descricao as string,
+    categoria: (r.categorias as { nome: string } | null)?.nome || "—",
+    data: new Date((r.vencimento as string) + "T00:00:00").toLocaleDateString("pt-BR"),
+    valor: Number(r.valor),
+    tipo: "pagar" as const,
+  }))
+
+  const toReceber = (receber || []).map((r) => ({
+    id: `r-${r.id}`,
+    descricao: r.descricao as string,
+    categoria: (r.categorias as { nome: string } | null)?.nome || "—",
+    data: new Date((r.vencimento as string) + "T00:00:00").toLocaleDateString("pt-BR"),
+    valor: Number(r.valor),
+    tipo: "receber" as const,
+  }))
+
+  return [...toPagar, ...toReceber]
+    .sort((a, b) => {
+      const da = new Date(a.data.split("/").reverse().join("-"))
+      const db = new Date(b.data.split("/").reverse().join("-"))
+      return db.getTime() - da.getTime()
+    })
+    .slice(0, 8)
+}
+
 async function fetchAccounts([, tid]: TidKey): Promise<AccountRow[]> {
   const supabase = createClient()
   let q = supabase.from("contas_bancarias").select("id, nome, tipo, saldo").order("nome")
@@ -290,6 +344,12 @@ export function useRecentTx() {
   const { tenant } = useTenant()
   const key: TidKey = ["dashboard-recent-tx", tenant?.id ?? null]
   return useSWR(key, fetchRecentTx, { revalidateOnFocus: false })
+}
+
+export function useRecentTxMonth(month: number, year: number) {
+  const { tenant, mounted } = useTenant()
+  const key = mounted ? ["dashboard-recent-tx-month", tenant?.id ?? null, month, year] as [string, number | null, number, number] : null
+  return useSWR(key, fetchRecentTxMonth, { revalidateOnFocus: false })
 }
 
 export function useAccounts() {

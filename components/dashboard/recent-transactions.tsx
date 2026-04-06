@@ -2,10 +2,15 @@
 
 import { ArrowUpRight, ArrowDownLeft } from "lucide-react"
 import Link from "next/link"
-import { useRecentTx, fmt } from "@/hooks/use-dashboard-data"
+import { useRecentTxMonth } from "@/hooks/use-dashboard-data"
 
-export function RecentTransactions() {
-  const { data: transactions = [], isLoading } = useRecentTx()
+interface RecentTransactionsProps {
+  month: number
+  year: number
+}
+
+export function RecentTransactions({ month, year }: RecentTransactionsProps) {
+  const { data: transactions = [], isLoading } = useRecentTxMonth(month, year)
 
   return (
     <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
