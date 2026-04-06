@@ -205,36 +205,18 @@ function DashboardMensalWithCallback({
   const [showYearDropdown, setShowYearDropdown] = useState(false)
 
   const { data, isLoading } = useSWR(
-    mounted ? ["dashboard-mensal-wrapper", tenant?.id ?? null, selectedMonth + 1, selectedYear] : null,
+    mounted ? ["dashboard-api", tenant?.id ?? null, selectedMonth + 1, selectedYear] : null,
     async ([, tid, month, year]) => {
-      // Importa dinamicamente para evitar dependencia circular
-      const { createClient } = await import("@/lib/supabase/client")
-      const supabase = createClient()
-      const from = `${year}-${String(month).padStart(2, "0")}-01`
-      const to = `${year}-${String(month).padStart(2, "0")}-31`
-
-      let qReceber = supabase.from("contas_receber").select("valor, status").gte("vencimento", from).lte("vencimento", to)
-      let qPagar = supabase.from("contas_pagar").select("valor, status").gte("vencimento", from).lte("vencimento", to)
-      let qContas = supabase.from("contas_bancarias").select("saldo")
-
-      if (tid) {
-        qReceber = qReceber.eq("tenant_id", tid)
-        qPagar = qPagar.eq("tenant_id", tid)
-        qContas = qContas.eq("tenant_id", tid)
-      }
-
-      const [{ data: receber }, { data: pagar }, { data: contas }] = await Promise.all([qReceber, qPagar, qContas])
-
-      const faturamento = (receber || []).reduce((acc, r) => acc + Number(r.valor), 0)
-      const recebimentos = (receber || []).filter(r => r.status === "recebido" || r.status === "confirmado").reduce((acc, r) => acc + Number(r.valor), 0)
-      const pagamentos = (pagar || []).filter(r => r.status === "pago" || r.status === "confirmado").reduce((acc, r) => acc + Number(r.valor), 0)
-      const lucroBruto = faturamento - pagamentos
-      const percLucroBruto = faturamento > 0 ? (lucroBruto / faturamento) * 100 : 0
-      const lucroLiquido = recebimentos - pagamentos
-      const percLucroLiquido = recebimentos > 0 ? (lucroLiquido / recebimentos) * 100 : 0
-      const saldoConta = (contas || []).reduce((acc, c) => acc + Number(c.saldo ?? 0), 0)
-
-      return { faturamento, pagamentos, lucroBruto, percLucroBruto, recebimentos, lucroLiquido, percLucroLiquido, saldoConta }
+      // Usa API route para ter logs no terminal do servidor
+      const params = new URLSearchParams({
+        month: String(month),
+        year: String(year),
+        ...(tid ? { tenantId: String(tid) } : {}),
+      })
+      const res = await fetch(`/api/dashboard-data?${params}`)
+      const json = await res.json()
+      if (!json.success) throw new Error(json.error)
+      return json.data.metricas
     },
     { revalidateOnFocus: false }
   )
