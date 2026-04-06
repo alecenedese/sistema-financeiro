@@ -11,18 +11,28 @@ export async function GET(request: NextRequest) {
 
   try {
     const supabase = await createClient()
+    
+    console.log("[v0] API tenant-info - tenantId:", tenantId)
+    
+    // Usa maybeSingle() para não dar erro se não encontrar
     const { data, error } = await supabase
       .from("tenant_clientes")
       .select("id, nome")
       .eq("id", tenantId)
-      .single()
+      .maybeSingle()
+
+    console.log("[v0] API tenant-info - data:", data, "error:", error)
 
     if (error) {
       console.error("[v0] API tenant-info error:", error)
       return NextResponse.json({ success: false, error: error.message }, { status: 500 })
     }
 
-    return NextResponse.json({ success: true, nome: data?.nome || "" })
+    if (!data) {
+      return NextResponse.json({ success: false, error: "Tenant not found" }, { status: 404 })
+    }
+
+    return NextResponse.json({ success: true, nome: data.nome || "" })
   } catch (error) {
     console.error("[v0] API tenant-info error:", error)
     return NextResponse.json({ success: false, error: String(error) }, { status: 500 })
