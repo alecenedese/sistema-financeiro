@@ -1,5 +1,6 @@
 "use client"
 
+// Dashboard v2.1 - Layout atualizado
 import { useState, useEffect } from "react"
 import { Building2, Search, LogIn, Shield } from "lucide-react"
 import { AppSidebar } from "@/components/app-sidebar"
