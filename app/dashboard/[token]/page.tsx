@@ -7,9 +7,9 @@ import { DespesasPorCategoria } from "@/components/dashboard/despesas-categoria"
 import { FluxoCaixaDiario } from "@/components/dashboard/fluxo-caixa-diario"
 import { AccountsCard } from "@/components/dashboard/accounts-card"
 import { DRECard } from "@/components/dashboard/dre-card"
-import { LucroBrutoDonut } from "@/components/dashboard/lucro-bruto-donut"
-import { LucroLiquidoDonut } from "@/components/dashboard/lucro-liquido-donut"
+import { LucroCharts } from "@/components/dashboard/lucro-charts"
 import { FluxoVendasDiario } from "@/components/dashboard/fluxo-vendas-diario"
+import { RecentTransactions } from "@/components/dashboard/recent-transactions"
 import { ChevronDown, Loader2 } from "lucide-react"
 
 const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro"]
@@ -201,10 +201,7 @@ export default function PublicDashboardPage() {
               <DRECardPublic month={selectedMonth + 1} year={selectedYear} tenantId={tenantId} />
 
               {/* Row 4: Lucro Bruto + Lucro Líquido */}
-              <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-                <LucroBrutoDonutPublic month={selectedMonth + 1} year={selectedYear} tenantId={tenantId} />
-                <LucroLiquidoDonutPublic month={selectedMonth + 1} year={selectedYear} tenantId={tenantId} />
-              </div>
+              <LucroChartsPublic month={selectedMonth + 1} year={selectedYear} tenantId={tenantId} />
 
               {/* Row 5: Fluxo de Vendas */}
               <FluxoVendasDiarioPublic month={selectedMonth + 1} year={selectedYear} tenantId={tenantId} />
@@ -238,12 +235,8 @@ function DRECardPublic({ month, year, tenantId }: { month: number; year: number;
   return <DRECard month={month} year={year} />
 }
 
-function LucroBrutoDonutPublic({ month, year, tenantId }: { month: number; year: number; tenantId: number }) {
-  return <LucroBrutoDonut month={month} year={year} />
-}
-
-function LucroLiquidoDonutPublic({ month, year, tenantId }: { month: number; year: number; tenantId: number }) {
-  return <LucroLiquidoDonut month={month} year={year} />
+function LucroChartsPublic({ month, year, tenantId }: { month: number; year: number; tenantId: number }) {
+  return <LucroCharts month={month} year={year} />
 }
 
 function FluxoVendasDiarioPublic({ month, year, tenantId }: { month: number; year: number; tenantId: number }) {
