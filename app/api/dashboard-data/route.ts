@@ -37,21 +37,35 @@ export async function GET(request: NextRequest) {
     let qContas = supabase.from("contas_bancarias").select("id, nome, saldo")
     if (tenantId) qContas = qContas.eq("tenant_id", tenantId)
 
-    const [receberResult, pagarResult, contasResult] = await Promise.all([
+    // Busca vendas da tabela vendas (valor_total é o total de vendas real)
+    // Usa select("*") porque as colunas podem variar
+    let qVendas = supabase
+      .from("vendas")
+      .select("*")
+      .gte("data_venda", from)
+      .lte("data_venda", to)
+    if (tenantId) qVendas = qVendas.eq("tenant_id", tenantId)
+
+    const [receberResult, pagarResult, contasResult, vendasResult] = await Promise.all([
       qReceber,
       qPagar,
       qContas,
+      qVendas,
     ])
 
     console.log("[v0] contas_receber:", receberResult.data?.length ?? 0, "error:", receberResult.error?.message ?? "none")
     console.log("[v0] contas_pagar:", pagarResult.data?.length ?? 0, "error:", pagarResult.error?.message ?? "none")
     console.log("[v0] contas_bancarias:", contasResult.data?.length ?? 0, "error:", contasResult.error?.message ?? "none")
+    console.log("[v0] vendas:", vendasResult.data?.length ?? 0, "error:", vendasResult.error?.message ?? "none")
 
     const receber = receberResult.data || []
     const pagar = pagarResult.data || []
     const contas = contasResult.data || []
+    const vendas = vendasResult.data || []
 
     // Calcula metricas
+    // Total de vendas vem da tabela vendas (valor_total)
+    const totalVendas = vendas.reduce((acc, v) => acc + Number(v.valor_total), 0)
     const faturamento = receber.reduce((acc, r) => acc + Number(r.valor), 0)
     const recebimentos = receber
       .filter(r => r.status === "recebido" || r.status === "confirmado")
@@ -104,6 +118,7 @@ export async function GET(request: NextRequest) {
       success: true,
       data: {
         metricas: {
+          totalVendas,
           faturamento,
           pagamentos,
           lucroBruto,
