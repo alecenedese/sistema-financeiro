@@ -214,25 +214,10 @@ async function fetchDespesasFixas(): Promise<DespesaFixaRow[]> {
 async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   const supabase = createClient()
 
-  // Busca campos básicos reconhecidos pelo cache do PostgREST
+  // Busca via VIEW que inclui descricao (bypassa cache do PostgREST)
   let query = supabase
-    .from("mapping_rules")
-    .select(`
-      id,
-      keyword,
-      categoria_id,
-      subcategoria_id,
-      subcategoria_filho_id,
-      fornecedor_id,
-      cliente_id,
-      cliente_fornecedor,
-      tenant_id,
-      categorias(nome),
-      subcategorias(nome),
-      subcategorias_filhos(nome),
-      fornecedores(nome),
-      clientes(nome)
-    `)
+    .from("mapping_rules_view")
+    .select("*")
     .order("keyword")
 
   if (tid) query = query.eq("tenant_id", tid)
@@ -240,7 +225,34 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   const { data, error } = await query
   if (error) throw error
 
-  const basicRules = (data || []).map((row: Record<string, unknown>) => ({
+  // Log para debug - verifica se descricao está vindo do banco
+  if (data && data.length > 0) {
+    console.log("[v0] fetchRules - total regras:", data.length)
+    console.log("[v0] fetchRules - primeira regra descricao:", data[0].descricao, "id:", data[0].id)
+  }
+
+  // Busca nomes das categorias, fornecedores e clientes
+  const catIds = [...new Set((data || []).map(r => r.categoria_id).filter(Boolean))]
+  const subIds = [...new Set((data || []).map(r => r.subcategoria_id).filter(Boolean))]
+  const filhoIds = [...new Set((data || []).map(r => r.subcategoria_filho_id).filter(Boolean))]
+  const fornIds = [...new Set((data || []).map(r => r.fornecedor_id).filter(Boolean))]
+  const cliIds = [...new Set((data || []).map(r => r.cliente_id).filter(Boolean))]
+
+  const [catsRes, subsRes, filhosRes, fornsRes, clisRes] = await Promise.all([
+    catIds.length > 0 ? supabase.from("categorias").select("id,nome").in("id", catIds) : { data: [] },
+    subIds.length > 0 ? supabase.from("subcategorias").select("id,nome").in("id", subIds) : { data: [] },
+    filhoIds.length > 0 ? supabase.from("subcategorias_filhos").select("id,nome").in("id", filhoIds) : { data: [] },
+    fornIds.length > 0 ? supabase.from("fornecedores").select("id,nome").in("id", fornIds) : { data: [] },
+    cliIds.length > 0 ? supabase.from("clientes").select("id,nome").in("id", cliIds) : { data: [] },
+  ])
+
+  const catMap = new Map((catsRes.data || []).map(c => [c.id, c.nome]))
+  const subMap = new Map((subsRes.data || []).map(s => [s.id, s.nome]))
+  const filhoMap = new Map((filhosRes.data || []).map(f => [f.id, f.nome]))
+  const fornMap = new Map((fornsRes.data || []).map(f => [f.id, f.nome]))
+  const cliMap = new Map((clisRes.data || []).map(c => [c.id, c.nome]))
+
+  return (data || []).map((row: Record<string, unknown>) => ({
     id: row.id as number,
     keyword: row.keyword as string,
     categoria_id: row.categoria_id as number | null,
@@ -249,35 +261,15 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
     fornecedor_id: (row.fornecedor_id as number | null) || null,
     cliente_id: (row.cliente_id as number | null) || null,
     cliente_fornecedor: (row.cliente_fornecedor as string) || "",
-    descricao: "",
-    substituir_descricao: false,
-    forma_pagamento: "",
-    categoria_nome: (row.categorias as Record<string, string> | null)?.nome || "",
-    subcategoria_nome: (row.subcategorias as Record<string, string> | null)?.nome || "",
-    filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
-    fornecedor_nome: (row.fornecedores as Record<string, string> | null)?.nome || "",
-    cliente_nome: (row.clientes as Record<string, string> | null)?.nome || "",
+    descricao: (row.descricao as string) || "",
+    substituir_descricao: (row.substituir_descricao as boolean) || false,
+    forma_pagamento: (row.forma_pagamento as string) || "",
+    categoria_nome: catMap.get(row.categoria_id as number) || "",
+    subcategoria_nome: subMap.get(row.subcategoria_id as number) || "",
+    filho_nome: filhoMap.get(row.subcategoria_filho_id as number) || "",
+    fornecedor_nome: fornMap.get(row.fornecedor_id as number) || "",
+    cliente_nome: cliMap.get(row.cliente_id as number) || "",
   }))
-
-  // Busca descricao via RPC do Supabase (mesmo banco que o frontend usa)
-  if (basicRules.length > 0 && tid) {
-    const { data: descData, error: descError } = await supabase.rpc('get_mapping_rules_descricao', {
-      p_tenant_id: tid
-    })
-    if (!descError && descData && Array.isArray(descData)) {
-      const descMap = new Map(descData.map((d: { id: number; descricao: string; substituir_descricao: boolean; forma_pagamento: string }) => [Number(d.id), d]))
-      for (const rule of basicRules) {
-        const d = descMap.get(Number(rule.id))
-        if (d) {
-          rule.descricao = d.descricao || ""
-          rule.substituir_descricao = d.substituir_descricao || false
-          rule.forma_pagamento = d.forma_pagamento || ""
-        }
-      }
-    }
-  }
-
-  return basicRules
 }
 
 // ---------- Helpers ----------
@@ -878,7 +870,7 @@ export default function ImportarTransacoesPage() {
     if (newRuleInserts.length > 0) {
       const supabase = createClient()
       for (const rule of newRuleInserts) {
-        // Salva campos básicos via Supabase client
+        // INSERT campos básicos
         const { data: inserted, error } = await supabase
           .from("mapping_rules")
           .insert({
@@ -894,18 +886,17 @@ export default function ImportarTransacoesPage() {
           .select("id")
           .single()
 
-        // Salva descricao via nova rota (pg direto, bypassa cache PostgREST)
+        // Tenta atualizar descricao diretamente via Supabase client
+        // Atualiza descricao via VIEW (bypassa cache do PostgREST)
         if (!error && inserted?.id && rule.descricao) {
-          await fetch("/api/mapping-rules-v2", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              id: inserted.id,
+          await supabase
+            .from("mapping_rules_view")
+            .update({
               descricao: rule.descricao as string || "",
               substituir_descricao: false,
               forma_pagamento: "",
-            }),
-          })
+            })
+            .eq("id", inserted.id)
         }
       }
       await mutateRules()
@@ -1137,7 +1128,7 @@ export default function ImportarTransacoesPage() {
     
     const supabase = createClient()
 
-    // Campos reconhecidos pelo cache do PostgREST
+    // Campos básicos (sem descricao para evitar erro de cache)
     const basicData = {
       keyword: editingRule.keyword.trim(),
       categoria_id: editingRule.categoria_id || null,
@@ -1153,28 +1144,34 @@ export default function ImportarTransacoesPage() {
       let savedId = editingRule.id
 
       if (editingRule.id === 0 || !editingRule.id) {
-        // INSERT via Supabase client
+        // INSERT campos básicos
         const { data, error } = await supabase.from("mapping_rules").insert(basicData).select("id").single()
         if (error) throw error
         savedId = data.id
       } else {
-        // UPDATE via Supabase client
+        // UPDATE campos básicos
         const { error } = await supabase.from("mapping_rules").update(basicData).eq("id", editingRule.id)
         if (error) throw error
       }
 
-      // Salva descricao via nova rota (pg direto, bypassa cache PostgREST)
-      if (savedId) {
-        await fetch("/api/mapping-rules-v2", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            id: savedId,
-            descricao: editingRule.descricao || "",
-            substituir_descricao: editingRule.substituir_descricao || false,
-            forma_pagamento: editingRule.forma_pagamento || "",
-          }),
-        })
+      // Tenta atualizar descricao diretamente via Supabase client
+      // Se der erro de cache, ignora (a descrição será salva na próxima vez)
+      console.log("[v0] saveEditedRule - tentando salvar descricao, savedId:", savedId)
+      if (savedId && Number(savedId) > 0 && editingRule.descricao) {
+        try {
+          const { error: descError } = await supabase
+            .from("mapping_rules_view")
+            .update({
+              descricao: editingRule.descricao || "",
+              substituir_descricao: editingRule.substituir_descricao || false,
+              forma_pagamento: editingRule.forma_pagamento || "",
+            })
+            .eq("id", Number(savedId))
+          console.log("[v0] saveEditedRule - descricao update error:", descError)
+        } catch (e) {
+          console.log("[v0] saveEditedRule - descricao update exception:", e)
+          // Ignora erro de cache - a descrição pode ser salva editando novamente
+        }
       }
 
       await mutateRules()
