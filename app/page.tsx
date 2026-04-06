@@ -141,8 +141,7 @@ export default function Page() {
     setSelectedYear(year)
   }
 
-  // Debug - verificar se tenant está setado
-  console.log("[v0] Page - tenant:", tenant, "selectedMonth:", selectedMonth, "selectedYear:", selectedYear)
+
 
   return (
     <div className="flex min-h-screen bg-[#E8EDF2]">
@@ -199,14 +198,14 @@ function DashboardMensalWithCallback({
   initialMonth: number
   initialYear: number
 }) {
-  const { tenant } = useTenant()
+  const { tenant, mounted } = useTenant()
   const [selectedMonth, setSelectedMonth] = useState(initialMonth - 1) // 0-indexed
   const [selectedYear, setSelectedYear] = useState(initialYear)
   const [showMonthDropdown, setShowMonthDropdown] = useState(false)
   const [showYearDropdown, setShowYearDropdown] = useState(false)
 
   const { data, isLoading } = useSWR(
-    ["dashboard-mensal-wrapper", tenant?.id ?? null, selectedMonth + 1, selectedYear],
+    mounted ? ["dashboard-mensal-wrapper", tenant?.id ?? null, selectedMonth + 1, selectedYear] : null,
     async ([, tid, month, year]) => {
       // Importa dinamicamente para evitar dependencia circular
       const { createClient } = await import("@/lib/supabase/client")

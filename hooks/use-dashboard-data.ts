@@ -365,9 +365,9 @@ async function fetchCategoryChartsMonth([, tid, month, year]: [string, number | 
 }
 
 export function useCategoryChartsMonth(month: number, year: number) {
-  const { tenant } = useTenant()
-  console.log("[v0] useCategoryChartsMonth - tenant:", tenant?.id, "month:", month, "year:", year)
-  const key = ["dashboard-category-charts-month", tenant?.id ?? null, month, year] as [string, number | null, number, number]
+  const { tenant, mounted } = useTenant()
+  // Aguarda montagem antes de buscar - evita hydration mismatch
+  const key = mounted ? ["dashboard-category-charts-month", tenant?.id ?? null, month, year] as [string, number | null, number, number] : null
   return useSWR(key, fetchCategoryChartsMonth, { revalidateOnFocus: false })
 }
 
@@ -450,8 +450,8 @@ async function fetchDashboardMensal([, tid, month, year]: [string, number | null
 }
 
 export function useDashboardMensal(month: number, year: number) {
-  const { tenant } = useTenant()
-  const key = ["dashboard-mensal", tenant?.id ?? null, month, year] as [string, number | null, number, number]
+  const { tenant, mounted } = useTenant()
+  const key = mounted ? ["dashboard-mensal", tenant?.id ?? null, month, year] as [string, number | null, number, number] : null
   return useSWR(key, fetchDashboardMensal, { revalidateOnFocus: false })
 }
 
@@ -510,9 +510,8 @@ async function fetchFluxoCaixaDiario([, tid, month, year]: [string, number | nul
 }
 
 export function useFluxoCaixaDiario(month: number, year: number) {
-  const { tenant } = useTenant()
-  console.log("[v0] useFluxoCaixaDiario - tenant:", tenant?.id, "month:", month, "year:", year)
-  const key = ["fluxo-caixa-diario", tenant?.id ?? null, month, year] as [string, number | null, number, number]
+  const { tenant, mounted } = useTenant()
+  const key = mounted ? ["fluxo-caixa-diario", tenant?.id ?? null, month, year] as [string, number | null, number, number] : null
   return useSWR(key, fetchFluxoCaixaDiario, { revalidateOnFocus: false })
 }
 
@@ -556,8 +555,8 @@ async function fetchFluxoVendasDiario([, tid, month, year]: [string, number | nu
 }
 
 export function useFluxoVendasDiario(month: number, year: number) {
-  const { tenant } = useTenant()
-  const key = ["fluxo-vendas-diario", tenant?.id ?? null, month, year] as [string, number | null, number, number]
+  const { tenant, mounted } = useTenant()
+  const key = mounted ? ["fluxo-vendas-diario", tenant?.id ?? null, month, year] as [string, number | null, number, number] : null
   return useSWR(key, fetchFluxoVendasDiario, { revalidateOnFocus: false })
 }
 
@@ -675,8 +674,8 @@ async function fetchDRE([, tid, month, year]: [string, number | null, number, nu
 }
 
 export function useDRE(month: number, year: number) {
-  const { tenant } = useTenant()
-  const key = ["dre", tenant?.id ?? null, month, year] as [string, number | null, number, number]
+  const { tenant, mounted } = useTenant()
+  const key = mounted ? ["dre", tenant?.id ?? null, month, year] as [string, number | null, number, number] : null
   return useSWR(key, fetchDRE, { revalidateOnFocus: false })
 }
 
