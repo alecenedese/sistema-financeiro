@@ -10,6 +10,7 @@ import { useTenant } from "@/hooks/use-tenant"
 interface Lancamento {
   id: number
   descricao: string
+  fornecedor_nome: string
   valor: number
   vencimento: string
   data_vencimento: string
@@ -81,8 +82,6 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
       const lastDay = new Date(year, month, 0).getDate()
       const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
 
-      console.log("[v0] Modal fetchLancamentos - from:", from, "to:", to, "categoria:", modalCategory)
-
       let query = supabase
         .from("contas_pagar")
         .select(`
@@ -92,7 +91,8 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
           vencimento,
           status,
           categorias(nome),
-          subcategorias(nome)
+          subcategorias(nome),
+          fornecedores(nome)
         `)
         .gte("vencimento", from)
         .lte("vencimento", to)
@@ -101,9 +101,7 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
         query = query.eq("tenant_id", tenant.id)
       }
 
-      const { data: rawData, error } = await query
-
-      console.log("[v0] Modal rawData:", rawData?.length, "error:", error?.message)
+      const { data: rawData } = await query
 
       // Filtra pela categoria selecionada
       const filtered = (rawData || [])
@@ -114,6 +112,7 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
         .map(r => ({
           id: r.id,
           descricao: r.descricao || "Sem descrição",
+          fornecedor_nome: (r.fornecedores as { nome: string } | null)?.nome || "Sem fornecedor",
           valor: Number(r.valor),
           vencimento: r.vencimento || "",
           data_vencimento: r.vencimento || "",
@@ -122,8 +121,6 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
           subcategoria: (r.subcategorias as { nome: string } | null)?.nome || "Geral",
         }))
         .sort((a, b) => new Date(b.vencimento).getTime() - new Date(a.vencimento).getTime())
-
-      console.log("[v0] Modal filtered:", filtered.length)
 
       setLancamentos(filtered)
       setLoadingLancamentos(false)
@@ -352,10 +349,10 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
                     >
                       <div className="flex-1 min-w-0">
                         <p className="font-medium text-card-foreground truncate">
-                          {lanc.descricao}
+                          {lanc.fornecedor_nome}
                         </p>
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <span>{lanc.subcategoria}</span>
+                          <span>{lanc.descricao}</span>
                           <span>•</span>
                           <span>
                             {new Date(lanc.vencimento || lanc.data_vencimento).toLocaleDateString("pt-BR")}
