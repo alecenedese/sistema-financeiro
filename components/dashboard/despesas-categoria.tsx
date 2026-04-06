@@ -81,6 +81,8 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
       const lastDay = new Date(year, month, 0).getDate()
       const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
 
+      console.log("[v0] Modal fetchLancamentos - from:", from, "to:", to, "categoria:", modalCategory)
+
       let query = supabase
         .from("contas_pagar")
         .select(`
@@ -88,19 +90,20 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
           descricao, 
           valor, 
           vencimento,
-          data_vencimento,
           status,
           categorias(nome),
           subcategorias(nome)
         `)
-        .or(`vencimento.gte.${from},data_vencimento.gte.${from}`)
-        .or(`vencimento.lte.${to},data_vencimento.lte.${to}`)
+        .gte("vencimento", from)
+        .lte("vencimento", to)
       
       if (tenant?.id) {
         query = query.eq("tenant_id", tenant.id)
       }
 
-      const { data: rawData } = await query
+      const { data: rawData, error } = await query
+
+      console.log("[v0] Modal rawData:", rawData?.length, "error:", error?.message)
 
       // Filtra pela categoria selecionada
       const filtered = (rawData || [])
@@ -112,13 +115,15 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
           id: r.id,
           descricao: r.descricao || "Sem descrição",
           valor: Number(r.valor),
-          vencimento: r.vencimento || r.data_vencimento || "",
-          data_vencimento: r.data_vencimento || r.vencimento || "",
+          vencimento: r.vencimento || "",
+          data_vencimento: r.vencimento || "",
           status: r.status || "",
           categoria: (r.categorias as { nome: string } | null)?.nome || "Sem categoria",
           subcategoria: (r.subcategorias as { nome: string } | null)?.nome || "Geral",
         }))
         .sort((a, b) => new Date(b.vencimento).getTime() - new Date(a.vencimento).getTime())
+
+      console.log("[v0] Modal filtered:", filtered.length)
 
       setLancamentos(filtered)
       setLoadingLancamentos(false)
@@ -221,7 +226,7 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
       </div>
       {!drillCategory && (
         <p className="mb-4 text-xs text-muted-foreground">
-          Clique em uma categoria para ver os lançamentos
+          Clique em uma categoria para ver os lan��amentos
         </p>
       )}
 
