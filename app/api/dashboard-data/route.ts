@@ -44,15 +44,54 @@ export async function GET(request: NextRequest) {
       qContas = qContas.eq("tenant_id", tenantId)
     }
 
-    const [receberResult, pagarResult, contasResult] = await Promise.all([
+    // Verifica tabelas alternativas também
+    let qContasAPagar = supabase
+      .from("contas_a_pagar")
+      .select("valor, status, data_vencimento")
+      .gte("data_vencimento", from)
+      .lte("data_vencimento", to)
+    if (tenantId) qContasAPagar = qContasAPagar.eq("tenant_id", tenantId)
+
+    let qContasAReceber = supabase
+      .from("contas_a_receber")
+      .select("valor, status, data_vencimento")
+      .gte("data_vencimento", from)
+      .lte("data_vencimento", to)
+    if (tenantId) qContasAReceber = qContasAReceber.eq("tenant_id", tenantId)
+
+    let qLancamentos = supabase
+      .from("lancamentos")
+      .select("valor, tipo, data, status")
+      .gte("data", from)
+      .lte("data", to)
+    if (tenantId) qLancamentos = qLancamentos.eq("tenant_id", tenantId)
+
+    const [receberResult, pagarResult, contasResult, capResult, carResult, lancResult] = await Promise.all([
       qReceber,
       qPagar,
       qContas,
+      qContasAPagar,
+      qContasAReceber,
+      qLancamentos,
     ])
 
-    console.log("[v0] API dashboard-data - receber count:", receberResult.data?.length ?? 0, "error:", receberResult.error?.message ?? "none")
-    console.log("[v0] API dashboard-data - pagar count:", pagarResult.data?.length ?? 0, "error:", pagarResult.error?.message ?? "none")
-    console.log("[v0] API dashboard-data - contas count:", contasResult.data?.length ?? 0, "error:", contasResult.error?.message ?? "none")
+    console.log("[v0] API dashboard-data - VERIFICANDO TODAS AS TABELAS:")
+    console.log("[v0] contas_receber:", receberResult.data?.length ?? 0, "error:", receberResult.error?.message ?? "none")
+    console.log("[v0] contas_pagar:", pagarResult.data?.length ?? 0, "error:", pagarResult.error?.message ?? "none")
+    console.log("[v0] contas_bancarias:", contasResult.data?.length ?? 0, "error:", contasResult.error?.message ?? "none")
+    console.log("[v0] contas_a_pagar:", capResult.data?.length ?? 0, "error:", capResult.error?.message ?? "none")
+    console.log("[v0] contas_a_receber:", carResult.data?.length ?? 0, "error:", carResult.error?.message ?? "none")
+    console.log("[v0] lancamentos:", lancResult.data?.length ?? 0, "error:", lancResult.error?.message ?? "none")
+    
+    if (capResult.data?.length) {
+      console.log("[v0] Exemplo contas_a_pagar:", JSON.stringify(capResult.data.slice(0, 2)))
+    }
+    if (carResult.data?.length) {
+      console.log("[v0] Exemplo contas_a_receber:", JSON.stringify(carResult.data.slice(0, 2)))
+    }
+    if (lancResult.data?.length) {
+      console.log("[v0] Exemplo lancamentos:", JSON.stringify(lancResult.data.slice(0, 2)))
+    }
 
     if (receberResult.data?.length) {
       console.log("[v0] API dashboard-data - sample receber:", JSON.stringify(receberResult.data.slice(0, 2)))
