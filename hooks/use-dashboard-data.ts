@@ -311,3 +311,348 @@ export function useCategoryCharts() {
   const key: TidKey = ["dashboard-category-charts", tenant?.id ?? null]
   return useSWR(key, fetchCategoryCharts, { revalidateOnFocus: false })
 }
+
+// ─── Dashboard Mensal ─────────────────────────────────────────────────────────
+
+export interface DashboardMensalData {
+  faturamento: number
+  pagamentos: number
+  lucroBruto: number
+  percLucroBruto: number
+  recebimentos: number
+  lucroLiquido: number
+  percLucroLiquido: number
+  saldoConta: number
+}
+
+async function fetchDashboardMensal([, tid, month, year]: [string, number | null, number, number]): Promise<DashboardMensalData> {
+  const supabase = createClient()
+  const from = `${year}-${String(month).padStart(2, "0")}-01`
+  const to = `${year}-${String(month).padStart(2, "0")}-31`
+
+  // Faturamento (vendas - contas a receber com status confirmado/recebido)
+  let qFat = supabase
+    .from("contas_receber")
+    .select("valor, status")
+    .gte("vencimento", from)
+    .lte("vencimento", to)
+  if (tid) qFat = qFat.eq("tenant_id", tid)
+
+  // Pagamentos (contas a pagar com status pago/confirmado)
+  let qPag = supabase
+    .from("contas_pagar")
+    .select("valor, status")
+    .gte("vencimento", from)
+    .lte("vencimento", to)
+  if (tid) qPag = qPag.eq("tenant_id", tid)
+
+  // Saldo em conta
+  let qContas = supabase.from("contas_bancarias").select("saldo")
+  if (tid) qContas = qContas.eq("tenant_id", tid)
+
+  const [{ data: receberData }, { data: pagarData }, { data: contasData }] = await Promise.all([
+    qFat, qPag, qContas,
+  ])
+
+  // Faturamento = total de contas a receber (independente do status, é o faturamento do período)
+  const faturamento = (receberData || []).reduce((acc, r) => acc + Number(r.valor), 0)
+
+  // Recebimentos = contas a receber que foram efetivamente recebidas
+  const recebimentos = (receberData || [])
+    .filter(r => r.status === "recebido" || r.status === "confirmado")
+    .reduce((acc, r) => acc + Number(r.valor), 0)
+
+  // Pagamentos = contas a pagar que foram efetivamente pagas
+  const pagamentos = (pagarData || [])
+    .filter(r => r.status === "pago" || r.status === "confirmado")
+    .reduce((acc, r) => acc + Number(r.valor), 0)
+
+  // Lucro Bruto = Faturamento - Pagamentos (saídas)
+  const lucroBruto = faturamento - pagamentos
+  const percLucroBruto = faturamento > 0 ? (lucroBruto / faturamento) * 100 : 0
+
+  // Lucro Líquido = Recebimentos - Pagamentos (fluxo de caixa real)
+  const lucroLiquido = recebimentos - pagamentos
+  const percLucroLiquido = recebimentos > 0 ? (lucroLiquido / recebimentos) * 100 : 0
+
+  // Saldo em conta
+  const saldoConta = (contasData || []).reduce((acc, c) => acc + Number(c.saldo ?? 0), 0)
+
+  return {
+    faturamento,
+    pagamentos,
+    lucroBruto,
+    percLucroBruto,
+    recebimentos,
+    lucroLiquido,
+    percLucroLiquido,
+    saldoConta,
+  }
+}
+
+export function useDashboardMensal(month: number, year: number) {
+  const { tenant } = useTenant()
+  const key = ["dashboard-mensal", tenant?.id ?? null, month, year] as [string, number | null, number, number]
+  return useSWR(key, fetchDashboardMensal, { revalidateOnFocus: false })
+}
+
+// ─── Fluxo de Caixa Diário ────────────────────────────────────────────────────
+
+export interface FluxoCaixaDiarioPoint {
+  dia: number
+  valor: number
+}
+
+async function fetchFluxoCaixaDiario([, tid, month, year]: [string, number | null, number, number]): Promise<FluxoCaixaDiarioPoint[]> {
+  const supabase = createClient()
+  const from = `${year}-${String(month).padStart(2, "0")}-01`
+  const to = `${year}-${String(month).padStart(2, "0")}-31`
+
+  // Recebimentos por dia
+  let qRec = supabase
+    .from("contas_receber")
+    .select("valor, vencimento")
+    .in("status", ["recebido", "confirmado"])
+    .gte("vencimento", from)
+    .lte("vencimento", to)
+  if (tid) qRec = qRec.eq("tenant_id", tid)
+
+  // Pagamentos por dia
+  let qPag = supabase
+    .from("contas_pagar")
+    .select("valor, vencimento")
+    .in("status", ["pago", "confirmado"])
+    .gte("vencimento", from)
+    .lte("vencimento", to)
+  if (tid) qPag = qPag.eq("tenant_id", tid)
+
+  const [{ data: recData }, { data: pagData }] = await Promise.all([qRec, qPag])
+
+  // Mapeia por dia
+  const daysInMonth = new Date(year, month, 0).getDate()
+  const dayMap: Record<number, number> = {}
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    dayMap[d] = 0
+  }
+
+  for (const r of (recData || [])) {
+    const day = new Date(r.vencimento + "T00:00:00").getDate()
+    dayMap[day] = (dayMap[day] || 0) + Number(r.valor)
+  }
+
+  for (const p of (pagData || [])) {
+    const day = new Date(p.vencimento + "T00:00:00").getDate()
+    dayMap[day] = (dayMap[day] || 0) - Number(p.valor)
+  }
+
+  return Object.entries(dayMap).map(([dia, valor]) => ({
+    dia: Number(dia),
+    valor,
+  }))
+}
+
+export function useFluxoCaixaDiario(month: number, year: number) {
+  const { tenant } = useTenant()
+  const key = ["fluxo-caixa-diario", tenant?.id ?? null, month, year] as [string, number | null, number, number]
+  return useSWR(key, fetchFluxoCaixaDiario, { revalidateOnFocus: false })
+}
+
+// ─── Fluxo de Vendas Diário ───────────────────────────────────────────────────
+
+export interface FluxoVendasDiarioPoint {
+  dia: number
+  valor: number
+}
+
+async function fetchFluxoVendasDiario([, tid, month, year]: [string, number | null, number, number]): Promise<FluxoVendasDiarioPoint[]> {
+  const supabase = createClient()
+  const from = `${year}-${String(month).padStart(2, "0")}-01`
+  const to = `${year}-${String(month).padStart(2, "0")}-31`
+
+  let qRec = supabase
+    .from("contas_receber")
+    .select("valor, vencimento")
+    .gte("vencimento", from)
+    .lte("vencimento", to)
+  if (tid) qRec = qRec.eq("tenant_id", tid)
+
+  const { data: recData } = await qRec
+
+  const daysInMonth = new Date(year, month, 0).getDate()
+  const dayMap: Record<number, number> = {}
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    dayMap[d] = 0
+  }
+
+  for (const r of (recData || [])) {
+    const day = new Date(r.vencimento + "T00:00:00").getDate()
+    dayMap[day] = (dayMap[day] || 0) + Number(r.valor)
+  }
+
+  return Object.entries(dayMap).map(([dia, valor]) => ({
+    dia: Number(dia),
+    valor,
+  }))
+}
+
+export function useFluxoVendasDiario(month: number, year: number) {
+  const { tenant } = useTenant()
+  const key = ["fluxo-vendas-diario", tenant?.id ?? null, month, year] as [string, number | null, number, number]
+  return useSWR(key, fetchFluxoVendasDiario, { revalidateOnFocus: false })
+}
+
+// ─── DRE ──────────────────────────────────────────────────────────────────────
+
+export interface DREData {
+  receitaOperacionalBruta: number
+  deducoesReceitaBruta: number
+  receitaLiquida: number
+  custoDiretoVendas: number
+  lucroBruto: number
+  despesasOperacionais: number
+  ebitda: number
+  outrasReceitasNaoOperacionais: number
+  outrasDespesasNaoOperacionais: number
+  irCsll: number
+  lucroLiquidoPeriodo: number
+}
+
+async function fetchDRE([, tid, month, year]: [string, number | null, number, number]): Promise<DREData> {
+  const supabase = createClient()
+  const from = `${year}-${String(month).padStart(2, "0")}-01`
+  const to = `${year}-${String(month).padStart(2, "0")}-31`
+
+  // Busca contas a receber com categoria e grupo DRE
+  let qRec = supabase
+    .from("contas_receber")
+    .select("valor, status, categorias(nome, grupo_dre)")
+    .gte("vencimento", from)
+    .lte("vencimento", to)
+  if (tid) qRec = qRec.eq("tenant_id", tid)
+
+  // Busca contas a pagar com categoria e grupo DRE
+  let qPag = supabase
+    .from("contas_pagar")
+    .select("valor, status, categorias(nome, grupo_dre)")
+    .gte("vencimento", from)
+    .lte("vencimento", to)
+  if (tid) qPag = qPag.eq("tenant_id", tid)
+
+  const [{ data: recData }, { data: pagData }] = await Promise.all([qRec, qPag])
+
+  // Inicializa valores
+  let receitaOperacionalBruta = 0
+  let deducoesReceitaBruta = 0
+  let custoDiretoVendas = 0
+  let despesasOperacionais = 0
+  let outrasReceitasNaoOperacionais = 0
+  let outrasDespesasNaoOperacionais = 0
+  let irCsll = 0
+
+  // Processa receitas
+  for (const r of (recData || [])) {
+    if (r.status !== "recebido" && r.status !== "confirmado") continue
+    const valor = Number(r.valor)
+    const grupoDre = (r.categorias as { grupo_dre?: string } | null)?.grupo_dre || ""
+
+    switch (grupoDre) {
+      case "receita_operacional_bruta":
+        receitaOperacionalBruta += valor
+        break
+      case "deducoes_receita_bruta":
+        deducoesReceitaBruta += valor
+        break
+      case "outras_receitas_nao_operacionais":
+        outrasReceitasNaoOperacionais += valor
+        break
+      default:
+        receitaOperacionalBruta += valor
+    }
+  }
+
+  // Processa despesas
+  for (const p of (pagData || [])) {
+    if (p.status !== "pago" && p.status !== "confirmado") continue
+    const valor = Number(p.valor)
+    const grupoDre = (p.categorias as { grupo_dre?: string } | null)?.grupo_dre || ""
+
+    switch (grupoDre) {
+      case "custo_direto_vendas":
+        custoDiretoVendas += valor
+        break
+      case "despesas_operacionais":
+        despesasOperacionais += valor
+        break
+      case "outras_despesas_nao_operacionais":
+        outrasDespesasNaoOperacionais += valor
+        break
+      case "ir_csll":
+        irCsll += valor
+        break
+      default:
+        despesasOperacionais += valor
+    }
+  }
+
+  const receitaLiquida = receitaOperacionalBruta - deducoesReceitaBruta
+  const lucroBruto = receitaLiquida - custoDiretoVendas
+  const ebitda = lucroBruto - despesasOperacionais
+  const lucroLiquidoPeriodo = ebitda + outrasReceitasNaoOperacionais - outrasDespesasNaoOperacionais - irCsll
+
+  return {
+    receitaOperacionalBruta,
+    deducoesReceitaBruta,
+    receitaLiquida,
+    custoDiretoVendas,
+    lucroBruto,
+    despesasOperacionais,
+    ebitda,
+    outrasReceitasNaoOperacionais,
+    outrasDespesasNaoOperacionais,
+    irCsll,
+    lucroLiquidoPeriodo,
+  }
+}
+
+export function useDRE(month: number, year: number) {
+  const { tenant } = useTenant()
+  const key = ["dre", tenant?.id ?? null, month, year] as [string, number | null, number, number]
+  return useSWR(key, fetchDRE, { revalidateOnFocus: false })
+}
+
+// ─── Lucro Bruto/Líquido para gráficos de rosca ───────────────────────────────
+
+export interface LucroChartData {
+  vendas: number
+  saidas: number
+  resultado: number
+  percentual: number
+}
+
+export function useLucroBrutoChart(month: number, year: number) {
+  const { data, isLoading } = useDashboardMensal(month, year)
+  
+  const chartData: LucroChartData = {
+    vendas: data?.faturamento ?? 0,
+    saidas: data?.pagamentos ?? 0,
+    resultado: data?.lucroBruto ?? 0,
+    percentual: data?.percLucroBruto ?? 0,
+  }
+
+  return { data: chartData, isLoading }
+}
+
+export function useLucroLiquidoChart(month: number, year: number) {
+  const { data, isLoading } = useDashboardMensal(month, year)
+  
+  const chartData: LucroChartData = {
+    vendas: data?.recebimentos ?? 0,
+    saidas: data?.pagamentos ?? 0,
+    resultado: data?.lucroLiquido ?? 0,
+    percentual: data?.percLucroLiquido ?? 0,
+  }
+
+  return { data: chartData, isLoading }
+}

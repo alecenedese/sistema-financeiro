@@ -10,7 +10,7 @@ export function RecentTransactions() {
   return (
     <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-base font-semibold text-card-foreground">Transacoes Recentes</h3>
+        <h3 className="text-lg font-bold text-card-foreground">Transacoes Recentes</h3>
         <Link href="/transacoes" className="text-sm font-medium text-primary hover:underline">
           Ver todas
         </Link>
@@ -59,10 +59,10 @@ export function RecentTransactions() {
               </div>
               <span
                 className={`text-sm font-semibold ${
-                  tx.tipo === "receber" ? "text-[hsl(142,71%,45%)]" : "text-[hsl(0,72%,51%)]"
+                  tx.tipo === "receber" ? "text-[#22C55E]" : "text-[#E53E3E]"
                 }`}
               >
-                {tx.tipo === "receber" ? "+" : "-"} {fmt(tx.valor)}
+                {tx.tipo === "receber" ? "+ " : "- "}R$ {tx.valor.toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
               </span>
             </div>
           ))}

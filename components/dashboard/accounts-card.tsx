@@ -21,7 +21,7 @@ export function AccountsCard() {
   return (
     <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-base font-semibold text-card-foreground">Minhas Contas</h3>
+        <h3 className="text-lg font-bold text-card-foreground">Contas Bancarias</h3>
         <Link href="/contas-bancarias" className="text-sm font-medium text-primary hover:underline">
           Ver todas
         </Link>
@@ -66,10 +66,10 @@ export function AccountsCard() {
                 </div>
                 <span
                   className={`text-sm font-semibold ${
-                    account.saldo_atual >= 0 ? "text-card-foreground" : "text-[hsl(0,72%,51%)]"
+                    account.saldo_atual >= 0 ? "text-[#22C55E]" : "text-[#E53E3E]"
                   }`}
                 >
-                  {fmt(account.saldo_atual)}
+                  {account.saldo_atual < 0 ? "-" : ""}R$ {Math.abs(account.saldo_atual).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
                 </span>
               </div>
             )
@@ -80,7 +80,9 @@ export function AccountsCard() {
       {!isLoading && accounts.length > 0 && (
         <div className="mt-4 flex items-center justify-between rounded-lg bg-muted px-4 py-3">
           <span className="text-sm font-medium text-muted-foreground">Saldo Total</span>
-          <span className="text-base font-bold text-card-foreground">{fmt(totalBalance)}</span>
+          <span className={`text-base font-bold ${totalBalance >= 0 ? "text-card-foreground" : "text-[#E53E3E]"}`}>
+            {totalBalance < 0 ? "-" : ""}R$ {Math.abs(totalBalance).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}
+          </span>
         </div>
       )}
     </div>
