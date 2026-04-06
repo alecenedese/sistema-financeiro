@@ -17,13 +17,27 @@ const MONTHS = ["Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Jul
 // Decodifica o token para obter o tenantId
 function decodeToken(token: string): number | null {
   try {
-    // Token é base64 do formato "tenant:{id}"
-    const decoded = atob(token)
+    // Primeiro decodifica URI component caso esteja encoded na URL
+    let decodedToken = token
+    try {
+      decodedToken = decodeURIComponent(token)
+    } catch {
+      // Ignora se não conseguir decodificar
+    }
+    
+    // Trata URL-safe base64 (substitui - por + e _ por /)
+    const base64 = decodedToken.replace(/-/g, '+').replace(/_/g, '/')
+    // Decodifica base64 do formato "tenant:{id}"
+    const decoded = atob(base64)
+    console.log("[v0] decodeToken - token:", token, "decodedToken:", decodedToken, "decoded:", decoded)
     if (decoded.startsWith("tenant:")) {
-      return parseInt(decoded.replace("tenant:", ""), 10)
+      const id = parseInt(decoded.replace("tenant:", ""), 10)
+      console.log("[v0] decodeToken - tenantId:", id)
+      return id
     }
     return null
-  } catch {
+  } catch (e) {
+    console.log("[v0] decodeToken error:", e)
     return null
   }
 }
