@@ -1,9 +1,22 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { PieChart, Pie, Cell, Tooltip, Sector } from "recharts"
-import { ArrowLeft, PieChartIcon } from "lucide-react"
+import { ArrowLeft, PieChartIcon, X, Loader2 } from "lucide-react"
 import { useCategoryChartsMonth, fmt, type CategoryPoint } from "@/hooks/use-dashboard-data"
+import { createClient } from "@/lib/supabase/client"
+import { useTenant } from "@/hooks/use-tenant"
+
+interface Lancamento {
+  id: number
+  descricao: string
+  valor: number
+  vencimento: string
+  data_vencimento: string
+  status: string
+  categoria: string
+  subcategoria: string
+}
 
 function CustomTooltip({
   active,
@@ -49,8 +62,81 @@ interface DespesasPorCategoriaProps {
 
 export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps) {
   const { data, isLoading } = useCategoryChartsMonth(month, year)
+  const { tenant } = useTenant()
   const [drillCategory, setDrillCategory] = useState<CategoryPoint | null>(null)
   const [activeIndex, setActiveIndex] = useState<number | undefined>(undefined)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [modalCategory, setModalCategory] = useState<string | null>(null)
+  const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
+  const [loadingLancamentos, setLoadingLancamentos] = useState(false)
+
+  // Busca lançamentos quando abre o modal
+  useEffect(() => {
+    if (!modalOpen || !modalCategory) return
+    
+    async function fetchLancamentos() {
+      setLoadingLancamentos(true)
+      const supabase = createClient()
+      const from = `${year}-${String(month).padStart(2, "0")}-01`
+      const lastDay = new Date(year, month, 0).getDate()
+      const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
+
+      let query = supabase
+        .from("contas_pagar")
+        .select(`
+          id, 
+          descricao, 
+          valor, 
+          vencimento,
+          data_vencimento,
+          status,
+          categorias(nome),
+          subcategorias(nome)
+        `)
+        .or(`vencimento.gte.${from},data_vencimento.gte.${from}`)
+        .or(`vencimento.lte.${to},data_vencimento.lte.${to}`)
+      
+      if (tenant?.id) {
+        query = query.eq("tenant_id", tenant.id)
+      }
+
+      const { data: rawData } = await query
+
+      // Filtra pela categoria selecionada
+      const filtered = (rawData || [])
+        .filter(r => {
+          const catName = (r.categorias as { nome: string } | null)?.nome || "Sem categoria"
+          return catName === modalCategory
+        })
+        .map(r => ({
+          id: r.id,
+          descricao: r.descricao || "Sem descrição",
+          valor: Number(r.valor),
+          vencimento: r.vencimento || r.data_vencimento || "",
+          data_vencimento: r.data_vencimento || r.vencimento || "",
+          status: r.status || "",
+          categoria: (r.categorias as { nome: string } | null)?.nome || "Sem categoria",
+          subcategoria: (r.subcategorias as { nome: string } | null)?.nome || "Geral",
+        }))
+        .sort((a, b) => new Date(b.vencimento).getTime() - new Date(a.vencimento).getTime())
+
+      setLancamentos(filtered)
+      setLoadingLancamentos(false)
+    }
+
+    fetchLancamentos()
+  }, [modalOpen, modalCategory, month, year, tenant?.id])
+
+  function handleOpenModal(categoryName: string) {
+    setModalCategory(categoryName)
+    setModalOpen(true)
+  }
+
+  function handleCloseModal() {
+    setModalOpen(false)
+    setModalCategory(null)
+    setLancamentos([])
+  }
 
   if (isLoading) {
     return (
@@ -103,9 +189,9 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
   const size = 320
 
   function handlePieClick(_: unknown, index: number) {
-    if (!drillCategory && coloredExpenses[index]?.subcategorias?.length) {
-      setDrillCategory(coloredExpenses[index])
-      setActiveIndex(undefined)
+    // Abre o modal ao clicar no gráfico
+    if (coloredExpenses[index]) {
+      handleOpenModal(coloredExpenses[index].name)
     }
   }
 
@@ -135,7 +221,7 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
       </div>
       {!drillCategory && (
         <p className="mb-4 text-xs text-muted-foreground">
-          Clique em uma fatia para detalhar por subcategoria
+          Clique em uma categoria para ver os lançamentos
         </p>
       )}
 
@@ -182,12 +268,10 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
                   <button
                     key={item.name}
                     type="button"
-                    onClick={() => { if (!drillCategory && coloredExpenses[idx]?.subcategorias?.length) { setDrillCategory(coloredExpenses[idx]); setActiveIndex(undefined) } }}
+                    onClick={() => handleOpenModal(item.name)}
                     onMouseEnter={() => { if (!drillCategory) setActiveIndex(idx) }}
                     onMouseLeave={() => { if (!drillCategory) setActiveIndex(undefined) }}
-                    className={`group flex items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors ${
-                      !drillCategory ? "hover:bg-muted cursor-pointer" : "cursor-default"
-                    } ${activeIndex === idx && !drillCategory ? "bg-muted" : ""}`}
+                    className={`group flex items-center gap-3 rounded-lg px-3 py-2 text-left transition-colors hover:bg-muted cursor-pointer ${activeIndex === idx && !drillCategory ? "bg-muted" : ""}`}
                   >
                     <div className="h-6 w-20 shrink-0 overflow-hidden rounded-full bg-muted">
                       <div
@@ -217,6 +301,93 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
           )}
         </div>
       </div>
+
+      {/* Modal de lançamentos */}
+      {modalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={handleCloseModal}>
+          <div 
+            className="relative max-h-[80vh] w-full max-w-2xl overflow-hidden rounded-xl bg-card shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Header */}
+            <div className="flex items-center justify-between border-b border-border px-6 py-4">
+              <div>
+                <h3 className="text-lg font-bold text-card-foreground">
+                  Lançamentos - {modalCategory}
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  {lancamentos.length} lançamento(s) encontrado(s)
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={handleCloseModal}
+                className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Content */}
+            <div className="max-h-[60vh] overflow-y-auto px-6 py-4">
+              {loadingLancamentos ? (
+                <div className="flex items-center justify-center py-12">
+                  <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+                </div>
+              ) : lancamentos.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
+                  <p className="text-sm">Nenhum lançamento encontrado</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {lancamentos.map((lanc) => (
+                    <div
+                      key={lanc.id}
+                      className="flex items-center justify-between rounded-lg border border-border bg-background p-4"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium text-card-foreground truncate">
+                          {lanc.descricao}
+                        </p>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <span>{lanc.subcategoria}</span>
+                          <span>•</span>
+                          <span>
+                            {new Date(lanc.vencimento || lanc.data_vencimento).toLocaleDateString("pt-BR")}
+                          </span>
+                          <span>•</span>
+                          <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                            lanc.status === "pago" || lanc.status === "confirmado"
+                              ? "bg-green-100 text-green-700"
+                              : lanc.status === "pendente"
+                              ? "bg-yellow-100 text-yellow-700"
+                              : "bg-gray-100 text-gray-700"
+                          }`}>
+                            {lanc.status || "pendente"}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="ml-4 text-right">
+                        <p className="font-bold text-[#E53E3E]">-{fmt(lanc.valor)}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Footer com total */}
+            {lancamentos.length > 0 && (
+              <div className="flex items-center justify-between border-t border-border px-6 py-4">
+                <span className="text-sm font-medium text-muted-foreground">Total</span>
+                <span className="text-lg font-bold text-[#E53E3E]">
+                  -{fmt(lancamentos.reduce((acc, l) => acc + l.valor, 0))}
+                </span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
