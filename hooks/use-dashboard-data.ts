@@ -316,6 +316,8 @@ async function fetchCategoryChartsMonth([, tid, month, year]: [string, number | 
   const from = `${year}-${String(month).padStart(2, "0")}-01`
   const to = `${year}-${String(month).padStart(2, "0")}-31`
 
+  console.log("[v0] fetchCategoryChartsMonth - tid:", tid, "from:", from, "to:", to)
+
   let qP = supabase
     .from("contas_pagar")
     .select("valor, categoria_id, categorias(nome), subcategorias(nome)")
@@ -327,7 +329,9 @@ async function fetchCategoryChartsMonth([, tid, month, year]: [string, number | 
 
   if (tid) { qP = qP.eq("tenant_id", tid); qR = qR.eq("tenant_id", tid) }
 
-  const [{ data: pagar }, { data: receber }] = await Promise.all([qP, qR])
+  const [{ data: pagar, error: errP }, { data: receber, error: errR }] = await Promise.all([qP, qR])
+  
+  console.log("[v0] fetchCategoryChartsMonth - pagar:", pagar?.length, "receber:", receber?.length, "errP:", errP, "errR:", errR)
 
   type Map = Record<string, { value: number; subs: Record<string, number> }>
 
@@ -467,6 +471,8 @@ async function fetchFluxoCaixaDiario([, tid, month, year]: [string, number | nul
   const from = `${year}-${String(month).padStart(2, "0")}-01`
   const to = `${year}-${String(month).padStart(2, "0")}-31`
 
+  console.log("[v0] fetchFluxoCaixaDiario - tid:", tid, "from:", from, "to:", to)
+
   // Recebimentos por dia - busca todos os status para ter dados
   let qRec = supabase
     .from("contas_receber")
@@ -483,7 +489,9 @@ async function fetchFluxoCaixaDiario([, tid, month, year]: [string, number | nul
     .lte("vencimento", to)
   if (tid) qPag = qPag.eq("tenant_id", tid)
 
-  const [{ data: recData }, { data: pagData }] = await Promise.all([qRec, qPag])
+  const [{ data: recData, error: errRec }, { data: pagData, error: errPag }] = await Promise.all([qRec, qPag])
+  
+  console.log("[v0] fetchFluxoCaixaDiario - recData:", recData?.length, "pagData:", pagData?.length, "errRec:", errRec, "errPag:", errPag)
 
   // Mapeia por dia
   const daysInMonth = new Date(year, month, 0).getDate()
