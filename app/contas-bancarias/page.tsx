@@ -5,7 +5,7 @@ import { PageHeader } from "@/components/page-header"
 import {
   Landmark, CreditCard, Wallet, Plus, TrendingUp, TrendingDown,
   ArrowDownLeft, ArrowUpRight, Eye, EyeOff, Pencil, Trash2, Loader2, X,
-  ArrowLeftRight,
+  ArrowLeftRight, ChevronDown,
 } from "lucide-react"
 import { useState, useEffect, useCallback } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
@@ -20,8 +20,10 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createClient } from "@/lib/supabase/client"
+import { fetchAll } from "@/lib/supabase/fetch-all"
 import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
 import useSWR from "swr"
+import { ConciliacaoContas } from "@/components/dashboard/conciliacao-contas"
 
 interface ContaBancaria {
   id: number; nome: string; tipo: string; saldo: number; saldo_inicial: number; cor: string
@@ -74,15 +76,49 @@ async function fetchExtrato(contaId: number, filtro: FiltroExtrato): Promise<Ext
     from = toISOLocal(new Date(today.getFullYear(), today.getMonth(), 1))
   }
   const tid = getActiveTenantId()
-  let eq = supabase
+
+  // 1) Lançamentos manuais
+  let lancQ = supabase
     .from("lancamentos")
     .select("id,descricao,valor,tipo,data,status")
     .eq("conta_bancaria_id", contaId)
     .gte("data", from).lte("data", to)
     .order("data", { ascending: false }).limit(100)
-  if (tid) eq = eq.eq("tenant_id", tid)
-  const { data } = await eq
-  return (data || []).map((r) => ({ id: r.id, descricao: r.descricao, valor: Number(r.valor), tipo: r.tipo, data: r.data, status: r.status || "confirmado" }))
+  if (tid) lancQ = lancQ.eq("tenant_id", tid)
+
+  // 2) Contas a receber (entradas) — usa vencimento como data do extrato
+  let recQ = supabase
+    .from("contas_receber")
+    .select("id,descricao,valor,vencimento,status")
+    .eq("conta_bancaria_id", contaId)
+    .gte("vencimento", from).lte("vencimento", to)
+    .order("vencimento", { ascending: false }).limit(200)
+  if (tid) recQ = recQ.eq("tenant_id", tid)
+
+  // 3) Contas a pagar (saídas)
+  let pagQ = supabase
+    .from("contas_pagar")
+    .select("id,descricao,valor,vencimento,status")
+    .eq("conta_bancaria_id", contaId)
+    .gte("vencimento", from).lte("vencimento", to)
+    .order("vencimento", { ascending: false }).limit(200)
+  if (tid) pagQ = pagQ.eq("tenant_id", tid)
+
+  const [lancRes, recRes, pagRes] = await Promise.all([lancQ, recQ, pagQ])
+
+  const items: Extrato[] = []
+  for (const r of (lancRes.data || []) as any[]) {
+    items.push({ id: r.id, descricao: r.descricao, valor: Number(r.valor), tipo: r.tipo, data: r.data, status: r.status || "confirmado" })
+  }
+  for (const r of (recRes.data || []) as any[]) {
+    items.push({ id: r.id + 1e9, descricao: r.descricao, valor: Number(r.valor), tipo: "receita", data: r.vencimento, status: r.status || "pendente" })
+  }
+  for (const r of (pagRes.data || []) as any[]) {
+    items.push({ id: r.id + 2e9, descricao: r.descricao, valor: Number(r.valor), tipo: "despesa", data: r.vencimento, status: r.status || "pendente" })
+  }
+  // Ordena por data desc e limita a 100
+  items.sort((a, b) => (a.data < b.data ? 1 : a.data > b.data ? -1 : 0))
+  return items.slice(0, 100)
 }
 
 const emptyForm = { nome: "", tipo: "Conta Corrente", agencia: "", conta: "", saldo: "" }
@@ -102,6 +138,14 @@ function ContasBancariasPage() {
   const [form, setForm] = useState(emptyForm)
   const [saving, setSaving] = useState(false)
 
+  // Mês de referência (controla ConciliacaoContas e labels)
+  const currentDate = new Date()
+  const [refMonth, setRefMonth] = useState(currentDate.getMonth() + 1) // 1..12
+  const [refYear, setRefYear] = useState(currentDate.getFullYear())
+  const [showMonthDropdown, setShowMonthDropdown] = useState(false)
+  const [showYearDropdown, setShowYearDropdown] = useState(false)
+  const MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
+
   // Extrato panel
   const [selectedConta, setSelectedConta] = useState<ContaBancaria | null>(null)
   const [filtroExtrato, setFiltroExtrato] = useState<FiltroExtrato>("mes")
@@ -119,32 +163,8 @@ function ContasBancariasPage() {
   })
   const [transferSaving, setTransferSaving] = useState(false)
 
-  // Criar categoria de transferência automaticamente ao abrir dialog
-  useEffect(() => {
-    if (!transferDialogOpen) return
-    const tid = getActiveTenantId()
-    if (!tid) return
-    
-    const createCategoriaTransferencia = async () => {
-      const supabase = createClient()
-      const { data: existing } = await supabase
-        .from("categorias")
-        .select("id")
-        .eq("nome", "Transferência entre Contas")
-        .eq("tenant_id", tid)
-        .single()
-      
-      if (!existing) {
-        await supabase.from("categorias").insert({
-          nome: "Transferência entre Contas",
-          tipo: "Despesa",
-          cor: "#6B7280",
-          tenant_id: tid,
-        })
-      }
-    }
-    createCategoriaTransferencia()
-  }, [transferDialogOpen])
+  // A categoria "Transferência entre Contas" é criada sob demanda em handleTransfer()
+  // (evita criar duplicatas ao abrir o diálogo)
 
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -174,28 +194,64 @@ function ContasBancariasPage() {
   }
 
   const handleSave = useCallback(async () => {
-    if (!form.nome.trim()) return
+    if (!form.nome.trim()) {
+      alert("O nome da conta é obrigatório")
+      return
+    }
+    
+    // Verificar se já existe uma conta com o mesmo nome PARA O MESMO TENANT
+    if (!editingConta) {
+      const tid = getActiveTenantId()
+      const contaExistente = contas.find(c => 
+        c.nome.toLowerCase().trim() === form.nome.toLowerCase().trim()
+      )
+      if (contaExistente) {
+        const confirmar = confirm(
+          `Já existe uma conta "${form.nome}" cadastrada. Deseja criar outra conta com o mesmo nome?`
+        )
+        if (!confirmar) return
+      }
+    }
+    
     setSaving(true)
     try {
       const supabase = createClient()
       const tid = getActiveTenantId()
+      
+      // Validar que sempre tem um tenant_id
+      if (!tid) {
+        alert("Erro: Cliente não identificado. Por favor, faça login novamente.")
+        return
+      }
+      
       if (editingConta) {
         const novoSaldoInicial = parseFloat(form.saldo) || 0
         const supabase2 = createClient()
 
         // 1. Atualiza dados cadastrais + saldo_inicial
-        await supabase.from("contas_bancarias").update({
+        const { error: updateError } = await supabase.from("contas_bancarias").update({
           nome: form.nome, tipo: form.tipo, agencia: form.agencia, conta: form.conta,
           saldo_inicial: novoSaldoInicial,
         }).eq("id", editingConta.id)
 
-        // 2. Recalcula saldo = saldo_inicial + entradas_recebidas - saidas_pagas
-        const [{ data: entradas }, { data: saidas }] = await Promise.all([
-          supabase2.from("contas_receber").select("valor").eq("conta_bancaria_id", editingConta.id).eq("status", "recebido"),
-          supabase2.from("contas_pagar").select("valor").eq("conta_bancaria_id", editingConta.id).eq("status", "pago"),
+        if (updateError) {
+          console.error("Erro ao atualizar conta:", updateError)
+          alert("Erro ao atualizar conta: " + updateError.message)
+          return
+        }
+
+        // 2. Recalcula saldo = saldo_inicial + entradas_recebidas - saidas_pagas + lancamentos
+        const [entradas, saidas, lancs] = await Promise.all([
+          fetchAll(supabase2.from("contas_receber").select("valor").eq("conta_bancaria_id", editingConta.id).eq("status", "recebido")),
+          fetchAll(supabase2.from("contas_pagar").select("valor").eq("conta_bancaria_id", editingConta.id).eq("status", "pago")),
+          fetchAll(supabase2.from("lancamentos").select("valor, tipo").eq("conta_bancaria_id", editingConta.id)),
         ])
-        const totalEntradas = (entradas || []).reduce((a, r) => a + Number(r.valor), 0)
-        const totalSaidas   = (saidas   || []).reduce((a, r) => a + Number(r.valor), 0)
+        let totalEntradas = (entradas as any[]).reduce((a, r) => a + Number(r.valor), 0)
+        let totalSaidas   = (saidas as any[]).reduce((a, r) => a + Number(r.valor), 0)
+        for (const l of lancs as any[]) {
+          if (l.tipo === "receita") totalEntradas += Number(l.valor)
+          else totalSaidas += Number(l.valor)
+        }
         const novoSaldo = novoSaldoInicial + totalEntradas - totalSaidas
 
         await supabase.from("contas_bancarias").update({ saldo: novoSaldo }).eq("id", editingConta.id)
@@ -203,17 +259,44 @@ function ContasBancariasPage() {
         // Novo: saldo_inicial e saldo recebem o valor informado (base para o trigger)
         const saldoInicial = parseFloat(form.saldo) || 0
         const payload: Record<string, unknown> = {
-          nome: form.nome, tipo: form.tipo, agencia: form.agencia, conta: form.conta,
+          nome: form.nome.trim(), 
+          tipo: form.tipo, 
+          agencia: form.agencia?.trim() || '', 
+          conta: form.conta?.trim() || '',
           saldo_inicial: saldoInicial,
           saldo: saldoInicial,
           cor: COLORS[contas.length % COLORS.length],
+          entradas: 0,
+          saidas: 0,
+          tenant_id: tid, // SEMPRE adiciona o tenant_id
         }
-        if (tid) payload.tenant_id = tid
-        await supabase.from("contas_bancarias").insert(payload)
+        
+        const { error: insertError, data: insertData } = await supabase
+          .from("contas_bancarias")
+          .insert(payload)
+          .select()
+        
+        if (insertError) {
+          console.error("Erro ao criar conta:", {
+            error: insertError,
+            message: insertError.message,
+            details: insertError.details,
+            hint: insertError.hint,
+            code: insertError.code,
+            payload: payload
+          })
+          alert("Erro ao criar conta: " + insertError.message + (insertError.hint ? "\n" + insertError.hint : ""))
+          return
+        }
+        
+        console.log("Conta criada com sucesso:", insertData)
       }
       await mutate(); setDialogOpen(false)
+    } catch (error) {
+      console.error("Erro inesperado:", error)
+      alert("Erro inesperado: " + (error instanceof Error ? error.message : String(error)))
     } finally { setSaving(false) }
-  }, [form, editingConta, contas.length, mutate])
+  }, [form, editingConta, contas, mutate])
 
   const handleDelete = useCallback(async (c: ContaBancaria) => {
     const supabase = createClient()
@@ -244,45 +327,50 @@ function ContasBancariasPage() {
       const contaDestino = contas.find(c => c.id === contaDestinoId)
 
       // Buscar ou criar categoria de transferência (sem grupo_dre = não afeta DRE)
+      // Busca robusta: compara normalizado (sem acentos, case-insensitive) para evitar duplicatas
       let categoriaTransferencia: { id: number } | null = null
-      
-      console.log("[v0] Buscando categoria de transferência para tenant:", tid)
-      
-      const { data: catData, error: catError } = await supabase
+
+      const normalize = (s: string) => s
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim()
+      const alvo = normalize("Transferência entre Contas")
+
+      // Busca TODAS as categorias do tenant e encontra qualquer variante de nome
+      const { data: allCats } = await supabase
         .from("categorias")
-        .select("id")
-        .eq("nome", "Transferência entre Contas")
+        .select("id, nome")
         .eq("tenant_id", tid)
-        .maybeSingle()
-      
-      console.log("[v0] Resultado busca categoria:", catData, catError)
-      
-      if (catData) {
-        categoriaTransferencia = catData
+
+      const existente = (allCats || []).find(c => normalize(c.nome as string) === alvo)
+
+      if (existente) {
+        categoriaTransferencia = { id: existente.id as number }
       } else {
-        // Criar categoria se não existir
-        console.log("[v0] Criando nova categoria de transferência")
+        // Não existe — cria
         const { data: newCat, error: insertError } = await supabase
           .from("categorias")
-          .insert({ nome: "Transferência entre Contas", tipo: "Despesa", cor: "#6B7280", tenant_id: tid })
+          .insert({
+            nome: "Transferência entre Contas",
+            tipo: "Despesa",
+            cor: "#6B7280",
+            tenant_id: tid,
+          })
           .select("id")
           .single()
-        
-        console.log("[v0] Resultado inserção categoria:", newCat, insertError)
-        
-        if (insertError) {
-          alert("Erro ao criar categoria: " + insertError.message)
+
+        if (insertError || !newCat) {
+          alert("Erro ao criar categoria: " + (insertError?.message || "desconhecido"))
           return
         }
         categoriaTransferencia = newCat
       }
 
       if (!categoriaTransferencia) {
-        alert("Erro ao criar categoria de transferência")
+        alert("Erro ao obter categoria de transferência")
         return
       }
-      
-      console.log("[v0] Categoria de transferência ID:", categoriaTransferencia.id)
 
       // 1. Criar conta a pagar (saída da conta origem) - já como PAGO
       const contaPagarPayload: Record<string, unknown> = {
@@ -394,6 +482,58 @@ function ContasBancariasPage() {
                   </div>
                 </div>
               </div>
+
+              {/* Seletor de Mês de Referência */}
+              <div className="flex items-center justify-between">
+                <h2 className="text-base font-semibold text-foreground">Mês de Referência</h2>
+                <div className="flex items-center gap-2">
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => { setShowMonthDropdown(!showMonthDropdown); setShowYearDropdown(false) }}
+                      className="flex items-center gap-1 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-card-foreground shadow-sm hover:bg-muted"
+                    >
+                      {MONTHS[refMonth - 1]}
+                      <ChevronDown className="h-4 w-4" />
+                    </button>
+                    {showMonthDropdown && (
+                      <div className="absolute right-0 top-full z-20 mt-1 w-40 rounded-lg border border-border bg-card py-1 shadow-lg">
+                        {MONTHS.map((m, idx) => (
+                          <button key={m} type="button"
+                            onClick={() => { setRefMonth(idx + 1); setShowMonthDropdown(false) }}
+                            className={`w-full px-4 py-2 text-left text-sm hover:bg-muted ${idx + 1 === refMonth ? "bg-muted font-medium" : ""}`}>
+                            {m}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => { setShowYearDropdown(!showYearDropdown); setShowMonthDropdown(false) }}
+                      className="flex items-center gap-1 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-card-foreground shadow-sm hover:bg-muted"
+                    >
+                      {refYear}
+                      <ChevronDown className="h-4 w-4" />
+                    </button>
+                    {showYearDropdown && (
+                      <div className="absolute right-0 top-full z-20 mt-1 w-24 rounded-lg border border-border bg-card py-1 shadow-lg">
+                        {[refYear - 1, refYear, refYear + 1].map((y) => (
+                          <button key={y} type="button"
+                            onClick={() => { setRefYear(y); setShowYearDropdown(false) }}
+                            className={`w-full px-4 py-2 text-left text-sm hover:bg-muted ${y === refYear ? "bg-muted font-medium" : ""}`}>
+                            {y}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Movimentação e Conciliação */}
+              <ConciliacaoContas month={refMonth} year={refYear} />
 
               {/* Table header */}
               <div className="flex items-center justify-between">

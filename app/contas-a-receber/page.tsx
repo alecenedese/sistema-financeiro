@@ -5,10 +5,11 @@ import { useSearchParams, useRouter } from "next/navigation"
 import { Suspense } from "react"
 import useSWR from "swr"
 import { createClient } from "@/lib/supabase/client"
+import { fetchAll } from "@/lib/supabase/fetch-all"
 import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
-import { FileUp, Plus, TrendingUp, Clock, CheckCircle2, AlertTriangle, Pencil, Trash2, Loader2, Search, X, ChevronDown, Calendar, ChevronLeft, ChevronRight, Download } from "lucide-react"
+import { FileUp, Plus, TrendingUp, Clock, CheckCircle2, AlertTriangle, Pencil, Trash2, Loader2, Search, X, ChevronDown, Calendar, ChevronLeft, ChevronRight, Download, Copy } from "lucide-react"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
 } from "@/components/ui/dialog"
@@ -73,17 +74,19 @@ async function recalcularSaldoConta(contaId: number) {
   if (!conta) return
   const saldoInicial = Number(conta.saldo_inicial) || 0
   
-  const { data: despesas } = await supabase.from("contas_pagar").select("valor").eq("conta_bancaria_id", contaId).eq("status", "pago")
-  const { data: receitas } = await supabase.from("contas_receber").select("valor").eq("conta_bancaria_id", contaId).eq("status", "recebido")
-  const { data: lancamentos } = await supabase.from("lancamentos").select("valor, tipo").eq("conta_bancaria_id", contaId)
+  const [despesas, receitas, lancamentos] = await Promise.all([
+    fetchAll(supabase.from("contas_pagar").select("valor").eq("conta_bancaria_id", contaId).eq("status", "pago")),
+    fetchAll(supabase.from("contas_receber").select("valor").eq("conta_bancaria_id", contaId).eq("status", "recebido")),
+    fetchAll(supabase.from("lancamentos").select("valor, tipo").eq("conta_bancaria_id", contaId)),
+  ])
   
   let entradas = 0, saidas = 0
-  for (const l of lancamentos || []) {
+  for (const l of lancamentos as any[]) {
     if (l.tipo === "receita") entradas += Number(l.valor)
     else saidas += Number(l.valor)
   }
-  for (const r of receitas || []) entradas += Number(r.valor)
-  for (const d of despesas || []) saidas += Number(d.valor)
+  for (const r of receitas as any[]) entradas += Number(r.valor)
+  for (const d of despesas as any[]) saidas += Number(d.valor)
   
   const novoSaldo = saldoInicial + entradas - saidas
   await supabase.from("contas_bancarias").update({ saldo: novoSaldo }).eq("id", contaId)
@@ -330,6 +333,23 @@ function openEdit(conta: ContaReceber) {
   forma_pagamento: normalizaFormaPgto(conta.forma_pagamento),
   })
   setDialogOpen(true)
+  }
+
+  function openClone(conta: ContaReceber) {
+    setEditingConta(null) // insere como nova
+    setForm({
+      descricao: conta.descricao,
+      valor: formatBRL(conta.valor),
+      vencimento: conta.vencimento,
+      cliente_id: conta.cliente_id?.toString() || "",
+      categoria_id: conta.categoria_id?.toString() || "",
+      subcategoria_id: conta.subcategoria_id?.toString() || "",
+      subcategoria_filho_id: conta.subcategoria_filho_id?.toString() || "",
+      conta_bancaria_id: conta.conta_bancaria_id?.toString() || "",
+      status: conta.status,
+      forma_pagamento: normalizaFormaPgto(conta.forma_pagamento),
+    })
+    setDialogOpen(true)
   }
 
   async function handleSave() {
@@ -611,7 +631,7 @@ function openEdit(conta: ContaReceber) {
                         <th className="w-28 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Vencimento</th>
                         <th className="w-24 px-4 py-3 text-left text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</th>
                         <th className="w-32 px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Valor</th>
-                        <th className="w-20 px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Acoes</th>
+                        <th className="w-32 px-4 py-3 text-right text-xs font-semibold uppercase tracking-wide text-muted-foreground">Acoes</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -658,10 +678,13 @@ function openEdit(conta: ContaReceber) {
                           </td>
                           <td className="px-4 py-3.5">
                             <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                              <button type="button" onClick={() => openEdit(conta)} className="flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground">
+                              <button type="button" onClick={() => openEdit(conta)} title="Editar" className="flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground">
                                 <Pencil className="h-3.5 w-3.5" />
                               </button>
-                              <button type="button" onClick={() => setDeleteConfirm(conta)} className="flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
+                              <button type="button" onClick={() => openClone(conta)} title="Clonar" className="flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground">
+                                <Copy className="h-3.5 w-3.5" />
+                              </button>
+                              <button type="button" onClick={() => setDeleteConfirm(conta)} title="Excluir" className="flex h-7 w-7 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
                                 <Trash2 className="h-3.5 w-3.5" />
                               </button>
                             </div>
