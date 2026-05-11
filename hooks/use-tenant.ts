@@ -21,6 +21,15 @@ function readFromStorage(): ActiveTenant | null {
   }
 }
 
+// Pub-sub global para que todas as instâncias de useTenant reajam
+// quando qualquer uma delas chama setTenant (mesma aba).
+type Listener = (t: ActiveTenant | null) => void
+const listeners = new Set<Listener>()
+
+function notify(t: ActiveTenant | null) {
+  listeners.forEach((l) => l(t))
+}
+
 // Hook reativo — inicia com null (SSR safe) e hidrata no useEffect
 // para evitar hydration mismatch
 export function useTenant() {
@@ -32,6 +41,10 @@ export function useTenant() {
     setTenantState(readFromStorage())
     setMounted(true)
 
+    // Subscribe ao pub-sub local (sincroniza instâncias na mesma aba)
+    const listener: Listener = (t) => setTenantState(t)
+    listeners.add(listener)
+
     // Sincroniza entre abas
     function onStorage(e: StorageEvent) {
       if (e.key === STORAGE_KEY) {
@@ -39,7 +52,10 @@ export function useTenant() {
       }
     }
     window.addEventListener("storage", onStorage)
-    return () => window.removeEventListener("storage", onStorage)
+    return () => {
+      listeners.delete(listener)
+      window.removeEventListener("storage", onStorage)
+    }
   }, [])
 
   const setTenant = useCallback((t: ActiveTenant | null) => {
@@ -48,6 +64,8 @@ export function useTenant() {
       if (t) localStorage.setItem(STORAGE_KEY, JSON.stringify(t))
       else localStorage.removeItem(STORAGE_KEY)
     } catch { /* ignore */ }
+    // Avisa outras instâncias de useTenant na mesma aba
+    notify(t)
   }, [])
 
   const clearTenant = useCallback(() => setTenant(null), [setTenant])

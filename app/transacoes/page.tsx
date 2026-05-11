@@ -5,6 +5,7 @@ import { useSearchParams, useRouter } from "next/navigation"
 import { Suspense } from "react"
 import useSWR from "swr"
 import { createClient } from "@/lib/supabase/client"
+import { fetchAll } from "@/lib/supabase/fetch-all"
 import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
@@ -76,25 +77,23 @@ function getPeriodoDates(periodo: PeriodoFiltro, custom: { from: string; to: str
 async function recalcularSaldoConta(contaId: number) {
   if (!contaId) return
   const supabase = createClient()
-  // Busca saldo inicial da conta
   const { data: conta } = await supabase.from("contas_bancarias").select("saldo_inicial").eq("id", contaId).single()
   if (!conta) return
   const saldoInicial = Number(conta.saldo_inicial) || 0
   
-  // Busca transacoes de contas_pagar (saidas pagas)
-  const { data: despesas } = await supabase.from("contas_pagar").select("valor").eq("conta_bancaria_id", contaId).eq("status", "pago")
-  // Busca transacoes de contas_receber (entradas recebidas)
-  const { data: receitas } = await supabase.from("contas_receber").select("valor").eq("conta_bancaria_id", contaId).eq("status", "recebido")
-  // Busca lancamentos manuais
-  const { data: lancamentos } = await supabase.from("lancamentos").select("valor, tipo").eq("conta_bancaria_id", contaId)
+  const [despesas, receitas, lancamentos] = await Promise.all([
+    fetchAll(supabase.from("contas_pagar").select("valor").eq("conta_bancaria_id", contaId).eq("status", "pago")),
+    fetchAll(supabase.from("contas_receber").select("valor").eq("conta_bancaria_id", contaId).eq("status", "recebido")),
+    fetchAll(supabase.from("lancamentos").select("valor, tipo").eq("conta_bancaria_id", contaId)),
+  ])
   
   let entradas = 0, saidas = 0
-  for (const l of lancamentos || []) {
+  for (const l of lancamentos as any[]) {
     if (l.tipo === "receita") entradas += Number(l.valor)
     else saidas += Number(l.valor)
   }
-  for (const r of receitas || []) entradas += Number(r.valor)
-  for (const d of despesas || []) saidas += Number(d.valor)
+  for (const r of receitas as any[]) entradas += Number(r.valor)
+  for (const d of despesas as any[]) saidas += Number(d.valor)
   
   const novoSaldo = saldoInicial + entradas - saidas
   await supabase.from("contas_bancarias").update({ saldo: novoSaldo }).eq("id", contaId)

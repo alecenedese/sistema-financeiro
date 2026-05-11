@@ -15,9 +15,10 @@ export async function GET(request: NextRequest) {
     console.log("[v0] API tenant-info - tenantId:", tenantId)
     
     // Usa maybeSingle() para não dar erro se não encontrar
+    // Consulta clientes_admin (mesma tabela do seletor de tenant no frontend)
     const { data, error } = await supabase
-      .from("tenant_clientes")
-      .select("id, nome")
+      .from("clientes_admin")
+      .select("id, nome, cnpj")
       .eq("id", tenantId)
       .maybeSingle()
 

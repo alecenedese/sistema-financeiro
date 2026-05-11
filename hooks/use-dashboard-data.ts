@@ -2,6 +2,7 @@
 
 import { createClient } from "@/lib/supabase/client"
 import { useTenant } from "@/hooks/use-tenant"
+import { fetchAll } from "@/lib/supabase/fetch-all"
 import useSWR from "swr"
 
 // ─── tipos ───────────────────────────────────────────────────────────────────
@@ -57,17 +58,35 @@ function colorForIndex(i: number) {
   return PALETTE[i % PALETTE.length]
 }
 
+function isTransferCat(nome: string): boolean {
+  return nome
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .includes("transferencia entre")
+}
+
 function mesRange(offset = 0) {
   const now = new Date()
   const d = new Date(now.getFullYear(), now.getMonth() - offset, 1)
   const year = d.getFullYear()
-  const month = String(d.getMonth() + 1).padStart(2, "0")
+  const month = d.getMonth() // 0-11
   const label = d.toLocaleDateString("pt-BR", { month: "short" }).replace(".", "")
+  // Usa horário local do browser para definir limites do mês
+  const fromISO = new Date(year, month, 1, 0, 0, 0, 0).toISOString()
+  const toISO = new Date(year, month + 1, 1, 0, 0, 0, 0).toISOString()
   return {
-    from: `${year}-${month}-01`,
-    to: `${year}-${month}-31`,
+    from: fromISO,
+    to: toISO,
     label: label.charAt(0).toUpperCase() + label.slice(1),
   }
+}
+
+// Helper: converte mês/ano para range ISO respeitando timezone local do browser
+function monthToISO(month: number, year: number) {
+  const fromISO = new Date(year, month - 1, 1, 0, 0, 0, 0).toISOString()
+  const toISO = new Date(year, month, 1, 0, 0, 0, 0).toISOString()
+  return { fromISO, toISO }
 }
 
 type TidKey = [string, number | null]
@@ -83,15 +102,15 @@ async function fetchSummary([, tid]: TidKey): Promise<SummaryData> {
     .from("contas_pagar")
     .select("valor, status")
     .gte("vencimento", from)
-    .lte("vencimento", to)
+    .lt("vencimento", to)
   if (tid) qPagar = qPagar.eq("tenant_id", tid)
 
   // Contas a receber (receitas)
   let qReceber = supabase
     .from("contas_receber")
-    .select("valor, status")
+    .select("valor, status, categorias(nome)")
     .gte("vencimento", from)
-    .lte("vencimento", to)
+    .lt("vencimento", to)
   if (tid) qReceber = qReceber.eq("tenant_id", tid)
 
   // Lancamentos manuais
@@ -99,7 +118,7 @@ async function fetchSummary([, tid]: TidKey): Promise<SummaryData> {
     .from("lancamentos")
     .select("valor, tipo, status")
     .gte("data", from)
-    .lte("data", to)
+    .lt("data", to)
   if (tid) qLanc = qLanc.eq("tenant_id", tid)
 
   // Contas bancarias
@@ -120,6 +139,8 @@ async function fetchSummary([, tid]: TidKey): Promise<SummaryData> {
 
   for (const r of (receber || [])) {
     const v = Number(r.valor)
+    const catNome = ((r.categorias as { nome?: string } | null)?.nome || "")
+    if (isTransferCat(catNome)) continue
     if (r.status === "recebido" || r.status === "confirmado") receitas += v
   }
 
@@ -182,15 +203,13 @@ async function fetchRecentTx([, tid]: TidKey): Promise<RecentTx[]> {
 // Versão com filtro de mês/ano para a dashboard
 async function fetchRecentTxMonth([, tid, month, year]: [string, number | null, number, number]): Promise<RecentTx[]> {
   const supabase = createClient()
-  const from = `${year}-${String(month).padStart(2, "0")}-01`
-  const lastDay = new Date(year, month, 0).getDate()
-  const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
+  const { fromISO, toISO } = monthToISO(month, year)
 
   let qP = supabase
     .from("contas_pagar")
     .select("id, descricao, valor, vencimento, status, categoria_id, categorias(nome)")
-    .gte("vencimento", from)
-    .lte("vencimento", to)
+    .gte("vencimento", fromISO)
+    .lt("vencimento", toISO)
     .order("vencimento", { ascending: false })
     .limit(10)
   if (tid) qP = qP.eq("tenant_id", tid)
@@ -198,8 +217,8 @@ async function fetchRecentTxMonth([, tid, month, year]: [string, number | null, 
   let qR = supabase
     .from("contas_receber")
     .select("id, descricao, valor, vencimento, status, categoria_id, categorias(nome)")
-    .gte("vencimento", from)
-    .lte("vencimento", to)
+    .gte("vencimento", fromISO)
+    .lt("vencimento", toISO)
     .order("vencimento", { ascending: false })
     .limit(10)
   if (tid) qR = qR.eq("tenant_id", tid)
@@ -253,16 +272,16 @@ async function fetchMonthly([, tid]: TidKey): Promise<MonthlyPoint[]> {
   for (let i = 5; i >= 0; i--) {
     const { from, to, label } = mesRange(i)
 
-    let qP = supabase.from("contas_pagar").select("valor").eq("status", "pago").gte("vencimento", from).lte("vencimento", to)
-    let qR = supabase.from("contas_receber").select("valor").eq("status", "recebido").gte("vencimento", from).lte("vencimento", to)
-    let qL = supabase.from("lancamentos").select("valor, tipo").gte("data", from).lte("data", to)
+    let qP = supabase.from("contas_pagar").select("valor").eq("status", "pago").gte("vencimento", from).lt("vencimento", to)
+    let qR = supabase.from("contas_receber").select("valor, categorias(nome)").eq("status", "recebido").gte("vencimento", from).lt("vencimento", to)
+    let qL = supabase.from("lancamentos").select("valor, tipo").gte("data", from).lt("data", to)
 
     if (tid) { qP = qP.eq("tenant_id", tid); qR = qR.eq("tenant_id", tid); qL = qL.eq("tenant_id", tid) }
 
     const [{ data: pagar }, { data: receber }, { data: lanc }] = await Promise.all([qP, qR, qL])
 
     let despesas = (pagar || []).reduce((s, r) => s + Number(r.valor), 0)
-    let receitas = (receber || []).reduce((s, r) => s + Number(r.valor), 0)
+    let receitas = (receber || []).filter(r => !isTransferCat(((r.categorias as { nome?: string } | null)?.nome || ""))).reduce((s, r) => s + Number(r.valor), 0)
     for (const r of (lanc || [])) {
       if (r.tipo === "receita") receitas += Number(r.valor)
       else despesas += Number(r.valor)
@@ -281,11 +300,13 @@ async function fetchCategoryCharts([, tid]: TidKey): Promise<{ expenses: Categor
   let qP = supabase
     .from("contas_pagar")
     .select("valor, categoria_id, categorias(nome), subcategorias(nome)")
-    .gte("vencimento", from).lte("vencimento", to)
+    .gte("vencimento", from)
+    .lt("vencimento", to)
   let qR = supabase
     .from("contas_receber")
     .select("valor, categoria_id, categorias(nome), subcategorias(nome)")
-    .gte("vencimento", from).lte("vencimento", to)
+    .gte("vencimento", from)
+    .lt("vencimento", to)
 
   if (tid) { qP = qP.eq("tenant_id", tid); qR = qR.eq("tenant_id", tid) }
 
@@ -373,18 +394,18 @@ export function useCategoryCharts() {
 // Versão com mês/ano específico para o novo dashboard
 async function fetchCategoryChartsMonth([, tid, month, year]: [string, number | null, number, number]): Promise<{ expenses: CategoryPoint[]; incomes: CategoryPoint[] }> {
   const supabase = createClient()
-  const from = `${year}-${String(month).padStart(2, "0")}-01`
-  const lastDay = new Date(year, month, 0).getDate()
-  const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
+  const { fromISO, toISO } = monthToISO(month, year)
 
   let qP = supabase
     .from("contas_pagar")
-    .select("valor, categoria_id, categorias(nome), subcategorias(nome)")
-    .gte("vencimento", from).lte("vencimento", to)
+    .select("valor, categoria_id, categorias!inner(nome, grupo_dre), subcategorias(nome)")
+    .gte("vencimento", fromISO).lt("vencimento", toISO)
+    .not("categorias.grupo_dre", "is", null)
   let qR = supabase
     .from("contas_receber")
-    .select("valor, categoria_id, categorias(nome), subcategorias(nome)")
-    .gte("vencimento", from).lte("vencimento", to)
+    .select("valor, categoria_id, categorias!inner(nome, grupo_dre), subcategorias(nome)")
+    .gte("vencimento", fromISO).lt("vencimento", toISO)
+    .not("categorias.grupo_dre", "is", null)
 
   if (tid) { qP = qP.eq("tenant_id", tid); qR = qR.eq("tenant_id", tid) }
 
@@ -395,7 +416,7 @@ async function fetchCategoryChartsMonth([, tid, month, year]: [string, number | 
   function buildMap(rows: typeof pagar): Map {
     const map: Map = {}
     for (const r of (rows || [])) {
-      const cat = (r.categorias as { nome: string } | null)?.nome || "Sem categoria"
+      const cat = (r.categorias as { nome: string; grupo_dre: string } | null)?.nome || "Sem categoria"
       const sub = (r.subcategorias as { nome: string } | null)?.nome || "Geral"
       const v = Number(r.valor)
       if (!map[cat]) map[cat] = { value: 0, subs: {} }
@@ -429,7 +450,11 @@ export function useCategoryChartsMonth(month: number, year: number) {
   const { tenant, mounted } = useTenant()
   // Aguarda montagem antes de buscar - evita hydration mismatch
   const key = mounted ? ["dashboard-category-charts-month", tenant?.id ?? null, month, year] as [string, number | null, number, number] : null
-  return useSWR(key, fetchCategoryChartsMonth, { revalidateOnFocus: false })
+  return useSWR(key, fetchCategoryChartsMonth, { 
+    revalidateOnFocus: false,
+    revalidateOnMount: true,
+    dedupingInterval: 0 // Desabilita cache para forçar nova busca
+  })
 }
 
 // ─── Dashboard Mensal ─────────────────────────────────────────────────────────
@@ -447,24 +472,22 @@ export interface DashboardMensalData {
 
 async function fetchDashboardMensal([, tid, month, year]: [string, number | null, number, number]): Promise<DashboardMensalData> {
   const supabase = createClient()
-  const from = `${year}-${String(month).padStart(2, "0")}-01`
-  const lastDay = new Date(year, month, 0).getDate()
-  const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
+  const { fromISO, toISO } = monthToISO(month, year)
 
   // Faturamento (vendas - contas a receber com status confirmado/recebido)
   let qFat = supabase
     .from("contas_receber")
-    .select("valor, status")
-    .gte("vencimento", from)
-    .lte("vencimento", to)
+    .select("valor, status, categorias(nome)")
+    .gte("vencimento", fromISO)
+    .lt("vencimento", toISO)
   if (tid) qFat = qFat.eq("tenant_id", tid)
 
   // Pagamentos (contas a pagar com status pago/confirmado)
   let qPag = supabase
     .from("contas_pagar")
     .select("valor, status")
-    .gte("vencimento", from)
-    .lte("vencimento", to)
+    .gte("vencimento", fromISO)
+    .lt("vencimento", toISO)
   if (tid) qPag = qPag.eq("tenant_id", tid)
 
   // Saldo em conta
@@ -475,11 +498,15 @@ async function fetchDashboardMensal([, tid, month, year]: [string, number | null
     qFat, qPag, qContas,
   ])
 
+  const semTransferencia = (receberData || []).filter(
+    r => !isTransferCat(((r.categorias as { nome?: string } | null)?.nome || ""))
+  )
+
   // Faturamento = total de contas a receber (independente do status, é o faturamento do período)
-  const faturamento = (receberData || []).reduce((acc, r) => acc + Number(r.valor), 0)
+  const faturamento = semTransferencia.reduce((acc, r) => acc + Number(r.valor), 0)
 
   // Recebimentos = contas a receber que foram efetivamente recebidas
-  const recebimentos = (receberData || [])
+  const recebimentos = semTransferencia
     .filter(r => r.status === "recebido" || r.status === "confirmado")
     .reduce((acc, r) => acc + Number(r.valor), 0)
 
@@ -521,55 +548,65 @@ export function useDashboardMensal(month: number, year: number) {
 
 export interface FluxoCaixaDiarioPoint {
   dia: number
-  valor: number
+  entradas: number   // recebimentos (positivo)
+  saidas: number     // pagamentos (negativo, para barras abaixo do zero)
+  saldo: number      // entradas + saidas (entradas - |pagamentos|)
 }
 
 async function fetchFluxoCaixaDiario([, tid, month, year]: [string, number | null, number, number]): Promise<FluxoCaixaDiarioPoint[]> {
   const supabase = createClient()
-  const from = `${year}-${String(month).padStart(2, "0")}-01`
-  const lastDay = new Date(year, month, 0).getDate()
-  const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
+  const { fromISO, toISO } = monthToISO(month, year)
 
   // Recebimentos por dia - busca todos os status para ter dados
   let qRec = supabase
     .from("contas_receber")
     .select("valor, vencimento, status")
-    .gte("vencimento", from)
-    .lte("vencimento", to)
+    .gte("vencimento", fromISO)
+    .lt("vencimento", toISO)
   if (tid) qRec = qRec.eq("tenant_id", tid)
 
   // Pagamentos por dia - busca todos os status para ter dados
   let qPag = supabase
     .from("contas_pagar")
     .select("valor, vencimento, status")
-    .gte("vencimento", from)
-    .lte("vencimento", to)
+    .gte("vencimento", fromISO)
+    .lt("vencimento", toISO)
   if (tid) qPag = qPag.eq("tenant_id", tid)
 
   const [{ data: recData }, { data: pagData }] = await Promise.all([qRec, qPag])
 
   // Mapeia por dia
   const daysInMonth = new Date(year, month, 0).getDate()
-  const dayMap: Record<number, number> = {}
+  const entradasMap: Record<number, number> = {}
+  const saidasMap: Record<number, number> = {}
 
   for (let d = 1; d <= daysInMonth; d++) {
-    dayMap[d] = 0
+    entradasMap[d] = 0
+    saidasMap[d] = 0
   }
 
   for (const r of (recData || [])) {
     const day = new Date(r.vencimento + "T00:00:00").getDate()
-    dayMap[day] = (dayMap[day] || 0) + Number(r.valor)
+    entradasMap[day] = (entradasMap[day] || 0) + Number(r.valor)
   }
 
   for (const p of (pagData || [])) {
     const day = new Date(p.vencimento + "T00:00:00").getDate()
-    dayMap[day] = (dayMap[day] || 0) - Number(p.valor)
+    saidasMap[day] = (saidasMap[day] || 0) + Number(p.valor)
   }
 
-  return Object.entries(dayMap).map(([dia, valor]) => ({
-    dia: Number(dia),
-    valor,
-  }))
+  const result: FluxoCaixaDiarioPoint[] = []
+  for (let d = 1; d <= daysInMonth; d++) {
+    const entradas = entradasMap[d] || 0
+    const saidasAbs = saidasMap[d] || 0
+    result.push({
+      dia: d,
+      entradas,
+      saidas: -saidasAbs, // negativo para exibir barra para baixo
+      saldo: entradas - saidasAbs,
+    })
+  }
+  return result
 }
 
 export function useFluxoCaixaDiario(month: number, year: number) {
@@ -585,20 +622,21 @@ export interface FluxoVendasDiarioPoint {
   valor: number
 }
 
-async function fetchFluxoVendasDiario([, tid, month, year]: [string, number | null, number, number]): Promise<FluxoVendasDiarioPoint[]> {
+export interface FluxoVendasDiarioResult {
+  points: FluxoVendasDiarioPoint[]
+  qtdVendas: number
+}
+
+async function fetchFluxoVendasDiario([, tid, month, year]: [string, number | null, number, number]): Promise<FluxoVendasDiarioResult> {
   const supabase = createClient()
-  const from = `${year}-${String(month).padStart(2, "0")}-01`
-  const lastDay = new Date(year, month, 0).getDate()
-  const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
+  const { fromISO, toISO } = monthToISO(month, year)
 
-  let qRec = supabase
-    .from("contas_receber")
-    .select("valor, vencimento")
-    .gte("vencimento", from)
-    .lte("vencimento", to)
-  if (tid) qRec = qRec.eq("tenant_id", tid)
-
-  const { data: recData } = await qRec
+  // Usa fetchAll para bypassar o limite de 1000 do Supabase
+  const vendasData = await fetchAll<Record<string, unknown>>(
+    tid
+      ? supabase.from("vendas").select("valor_total, data_venda").gte("data_venda", fromISO).lt("data_venda", toISO).eq("tenant_id", tid)
+      : supabase.from("vendas").select("valor_total, data_venda").gte("data_venda", fromISO).lt("data_venda", toISO)
+  )
 
   const daysInMonth = new Date(year, month, 0).getDate()
   const dayMap: Record<number, number> = {}
@@ -607,15 +645,20 @@ async function fetchFluxoVendasDiario([, tid, month, year]: [string, number | nu
     dayMap[d] = 0
   }
 
-  for (const r of (recData || [])) {
-    const day = new Date(r.vencimento + "T00:00:00").getDate()
-    dayMap[day] = (dayMap[day] || 0) + Number(r.valor)
+  const tzOffset = new Date().getTimezoneOffset()
+  for (const r of (vendasData || [])) {
+    const dt = new Date(r.data_venda as string)
+    dt.setUTCMinutes(dt.getUTCMinutes() - tzOffset)
+    const day = dt.getUTCDate()
+    dayMap[day] = (dayMap[day] || 0) + Number(r.valor_total)
   }
 
-  return Object.entries(dayMap).map(([dia, valor]) => ({
+  const points = Object.entries(dayMap).map(([dia, valor]) => ({
     dia: Number(dia),
     valor,
   }))
+
+  return { points, qtdVendas: (vendasData || []).length }
 }
 
 export function useFluxoVendasDiario(month: number, year: number) {
@@ -624,118 +667,106 @@ export function useFluxoVendasDiario(month: number, year: number) {
   return useSWR(key, fetchFluxoVendasDiario, { revalidateOnFocus: false })
 }
 
-// ─── DRE ──────────────────────────────────────────────────────────────────────
+// ─── DRE (estrutura de 11 grupos, conforme Modelo DRE.xlsx) ──────────────────
+
+import { ESTRUTURA_DRE, calcularDRE, normalizarGrupoDRE } from "@/lib/dre-structure"
+
+export interface DRECategoriaDetalhe {
+  categoria_id: number
+  categoria_nome: string
+  codigo: string    // código DRE da folha (ex "1.1", "7.2")
+  total: number
+}
 
 export interface DREData {
-  receitaOperacionalBruta: number
-  deducoesReceitaBruta: number
-  receitaLiquida: number
-  custoDiretoVendas: number
-  lucroBruto: number
-  despesasOperacionais: number
-  ebitda: number
-  outrasReceitasNaoOperacionais: number
-  outrasDespesasNaoOperacionais: number
-  irCsll: number
-  lucroLiquidoPeriodo: number
+  valores: Record<string, number>          // código → valor calculado
+  detalhePorCodigo: Record<string, DRECategoriaDetalhe[]>  // folhas por código para drill-down
 }
 
 async function fetchDRE([, tid, month, year]: [string, number | null, number, number]): Promise<DREData> {
   const supabase = createClient()
-  const from = `${year}-${String(month).padStart(2, "0")}-01`
-  const lastDay = new Date(year, month, 0).getDate()
-  const to = `${year}-${String(month).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`
 
-  // Busca contas a receber com categoria e grupo DRE
-  let qRec = supabase
-    .from("contas_receber")
-    .select("valor, status, categorias(nome, grupo_dre)")
-    .gte("vencimento", from)
-    .lte("vencimento", to)
-  if (tid) qRec = qRec.eq("tenant_id", tid)
+  // Usa horário local do browser para definir limites do mês
+  // Converte para ISO UTC para que o Postgres filtre corretamente pelo fuso do usuário
+  const fromISO = new Date(year, month - 1, 1, 0, 0, 0, 0).toISOString()
+  const toISO = new Date(year, month, 1, 0, 0, 0, 0).toISOString()
 
-  // Busca contas a pagar com categoria e grupo DRE
-  let qPag = supabase
-    .from("contas_pagar")
-    .select("valor, status, categorias(nome, grupo_dre)")
-    .gte("vencimento", from)
-    .lte("vencimento", to)
-  if (tid) qPag = qPag.eq("tenant_id", tid)
+  // vendas do período (entram em 1.1 Receita de Vendas por padrão)
+  // Usa fetchAll para bypassar o limite de 1000 do Supabase
+  const [recData, pagData, vendasData] = await Promise.all([
+    fetchAll<Record<string, unknown>>(
+      tid
+        ? supabase.from("contas_receber").select("valor, status, categorias(id, nome, grupo_dre)").gte("vencimento", fromISO).lt("vencimento", toISO).eq("status", "recebido").eq("tenant_id", tid)
+        : supabase.from("contas_receber").select("valor, status, categorias(id, nome, grupo_dre)").gte("vencimento", fromISO).lt("vencimento", toISO).eq("status", "recebido")
+    ),
+    fetchAll<Record<string, unknown>>(
+      tid
+        ? supabase.from("contas_pagar").select("valor, status, categorias(id, nome, grupo_dre)").gte("vencimento", fromISO).lt("vencimento", toISO).eq("status", "pago").eq("tenant_id", tid)
+        : supabase.from("contas_pagar").select("valor, status, categorias(id, nome, grupo_dre)").gte("vencimento", fromISO).lt("vencimento", toISO).eq("status", "pago")
+    ),
+    fetchAll<Record<string, unknown>>(
+      tid
+        ? supabase.from("vendas").select("valor_total, data_venda").gte("data_venda", fromISO).lt("data_venda", toISO).eq("tenant_id", tid)
+        : supabase.from("vendas").select("valor_total, data_venda").gte("data_venda", fromISO).lt("data_venda", toISO)
+    ),
+  ])
 
-  const [{ data: recData }, { data: pagData }] = await Promise.all([qRec, qPag])
+  // Agrega por código folha
+  const folhas: Record<string, number> = {}
+  const detalheMap: Record<string, Map<number, DRECategoriaDetalhe>> = {}
 
-  // Inicializa valores
-  let receitaOperacionalBruta = 0
-  let deducoesReceitaBruta = 0
-  let custoDiretoVendas = 0
-  let despesasOperacionais = 0
-  let outrasReceitasNaoOperacionais = 0
-  let outrasDespesasNaoOperacionais = 0
-  let irCsll = 0
+  function addRow(valor: number, cat: { id?: number; nome?: string; grupo_dre?: string } | null, fonteEsperada: "cr" | "cp") {
+    const codigo = normalizarGrupoDRE(cat?.grupo_dre)
+    if (!codigo) return
+    const node = ESTRUTURA_DRE.find(n => n.codigo === codigo)
+    if (!node || node.fonte !== fonteEsperada) return
+    folhas[codigo] = (folhas[codigo] || 0) + valor
+    if (!detalheMap[codigo]) detalheMap[codigo] = new Map()
+    const key = cat?.id ?? 0
+    const existing = detalheMap[codigo].get(key)
+    if (existing) existing.total += valor
+    else detalheMap[codigo].set(key, {
+      categoria_id: cat?.id ?? 0,
+      categoria_nome: cat?.nome || "(sem categoria)",
+      codigo,
+      total: valor,
+    })
+  }
 
-  // Processa receitas
+  // 6.0 Recebimentos do Mês = soma de todos os contas_receber status=recebido (independente de categoria)
+  let recebimentosMes = 0
+
   for (const r of (recData || [])) {
-    if (r.status !== "recebido" && r.status !== "confirmado") continue
-    const valor = Number(r.valor)
-    const grupoDre = (r.categorias as { grupo_dre?: string } | null)?.grupo_dre || ""
-
-    switch (grupoDre) {
-      case "receita_operacional_bruta":
-        receitaOperacionalBruta += valor
-        break
-      case "deducoes_receita_bruta":
-        deducoesReceitaBruta += valor
-        break
-      case "outras_receitas_nao_operacionais":
-        outrasReceitasNaoOperacionais += valor
-        break
-      default:
-        receitaOperacionalBruta += valor
-    }
+    const valor = Number(r.valor) || 0
+    const catNome = ((r.categorias as { nome?: string } | null)?.nome || "")
+    if (isTransferCat(catNome)) continue
+    recebimentosMes += valor
+    addRow(valor, r.categorias as { id?: number; nome?: string; grupo_dre?: string } | null, "cr")
   }
+  folhas["6.0"] = recebimentosMes
 
-  // Processa despesas
   for (const p of (pagData || [])) {
-    if (p.status !== "pago" && p.status !== "confirmado") continue
-    const valor = Number(p.valor)
-    const grupoDre = (p.categorias as { grupo_dre?: string } | null)?.grupo_dre || ""
-
-    switch (grupoDre) {
-      case "custo_direto_vendas":
-        custoDiretoVendas += valor
-        break
-      case "despesas_operacionais":
-        despesasOperacionais += valor
-        break
-      case "outras_despesas_nao_operacionais":
-        outrasDespesasNaoOperacionais += valor
-        break
-      case "ir_csll":
-        irCsll += valor
-        break
-      default:
-        despesasOperacionais += valor
-    }
+    const valor = Number(p.valor) || 0
+    addRow(valor, p.categorias as { id?: number; nome?: string; grupo_dre?: string } | null, "cp")
   }
 
-  const receitaLiquida = receitaOperacionalBruta - deducoesReceitaBruta
-  const lucroBruto = receitaLiquida - custoDiretoVendas
-  const ebitda = lucroBruto - despesasOperacionais
-  const lucroLiquidoPeriodo = ebitda + outrasReceitasNaoOperacionais - outrasDespesasNaoOperacionais - irCsll
-
-  return {
-    receitaOperacionalBruta,
-    deducoesReceitaBruta,
-    receitaLiquida,
-    custoDiretoVendas,
-    lucroBruto,
-    despesasOperacionais,
-    ebitda,
-    outrasReceitasNaoOperacionais,
-    outrasDespesasNaoOperacionais,
-    irCsll,
-    lucroLiquidoPeriodo,
+  // vendas → 1.1 Receita de Vendas
+  const totalVendas = (vendasData || []).reduce((acc, v) => acc + (Number(v.valor_total) || 0), 0)
+  if (totalVendas > 0) {
+    folhas["1.1"] = (folhas["1.1"] || 0) + totalVendas
+    if (!detalheMap["1.1"]) detalheMap["1.1"] = new Map()
+    const existing = detalheMap["1.1"].get(-1)
+    if (existing) existing.total += totalVendas
+    else detalheMap["1.1"].set(-1, { categoria_id: -1, categoria_nome: "Vendas", codigo: "1.1", total: totalVendas })
   }
+
+  const valores = calcularDRE(folhas)
+  const detalhePorCodigo: Record<string, DRECategoriaDetalhe[]> = {}
+  for (const k of Object.keys(detalheMap)) {
+    detalhePorCodigo[k] = Array.from(detalheMap[k].values()).sort((a, b) => b.total - a.total)
+  }
+
+  return { valores, detalhePorCodigo }
 }
 
 export function useDRE(month: number, year: number) {
@@ -754,26 +785,40 @@ export interface LucroChartData {
 }
 
 export function useLucroBrutoChart(month: number, year: number) {
-  const { data, isLoading } = useDashboardMensal(month, year)
-  
+  const { data, isLoading } = useDRE(month, year)
+  const v = data?.valores || {}
+
+  const receitaBruta = v["1.0"] || 0
+  const receitaLiquida = v["3.0"] || 0
+  const custoDireto = v["4.0"] || 0
+  const resultado = v["5.0"] || 0
+  const percentual = receitaBruta !== 0 ? (resultado / receitaBruta) * 100 : 0
+
   const chartData: LucroChartData = {
-    vendas: data?.faturamento ?? 0,
-    saidas: data?.pagamentos ?? 0,
-    resultado: data?.lucroBruto ?? 0,
-    percentual: data?.percLucroBruto ?? 0,
+    vendas: receitaLiquida,
+    saidas: custoDireto,
+    resultado,
+    percentual,
   }
 
   return { data: chartData, isLoading }
 }
 
 export function useLucroLiquidoChart(month: number, year: number) {
-  const { data, isLoading } = useDashboardMensal(month, year)
-  
+  const { data, isLoading } = useDRE(month, year)
+  const v = data?.valores || {}
+
+  const receitaBruta = v["1.0"] || 0
+  const recebimentos = v["6.0"] || 0
+  const resultado = v["9.0"] || 0
+  const totalSaidas = recebimentos - resultado
+  const percentual = receitaBruta !== 0 ? (resultado / receitaBruta) * 100 : 0
+
   const chartData: LucroChartData = {
-    vendas: data?.recebimentos ?? 0,
-    saidas: data?.pagamentos ?? 0,
-    resultado: data?.lucroLiquido ?? 0,
-    percentual: data?.percLucroLiquido ?? 0,
+    vendas: recebimentos,
+    saidas: totalSaidas > 0 ? totalSaidas : 0,
+    resultado,
+    percentual,
   }
 
   return { data: chartData, isLoading }

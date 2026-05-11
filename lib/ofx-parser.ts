@@ -6,6 +6,8 @@ export interface OFXTransaction {
   amount: number
   fitId: string
   memo: string
+  payee: string // NAME field do OFX (favorecido/pagador)
+  descricao: string // MEMO + NAME combinados
 }
 
 export interface OFXData {
@@ -63,6 +65,13 @@ export function parseOFX(content: string): OFXData {
     const amountStr = getTagValue(block, "TRNAMT")
     const fitId = getTagValue(block, "FITID")
     const memo = getTagValue(block, "MEMO")
+    const nameRaw = getTagValue(block, "NAME")
+    // Payee = NAME completo (para matching e exibição)
+    const payee = nameRaw.trim()
+    // Descrição combinada = MEMO + NAME (se ambos existem e são diferentes)
+    const descricao = memo && nameRaw && nameRaw !== memo
+      ? `${memo} - ${nameRaw}`
+      : memo || nameRaw
     let amount = parseFloat(amountStr.replace(",", "."))
 
     if (fitId && !isNaN(amount)) {
@@ -94,6 +103,8 @@ export function parseOFX(content: string): OFXData {
         amount,
         fitId,
         memo,
+        payee,
+        descricao,
       })
     }
   }

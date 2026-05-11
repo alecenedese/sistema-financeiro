@@ -10,7 +10,7 @@ import { PageHeader } from "@/components/page-header"
 import {
   Tags, Plus, ChevronDown, ChevronRight, Pencil, Trash2, Loader2,
   X, ArrowRight, ReceiptText, CalendarClock, FileText, BarChart3,
-  Upload, FileSpreadsheet, Check, AlertCircle, Download, Share2
+  Upload, FileSpreadsheet, Check, AlertCircle, Download, Share2, Search
 } from "lucide-react"
 import { parseCSVRaw } from "@/lib/spreadsheet-parser"
 import { getActiveTenantId, useTenant } from "@/hooks/use-tenant"
@@ -24,15 +24,20 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 
-// ---- Grupos DRE ----
+// ---- Grupos DRE (conforme Modelo DRE.xlsx, 11 grupos) ----
 export const GRUPOS_DRE = [
-  { value: "receita_bruta",       label: "Receita Operacional Bruta",            tipo: "Receita" },
-  { value: "deducoes_receita",    label: "Deducoes de Receita Bruta (-)",         tipo: "Receita" },
-  { value: "custo_direto",        label: "Custo Direto de Vendas (-)",            tipo: "Despesa" },
-  { value: "despesas_operacionais",label: "Despesas Operacionais e Adm. (-)",    tipo: "Despesa" },
-  { value: "outras_receitas",     label: "Outras Receitas Nao Operacionais",      tipo: "Receita" },
-  { value: "outras_despesas",     label: "Outras Despesas Nao Operacionais (-)",  tipo: "Despesa" },
-  { value: "ir_csll",             label: "IR / CSLL (-)",                         tipo: "Despesa" },
+  { value: "1.1",  label: "1.1 Receita de Vendas",       tipo: "Receita" },
+  { value: "1.2",  label: "1.2 Receita de Serviços",     tipo: "Receita" },
+  { value: "2.1",  label: "2.1 Impostos sobre vendas",   tipo: "Despesa" },
+  { value: "2.2",  label: "2.2 Devoluções",              tipo: "Despesa" },
+  { value: "4.1",  label: "4.1 Custo com Produto",       tipo: "Despesa" },
+  { value: "7.1",  label: "7.1 Despesas Administrativas", tipo: "Despesa" },
+  { value: "7.2",  label: "7.2 Despesas Operacionais",   tipo: "Despesa" },
+  { value: "7.3",  label: "7.3 Despesas com Pessoal",    tipo: "Despesa" },
+  { value: "8.1",  label: "8.1 Receitas Financeiras",    tipo: "Receita" },
+  { value: "8.2",  label: "8.2 Despesas Financeiras",    tipo: "Despesa" },
+  { value: "10.1", label: "10.1 Retiradas do Caixa",     tipo: "Despesa" },
+  { value: "10.2", label: "10.2 Distribuição de Lucro",  tipo: "Despesa" },
 ]
 
 interface SubcategoriaFilho {
@@ -129,6 +134,7 @@ function CategoriasPage() {
   const [expandedCats, setExpandedCats] = useState<Set<number>>(new Set())
   const [expandedSubs, setExpandedSubs] = useState<Set<number>>(new Set())
   const [filterTipo, setFilterTipo] = useState<"Todos" | "Receita" | "Despesa">("Todos")
+  const [search, setSearch] = useState("")
   const [saving, setSaving] = useState(false)
 
   // Dialog state
@@ -205,7 +211,18 @@ function CategoriasPage() {
     setExpandedSubs((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n })
   }
 
-  const filtered = filterTipo === "Todos" ? (categorias || []) : (categorias || []).filter((c) => c.tipo === filterTipo)
+  const filtered = (categorias || []).filter((c) => {
+    if (filterTipo !== "Todos" && c.tipo !== filterTipo) return false
+    if (!search.trim()) return true
+    const s = search.toLowerCase()
+    return (
+      c.nome.toLowerCase().includes(s) ||
+      (c.grupo_dre || "").toLowerCase().includes(s) ||
+      c.subcategorias.some(
+        (sub) => sub.nome.toLowerCase().includes(s) || sub.filhos.some((f) => f.nome.toLowerCase().includes(s))
+      )
+    )
+  })
 
   // Categoria CRUD
   function openEditCategoria(cat: Categoria) {
@@ -501,7 +518,7 @@ function CategoriasPage() {
     setTransferOpen(true)
     // Buscar todos os tenants
     const supabase = createClient()
-    const { data } = await supabase.from("tenant_clientes").select("id, nome").order("nome")
+    const { data } = await supabase.from("clientes_admin").select("id, nome").order("nome")
     setAllTenants((data || []).filter(t => t.id !== tid))
   }
 
@@ -604,29 +621,47 @@ function CategoriasPage() {
           <div className={`flex-1 overflow-y-auto p-6 transition-all duration-300 ${drillCat ? "xl:pr-3" : ""}`}>
             <div className="mx-auto max-w-5xl space-y-6">
               {/* Top bar */}
-              <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-                <p className="text-sm text-muted-foreground">Organize suas transacoes com categorias, subcategorias e grupos DRE.</p>
-                <div className="flex items-center gap-3">
-                  <div className="flex items-center rounded-lg border border-border bg-card">
-                    {(["Todos", "Receita", "Despesa"] as const).map((tipo) => (
-                      <button key={tipo} type="button" onClick={() => setFilterTipo(tipo)}
-                        className={`px-3 py-1.5 text-sm font-medium transition-colors first:rounded-l-lg last:rounded-r-lg ${filterTipo === tipo ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
-                        {tipo}
-                      </button>
-                    ))}
+              <div className="flex flex-col gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="flex items-center rounded-lg border border-border bg-card">
+                      {(["Todos", "Receita", "Despesa"] as const).map((tipo) => (
+                        <button key={tipo} type="button" onClick={() => setFilterTipo(tipo)}
+                          className={`px-3 py-1.5 text-sm font-medium transition-colors first:rounded-l-lg last:rounded-r-lg ${filterTipo === tipo ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
+                          {tipo}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                      <input
+                        type="text"
+                        placeholder="Buscar categoria..."
+                        value={search}
+                        onChange={(e) => setSearch(e.target.value)}
+                        className="h-9 w-56 rounded-lg border border-border bg-card pl-9 pr-3 text-sm text-foreground placeholder:text-muted-foreground outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/20"
+                      />
+                      {search && (
+                        <button type="button" onClick={() => setSearch("")} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
                   </div>
-                  <button type="button" onClick={() => { setImportRows([]); setImportResult(null); setImportOpen(true) }} className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
-                    <Upload className="h-4 w-4" />Importar
-                  </button>
-                  <button type="button" onClick={handleExport} className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
-                    <Download className="h-4 w-4" />Exportar
-                  </button>
-                  <button type="button" onClick={openTransferDialog} className="flex items-center gap-2 rounded-lg border border-border bg-card px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
-                    <Share2 className="h-4 w-4" />Transferir
-                  </button>
-                  <button type="button" onClick={openNewCategoria} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
-                    <Plus className="h-4 w-4" />Nova Categoria
-                  </button>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <button type="button" onClick={() => { setImportRows([]); setImportResult(null); setImportOpen(true) }} className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
+                      <Upload className="h-4 w-4" />Importar
+                    </button>
+                    <button type="button" onClick={handleExport} className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
+                      <Download className="h-4 w-4" />Exportar
+                    </button>
+                    <button type="button" onClick={openTransferDialog} className="flex items-center gap-2 rounded-lg border border-border bg-card px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
+                      <Share2 className="h-4 w-4" />Transferir
+                    </button>
+                    <button type="button" onClick={openNewCategoria} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90">
+                      <Plus className="h-4 w-4" />Nova Categoria
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -634,103 +669,137 @@ function CategoriasPage() {
               {error && <div className="rounded-xl border border-destructive/30 bg-destructive/5 p-6 text-center"><p className="text-sm text-destructive">Erro ao carregar. <button type="button" onClick={() => mutate()} className="font-medium text-primary underline">Recarregar</button></p></div>}
 
               {!isLoading && !error && (
-                <div className="space-y-3">
-                  {filtered.map((cat) => {
-                    const isExpanded = expandedCats.has(cat.id)
-                    const grupoDre = GRUPOS_DRE.find(g => g.value === cat.grupo_dre)
-                    const isActive = drillCat?.id === cat.id
-                    return (
-                      <div key={cat.id} className={`rounded-xl border bg-card shadow-sm transition-all ${isActive ? "border-primary/40 shadow-md" : "border-border hover:shadow-md"}`}>
-                        <div className="flex w-full items-center gap-4 p-5">
-                          <button type="button" onClick={() => toggleExpand(cat.id)} className="flex flex-1 items-center gap-4 text-left">
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${cat.cor}18` }}>
-                              <Tags className="h-5 w-5" style={{ color: cat.cor }} />
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <p className="font-semibold text-card-foreground">{cat.nome}</p>
-                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${cat.tipo === "Receita" ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)]" : "bg-[hsl(0,72%,51%)]/10 text-[hsl(0,72%,51%)]"}`}>{cat.tipo}</span>
-                                {grupoDre && (
-                                  <span className="rounded-full border border-[hsl(216,60%,50%)]/30 bg-[hsl(216,60%,50%)]/10 px-2 py-0.5 text-[10px] font-medium text-[hsl(216,60%,50%)]">
-                                    DRE: {grupoDre.label}
-                                  </span>
-                                )}
+                <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="border-b border-border bg-muted/50">
+                          <th className="w-8 px-3 py-3"></th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">Categoria</th>
+                          <th className="w-28 px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">Tipo</th>
+                          <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">Grupo DRE</th>
+                          <th className="w-32 px-4 py-3 text-center text-xs font-semibold uppercase text-muted-foreground">Subcategorias</th>
+                          <th className="w-28 px-4 py-3 text-right text-xs font-semibold uppercase text-muted-foreground">Acoes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filtered.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="px-5 py-12 text-center">
+                              <div className="flex flex-col items-center gap-3">
+                                <Tags className="h-8 w-8 text-muted-foreground/40" />
+                                <p className="text-sm text-muted-foreground">{search ? "Nenhuma categoria encontrada para a busca." : "Nenhuma categoria cadastrada."}</p>
+                                {!search && <button type="button" onClick={openNewCategoria} className="flex items-center gap-1 text-sm font-medium text-primary hover:underline"><Plus className="h-3.5 w-3.5" />Criar primeira categoria</button>}
                               </div>
-                              <p className="text-xs text-muted-foreground">{cat.subcategorias.length} subcategorias</p>
-                            </div>
-                          </button>
-                          <div className="flex items-center gap-1.5">
-                            <button type="button" onClick={() => isActive ? setDrillCat(null) : openDrill(cat)}
-                              className={`flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${isActive ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/30 hover:bg-primary/5 hover:text-primary"}`}>
-                              <BarChart3 className="h-3.5 w-3.5" />
-                              {isActive ? "Fechar" : "Ver"}
-                            </button>
-                            <button type="button" onClick={() => openEditCategoria(cat)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"><Pencil className="h-3.5 w-3.5" /></button>
-                            <button type="button" onClick={() => setDeleteConfirm({ type: "cat", catId: cat.id, nome: cat.nome })} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
-                            <button type="button" onClick={() => toggleExpand(cat.id)} className="text-muted-foreground">
-                              {isExpanded ? <ChevronDown className="h-5 w-5" /> : <ChevronRight className="h-5 w-5" />}
-                            </button>
-                          </div>
-                        </div>
-
-                        {isExpanded && (
-                          <div className="border-t border-border px-5 py-3">
-                            <div className="flex items-center justify-between pb-2">
-                              <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Subcategorias</span>
-                              <button type="button" onClick={() => openNewSubcategoria(cat.id)} className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"><Plus className="h-3 w-3" />Adicionar</button>
-                            </div>
-                            <div className="space-y-1">
-                              {cat.subcategorias.map((sub) => {
-                                const isSubExpanded = expandedSubs.has(sub.id)
-                                return (
-                                  <div key={sub.id}>
-                                    <div className="flex items-center gap-3 rounded-lg px-3 py-2.5 transition-colors hover:bg-muted">
-                                      {sub.filhos.length > 0 ? (
-                                        <button type="button" onClick={() => toggleExpandSub(sub.id)} className="shrink-0 text-muted-foreground">
-                                          {isSubExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-                                        </button>
-                                      ) : (
-                                        <div className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: cat.cor }} />
-                                      )}
-                                      <span className="flex-1 text-sm text-card-foreground">{sub.nome}</span>
-                                      {sub.filhos.length > 0 && <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{sub.filhos.length}</span>}
-                                      <div className="flex items-center gap-1">
-                                        <button type="button" onClick={() => openNewFilho(cat.id, sub.id)} className="rounded p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary"><Plus className="h-3 w-3" /></button>
-                                        <button type="button" onClick={() => openEditSubcategoria(cat.id, sub)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"><Pencil className="h-3 w-3" /></button>
-                                        <button type="button" onClick={() => setDeleteConfirm({ type: "sub", catId: cat.id, subId: sub.id, nome: sub.nome })} className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-3 w-3" /></button>
-                                      </div>
+                            </td>
+                          </tr>
+                        ) : filtered.map((cat) => {
+                          const isExpanded = expandedCats.has(cat.id)
+                          const grupoDre = GRUPOS_DRE.find(g => g.value === cat.grupo_dre)
+                          const isActive = drillCat?.id === cat.id
+                          return (
+                            <React.Fragment key={cat.id}>
+                              <tr className={`group border-b border-border last:border-b-0 transition-colors ${
+                                isExpanded ? "bg-muted/30" : isActive ? "bg-primary/5" : "hover:bg-muted/50"
+                              }`}>
+                                <td className="px-3 py-3">
+                                  <button type="button" onClick={() => toggleExpand(cat.id)} className="flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground">
+                                    {isExpanded ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+                                  </button>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center gap-3">
+                                    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: `${cat.cor}18` }}>
+                                      <Tags className="h-4 w-4" style={{ color: cat.cor }} />
                                     </div>
-                                    {isSubExpanded && sub.filhos.length > 0 && (
-                                      <div className="ml-6 border-l-2 border-border pl-4 mt-1 mb-1">
-                                        {sub.filhos.map((filho) => (
-                                          <div key={filho.id} className="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-muted">
-                                            <div className="h-1.5 w-1.5 shrink-0 rounded-full border border-current opacity-40" style={{ color: cat.cor }} />
-                                            <span className="flex-1 text-sm">{filho.nome}</span>
-                                            <div className="flex items-center gap-1">
-                                              <button type="button" onClick={() => openEditFilho(cat.id, sub.id, filho)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"><Pencil className="h-3 w-3" /></button>
-                                              <button type="button" onClick={() => setDeleteConfirm({ type: "filho", catId: cat.id, subId: sub.id, filhoId: filho.id, nome: filho.nome })} className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-3 w-3" /></button>
-                                            </div>
-                                          </div>
-                                        ))}
-                                      </div>
-                                    )}
+                                    <span className="font-semibold text-card-foreground">{cat.nome}</span>
                                   </div>
-                                )
-                              })}
-                              {cat.subcategorias.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">Nenhuma subcategoria.</p>}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
-                  {filtered.length === 0 && !isLoading && (
-                    <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-border py-16 text-center">
-                      <Tags className="h-10 w-10 text-muted-foreground/40" />
-                      <p className="mt-3 text-sm font-medium text-muted-foreground">Nenhuma categoria encontrada.</p>
-                      <button type="button" onClick={openNewCategoria} className="mt-4 flex items-center gap-1 text-sm font-medium text-primary hover:underline"><Plus className="h-3.5 w-3.5" />Criar primeira categoria</button>
-                    </div>
-                  )}
+                                </td>
+                                <td className="px-4 py-3">
+                                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                    cat.tipo === "Receita" ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)]" : "bg-[hsl(0,72%,51%)]/10 text-[hsl(0,72%,51%)]"
+                                  }`}>{cat.tipo}</span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  {grupoDre ? (
+                                    <span className="rounded-full border border-[hsl(216,60%,50%)]/30 bg-[hsl(216,60%,50%)]/10 px-2 py-0.5 text-[10px] font-medium text-[hsl(216,60%,50%)] whitespace-nowrap">
+                                      {grupoDre.label}
+                                    </span>
+                                  ) : <span className="text-xs text-muted-foreground">—</span>}
+                                </td>
+                                <td className="px-4 py-3 text-center">
+                                  <span className="rounded-full bg-muted px-2.5 py-0.5 text-xs font-medium text-muted-foreground">{cat.subcategorias.length}</span>
+                                </td>
+                                <td className="px-4 py-3">
+                                  <div className="flex items-center justify-end gap-1">
+                                    <button type="button" onClick={() => isActive ? setDrillCat(null) : openDrill(cat)}
+                                      className={`flex items-center gap-1 rounded-lg border px-2 py-1 text-xs font-medium transition-colors ${
+                                        isActive ? "border-primary/30 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/30 hover:bg-primary/5 hover:text-primary"
+                                      }`}>
+                                      <BarChart3 className="h-3.5 w-3.5" />
+                                      {isActive ? "Fechar" : "Ver"}
+                                    </button>
+                                    <button type="button" onClick={() => openEditCategoria(cat)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"><Pencil className="h-3.5 w-3.5" /></button>
+                                    <button type="button" onClick={() => setDeleteConfirm({ type: "cat", catId: cat.id, nome: cat.nome })} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
+                                  </div>
+                                </td>
+                              </tr>
+                              {isExpanded && (
+                                <tr className="border-b border-border last:border-b-0 bg-muted/20">
+                                  <td colSpan={6} className="px-5 py-3">
+                                    <div className="flex items-center justify-between pb-2">
+                                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Subcategorias</span>
+                                      <button type="button" onClick={() => openNewSubcategoria(cat.id)} className="flex items-center gap-1 text-xs font-medium text-primary hover:underline"><Plus className="h-3 w-3" />Adicionar</button>
+                                    </div>
+                                    <div className="space-y-0.5">
+                                      {cat.subcategorias.map((sub) => {
+                                        const isSubExpanded = expandedSubs.has(sub.id)
+                                        return (
+                                          <div key={sub.id}>
+                                            <div className="flex items-center gap-3 rounded-lg px-3 py-2 transition-colors hover:bg-muted">
+                                              {sub.filhos.length > 0 ? (
+                                                <button type="button" onClick={() => toggleExpandSub(sub.id)} className="shrink-0 text-muted-foreground">
+                                                  {isSubExpanded ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+                                                </button>
+                                              ) : (
+                                                <div className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: cat.cor }} />
+                                              )}
+                                              <span className="flex-1 text-sm text-card-foreground">{sub.nome}</span>
+                                              {sub.filhos.length > 0 && <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">{sub.filhos.length}</span>}
+                                              <div className="flex items-center gap-1">
+                                                <button type="button" onClick={() => openNewFilho(cat.id, sub.id)} className="rounded p-1 text-muted-foreground hover:bg-primary/10 hover:text-primary"><Plus className="h-3 w-3" /></button>
+                                                <button type="button" onClick={() => openEditSubcategoria(cat.id, sub)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"><Pencil className="h-3 w-3" /></button>
+                                                <button type="button" onClick={() => setDeleteConfirm({ type: "sub", catId: cat.id, subId: sub.id, nome: sub.nome })} className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-3 w-3" /></button>
+                                              </div>
+                                            </div>
+                                            {isSubExpanded && sub.filhos.length > 0 && (
+                                              <div className="ml-6 border-l-2 border-border pl-4 mt-0.5 mb-0.5">
+                                                {sub.filhos.map((filho) => (
+                                                  <div key={filho.id} className="flex items-center gap-3 rounded-lg px-3 py-1.5 transition-colors hover:bg-muted">
+                                                    <div className="h-1.5 w-1.5 shrink-0 rounded-full border border-current opacity-40" style={{ color: cat.cor }} />
+                                                    <span className="flex-1 text-sm">{filho.nome}</span>
+                                                    <div className="flex items-center gap-1">
+                                                      <button type="button" onClick={() => openEditFilho(cat.id, sub.id, filho)} className="rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground"><Pencil className="h-3 w-3" /></button>
+                                                      <button type="button" onClick={() => setDeleteConfirm({ type: "filho", catId: cat.id, subId: sub.id, filhoId: filho.id, nome: filho.nome })} className="rounded p-1 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-3 w-3" /></button>
+                                                    </div>
+                                                  </div>
+                                                ))}
+                                              </div>
+                                            )}
+                                          </div>
+                                        )
+                                      })}
+                                      {cat.subcategorias.length === 0 && <p className="px-3 py-2 text-xs text-muted-foreground">Nenhuma subcategoria.</p>}
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
+                            </React.Fragment>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
                 </div>
               )}
             </div>

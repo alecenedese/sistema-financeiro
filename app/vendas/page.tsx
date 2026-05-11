@@ -1,5 +1,5 @@
 "use client"
-// v2.0.0 - Fixed currency input handling
+// v3.0.0 - fetchAll corrigido + filtro de data no servidor
 import React, { useState, useEffect, useMemo, useCallback } from "react"
 import { useSearchParams, useRouter } from "next/navigation"
 import { Suspense } from "react"
@@ -10,7 +10,7 @@ import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
 import {
   ShoppingCart, Plus, Pencil, Trash2, Loader2, Search, X, ChevronDown,
-  ChevronLeft, ChevronRight, Upload, FileSpreadsheet, Check, TrendingUp, Copy
+  ChevronLeft, ChevronRight, Upload, FileSpreadsheet, Check, Copy
 } from "lucide-react"
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter,
@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { handleCurrencyInput, parseBRL, formatBRL } from "@/lib/currency-input"
 import { parseCSVRaw } from "@/lib/spreadsheet-parser"
+import { fetchAll } from "@/lib/supabase/fetch-all"
 
 interface ClienteRow { id: number; nome: string }
 
@@ -45,20 +46,54 @@ interface Venda {
 const FORMAS_PAGAMENTO = ["PIX", "Debito", "Credito", "Dinheiro", "Boleto", "Transferencia", "IFOOD - DEBITO - MASTERCARD", "IFOOD - CREDITO"]
 const CANAIS = ["DELIVERY", "IFOOD", "LOJA", "WHATSAPP", "SITE", "OUTRO"]
 
-async function fetchVendas([, tid]: [string, number | null]): Promise<Venda[]> {
+// ─── fetch com filtro de data no servidor (v4.2 - paginação inline) ────────────────
+async function fetchVendas([, tid, dateFrom, dateTo, useLt]: [string, number | null, string, string, boolean]): Promise<Venda[]> {
+  console.log('[fetchVendas v4.2] Iniciando busca:', { tid, dateFrom, dateTo, useLt })
+  
   const supabase = createClient()
-  let q = supabase
-    .from("vendas")
-    .select(`*, clientes(nome)`)
-    .order("data_venda", { ascending: false })
-  if (tid) q = q.eq("tenant_id", tid)
-  const { data, error } = await q
-  if (error) throw error
-  return (data || []).map((row: Record<string, unknown>) => ({
+  
+  // Paginação inline para evitar problemas
+  const PAGE_SIZE = 1000
+  let allRows: Record<string, unknown>[] = []
+  let offset = 0
+  
+  while (true) {
+    let q = supabase
+      .from("vendas")
+      .select(`*`)
+      .order("id", { ascending: true })  // Ordenar por ID para consistência
+    
+    if (tid) q = q.eq("tenant_id", tid)
+    if (dateFrom) q = q.gte("data_venda", dateFrom)
+    if (dateTo) {
+      // Com formato YYYY-MM-DD, adiciona T23:59:59 para incluir o dia inteiro
+      const toVal = useLt ? dateTo : (dateTo.length === 10 ? dateTo + "T23:59:59" : dateTo)
+      q = useLt ? q.lt("data_venda", toVal) : q.lte("data_venda", toVal)
+    }
+    
+    const { data, error } = await q.range(offset, offset + PAGE_SIZE - 1)
+    
+    if (error) {
+      console.error('[fetchVendas v4.2] Erro:', error)
+      break
+    }
+    
+    if (!data || data.length === 0) break
+    
+    allRows = allRows.concat(data)
+    console.log(`[fetchVendas v4.2] Página ${Math.floor(offset / PAGE_SIZE) + 1}: ${data.length} registros, total: ${allRows.length}`)
+    
+    if (data.length < PAGE_SIZE) break
+    offset += PAGE_SIZE
+  }
+  
+  console.log('[fetchVendas v4.2] Total final:', allRows.length)
+  
+  return allRows.map((row) => ({
     id: row.id as number,
     codigo: (row.codigo as string) || "",
     cliente_id: row.cliente_id as number | null,
-    cliente_nome: (row.clientes as Record<string, string> | null)?.nome || (row.cliente_nome as string) || "",
+    cliente_nome: (row.cliente_nome as string) || "",  // Usa cliente_nome direto da tabela vendas
     valor_total: Number(row.valor_total) || 0,
     acrescimo: Number(row.acrescimo) || 0,
     taxas_marketplace: Number(row.taxas_marketplace) || 0,
@@ -73,20 +108,30 @@ async function fetchVendas([, tid]: [string, number | null]): Promise<Venda[]> {
 
 async function fetchClientes(tid: number | null): Promise<ClienteRow[]> {
   const supabase = createClient()
-  let q = supabase.from("clientes").select("id, nome").order("nome")
-  if (tid) q = q.eq("tenant_id", tid)
-  const { data } = await q
-  return data || []
+  return fetchAll<ClienteRow>(() => {
+    let q = supabase.from("clientes").select("id, nome").order("nome")
+    if (tid) q = q.eq("tenant_id", tid)
+    return q
+  })
 }
 
 function formatCurrency(v: number) {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v)
 }
 
-function formatDateTimeDisplay(d: string) {
+function formatDateDisplay(d: string) {
   if (!d) return "-"
   const dt = new Date(d)
-  return dt.toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" })
+  return dt.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })
+}
+
+function toDateInputValue(value?: string) {
+  const dt = value ? new Date(value) : new Date()
+  if (Number.isNaN(dt.getTime())) return ""
+  const y = dt.getFullYear()
+  const m = String(dt.getMonth() + 1).padStart(2, "0")
+  const d = String(dt.getDate()).padStart(2, "0")
+  return `${y}-${m}-${d}`
 }
 
 const emptyForm = {
@@ -103,15 +148,13 @@ function VendasPage() {
   const tid = tenant?.id ?? null
   const router = useRouter()
   const searchParams = useSearchParams()
-  const { data: vendas = [], error, isLoading, mutate } = useSWR(["vendas", tid], fetchVendas)
-  const { data: clientesLista = [] } = useSWR(["clientes_vendas", tid], ([, t]) => fetchClientes(t))
 
   const [filterPeriodo, setFilterPeriodo] = useState<"mes_atual" | "7dias" | "personalizado" | "todos">("mes_atual")
   const [customDateFrom, setCustomDateFrom] = useState("")
   const [customDateTo, setCustomDateTo] = useState("")
   const [filterCanal, setFilterCanal] = useState("")
   const [page, setPage] = useState(1)
-  const PAGE_SIZE = 50
+  const PAGE_SIZE = 200
   const [search, setSearch] = useState("")
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingVenda, setEditingVenda] = useState<Venda | null>(null)
@@ -140,33 +183,78 @@ function VendasPage() {
     }
   }, [searchParams, router])
 
-  // Date range
+  // ─── Date range (para filtro no servidor) ──────────────────────────────────
   const dateRange = useMemo(() => {
     const today = new Date()
+    
     if (filterPeriodo === "mes_atual") {
-      const first = new Date(today.getFullYear(), today.getMonth(), 1)
-      const last = new Date(today.getFullYear(), today.getMonth() + 1, 0)
-      return { from: first.toISOString().split("T")[0], to: last.toISOString().split("T")[0] + "T23:59:59" }
+      const year = today.getFullYear()
+      const month = today.getMonth() // 0-11
+
+      // Limites em horário local, convertidos para ISO UTC
+      // Isso garante que o filtro respeite o fuso do usuário (ex: UTC-3)
+      // April 1 00:00 local → April 1 03:00 UTC (para UTC-3)
+      const fromStr = new Date(year, month, 1, 0, 0, 0, 0).toISOString()
+      const toStr = new Date(year, month + 1, 1, 0, 0, 0, 0).toISOString()
+      
+      return { from: fromStr, to: toStr, useLt: true }
     }
     if (filterPeriodo === "7dias") {
       const from = new Date(today)
       from.setDate(from.getDate() - 7)
-      return { from: from.toISOString().split("T")[0], to: today.toISOString().split("T")[0] + "T23:59:59" }
+      from.setHours(0, 0, 0, 0)
+      const nextDay = new Date(today)
+      nextDay.setDate(nextDay.getDate() + 1)
+      nextDay.setHours(0, 0, 0, 0)
+      
+      return { from: from.toISOString(), to: nextDay.toISOString(), useLt: true }
     }
     if (filterPeriodo === "personalizado" && customDateFrom && customDateTo) {
-      return { from: customDateFrom, to: customDateTo + "T23:59:59" }
+      // Converte YYYY-MM-DD para ISO respeitando horário local
+      const [fromYear, fromMonth, fromDay] = customDateFrom.split("-").map(Number)
+      const [toYear, toMonth, toDay] = customDateTo.split("-").map(Number)
+      const fromStr = new Date(fromYear, fromMonth - 1, fromDay, 0, 0, 0, 0).toISOString()
+      const toStr = new Date(toYear, toMonth - 1, toDay + 1, 0, 0, 0, 0).toISOString()
+      
+      return { from: fromStr, to: toStr, useLt: true }
     }
     return null
   }, [filterPeriodo, customDateFrom, customDateTo])
 
-  // Filtered
+  // ─── SWR key inclui o range de datas → refetch automático ao mudar período ─
+  const swrKey = useMemo<[string, number | null, string, string, boolean]>(() => {
+    const key: [string, number | null, string, string, boolean] = [
+      "vendas", 
+      tid, 
+      dateRange?.from ?? "", 
+      dateRange?.to ?? "",
+      dateRange?.useLt ?? false
+    ]
+    console.log('[Vendas v4.0] SWR Key:', { 
+      tid, 
+      periodo: filterPeriodo,
+      dateFrom: dateRange?.from, 
+      dateTo: dateRange?.to,
+      useLt: dateRange?.useLt
+    })
+    return key
+  }, [tid, dateRange, filterPeriodo])
+
+  const { data: vendas = [], error, isLoading, mutate } = useSWR(
+    swrKey, 
+    fetchVendas,
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      dedupingInterval: 0, // Desabilita deduplicação
+    }
+  )
+  const { data: clientesLista = [] } = useSWR(["clientes_vendas", tid], ([, t]) => fetchClientes(t as number | null))
+
+  // ─── Filtro local (canal + busca) — data já vem filtrada do servidor ───────
   const filtered = useMemo(() => {
     return vendas.filter((v) => {
       if (filterCanal && v.canal !== filterCanal) return false
-      if (dateRange && v.data_venda) {
-        const vDate = v.data_venda.split("T")[0]
-        if (vDate < dateRange.from.split("T")[0] || vDate > dateRange.to.split("T")[0]) return false
-      }
       if (search) {
         const q = search.toLowerCase()
         if (
@@ -178,7 +266,7 @@ function VendasPage() {
       }
       return true
     })
-  }, [vendas, filterCanal, dateRange, search])
+  }, [vendas, filterCanal, search])
 
   // Pagination
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
@@ -190,9 +278,9 @@ function VendasPage() {
   useEffect(() => { setPage(1) }, [filterCanal, search, filterPeriodo, customDateFrom, customDateTo])
 
   // Totals
-  const totalVendas = filtered.reduce((a, v) => a + v.valor_total, 0)
+  const totalVendas   = filtered.reduce((a, v) => a + v.valor_total, 0)
   const totalRecebido = filtered.reduce((a, v) => a + v.valor_recebido, 0)
-  const totalTaxas = filtered.reduce((a, v) => a + v.taxas_marketplace, 0)
+  const totalTaxas    = filtered.reduce((a, v) => a + v.taxas_marketplace, 0)
   const totalDescontos = filtered.reduce((a, v) => a + v.desconto, 0)
 
   const hasFilter = filterCanal || search || filterPeriodo !== "mes_atual"
@@ -224,16 +312,16 @@ function VendasPage() {
       valor_recebido: formatBRL(v.valor_recebido),
       forma_pagamento: v.forma_pagamento,
       canal: v.canal,
-      data_venda: v.data_venda ? v.data_venda.slice(0, 16) : "",
+      data_venda: toDateInputValue(v.data_venda),
       observacoes: v.observacoes,
     })
     setDialogOpen(true)
   }
 
   function cloneVenda(v: Venda) {
-    setEditingVenda(null) // null para criar nova
+    setEditingVenda(null)
     setForm({
-      codigo: "", // Código vazio para nova venda
+      codigo: "",
       cliente_id: v.cliente_id ? String(v.cliente_id) : "",
       cliente_nome: v.cliente_nome,
       valor_total: formatBRL(v.valor_total),
@@ -243,26 +331,34 @@ function VendasPage() {
       valor_recebido: formatBRL(v.valor_recebido),
       forma_pagamento: v.forma_pagamento,
       canal: v.canal,
-      data_venda: new Date().toISOString().slice(0, 16), // Data atual
+      data_venda: toDateInputValue(),
       observacoes: v.observacoes,
     })
     setDialogOpen(true)
   }
 
   async function handleSave() {
-    console.log("[v0] handleSave chamado, form:", form)
-    if (!form.valor_total) { console.log("[v0] valor_total vazio, retornando"); return }
+    // Campos obrigatórios
+    if (!form.codigo.trim()) { alert("Codigo é obrigatório."); return }
+    if (!form.data_venda) { alert("Data é obrigatória."); return }
+    if (!form.cliente_id && !form.cliente_nome.trim()) { alert("Cliente é obrigatório."); return }
+    if (!form.valor_total) { alert("Valor é obrigatório."); return }
+    if (!form.forma_pagamento) { alert("Forma de Pagamento é obrigatória."); return }
+    if (!form.canal) { alert("Canal é obrigatório."); return }
     setSaving(true)
     try {
       const supabase = createClient()
       const tenantId = getActiveTenantId()
-      console.log("[v0] tenantId:", tenantId)
-      const valorTotal = parseBRL(form.valor_total)
-      const acrescimo = parseBRL(form.acrescimo)
-      const taxas = parseBRL(form.taxas_marketplace)
-      const desconto = parseBRL(form.desconto)
+      const valorTotal    = parseBRL(form.valor_total)
+      const acrescimo     = parseBRL(form.acrescimo)
+      const taxas         = parseBRL(form.taxas_marketplace)
+      const desconto      = parseBRL(form.desconto)
       const valorRecebido = parseBRL(form.valor_recebido) || (valorTotal + acrescimo - taxas - desconto)
-      console.log("[v0] Valores parseados:", { valorTotal, acrescimo, taxas, desconto, valorRecebido })
+
+      // Converte YYYY-MM-DD para ISO usando meio-dia UTC para evitar shift de fuso
+      const dataISO = form.data_venda
+        ? `${form.data_venda}T12:00:00.000Z`
+        : new Date().toISOString()
 
       const payload: Record<string, unknown> = {
         codigo: form.codigo,
@@ -275,18 +371,15 @@ function VendasPage() {
         valor_recebido: valorRecebido,
         forma_pagamento: form.forma_pagamento,
         canal: form.canal,
-        data_venda: form.data_venda || new Date().toISOString(),
+        data_venda: dataISO,
         observacoes: form.observacoes,
       }
       if (tenantId) payload.tenant_id = tenantId
-      console.log("[v0] Payload final:", payload)
 
       if (editingVenda) {
-        const { error } = await supabase.from("vendas").update(payload).eq("id", editingVenda.id)
-        console.log("[v0] Update result error:", error)
+        await supabase.from("vendas").update(payload).eq("id", editingVenda.id)
       } else {
-        const { error } = await supabase.from("vendas").insert(payload)
-        console.log("[v0] Insert result error:", error)
+        await supabase.from("vendas").insert(payload)
       }
       await mutate()
       setDialogOpen(false)
@@ -304,7 +397,6 @@ function VendasPage() {
     setDeleteConfirm(null)
   }, [mutate])
 
-  // Seleção múltipla
   function toggleSelectAll() {
     if (selectedIds.size === paginatedFiltered.length) {
       setSelectedIds(new Set())
@@ -334,199 +426,270 @@ function VendasPage() {
     }
   }
 
-  // Import functions
+  // ─── Import ────────────────────────────────────────────────────────────────
   function readFileText(file: File, enc: string): Promise<string> {
-    return new Promise((res, rej) => { const r = new FileReader(); r.onload = e => res(e.target?.result as string); r.onerror = rej; r.readAsText(file, enc) })
+    return new Promise((res, rej) => {
+      const r = new FileReader()
+      r.onload = e => res(e.target?.result as string)
+      r.onerror = rej
+      r.readAsText(file, enc)
+    })
   }
 
   function parseDate(str: string): string {
     if (!str) return ""
-    // Excel serial number (e.g., 46082.957650462966)
+
+    const toMiddayUTC = (d: string, m: string, y: string) => `${y}-${m}-${d}T12:00:00.000Z`
+
     const num = parseFloat(str)
     if (!isNaN(num) && num > 25000 && num < 60000) {
-      // Excel date serial: days since 1900-01-01 (with Excel bug for 1900 leap year)
-      const excelEpoch = new Date(1899, 11, 30) // Dec 30, 1899
-      const msPerDay = 24 * 60 * 60 * 1000
-      const date = new Date(excelEpoch.getTime() + num * msPerDay)
+      // Excel serial date: usa midday UTC para evitar shift de timezone
+      const excelEpoch = Date.UTC(1899, 11, 30, 12, 0, 0, 0)
+      const date = new Date(excelEpoch + Math.floor(num) * 86400000)
       return date.toISOString()
     }
-    // Try DD/MM/YYYY HH:MM:SS format
     const match = str.match(/^(\d{2})\/(\d{2})\/(\d{4})\s*(\d{2}):(\d{2}):?(\d{2})?$/)
     if (match) {
-      const [, d, m, y, h, min, s] = match
-      return `${y}-${m}-${d}T${h}:${min}:${s || "00"}`
+      const [, d, m, y] = match
+      // Para importação de vendas, respeita apenas a data da linha
+      // (hora de origem pode deslocar o dia em diferentes fusos)
+      return toMiddayUTC(d, m, y)
     }
-    // Try DD/MM/YYYY format (without time)
     const matchDate = str.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
     if (matchDate) {
       const [, d, m, y] = matchDate
-      return `${y}-${m}-${d}T00:00:00`
+      // Midday UTC garante que a data exibida em qualquer fuso horário (UTC-12 a UTC+12) seja o mesmo dia
+      return toMiddayUTC(d, m, y)
     }
-    // Try YYYY-MM-DD format
-    if (/^\d{4}-\d{2}-\d{2}/.test(str)) return str
+
+    const isoMatch = str.match(/^(\d{4})-(\d{2})-(\d{2})(?:[T\s].*)?$/)
+    if (isoMatch) {
+      const [, y, m, d] = isoMatch
+      return toMiddayUTC(d, m, y)
+    }
+
     return str
   }
 
   function parseNumber(str: string): string {
     if (!str) return "0"
-    return str.replace(/[^\d,.-]/g, "").replace(",", ".")
+    // Remove espaços e caracteres especiais, mantém apenas números, vírgula, ponto e sinal negativo
+    let cleaned = str.toString().trim().replace(/[^\d,.-]/g, "")
+    
+    // Se tiver vírgula e ponto, determina qual é o separador decimal
+    if (cleaned.includes(",") && cleaned.includes(".")) {
+      // Se o ponto vem depois da vírgula, vírgula é milhar e ponto é decimal
+      if (cleaned.lastIndexOf(".") > cleaned.lastIndexOf(",")) {
+        cleaned = cleaned.replace(/,/g, "")
+      } else {
+        // Vírgula é decimal, ponto é milhar
+        cleaned = cleaned.replace(/\./g, "").replace(",", ".")
+      }
+    } else if (cleaned.includes(",")) {
+      // Apenas vírgula - substitui por ponto
+      cleaned = cleaned.replace(",", ".")
+    }
+    
+    return cleaned || "0"
+  }
+
+  function normalizeImportKey(key: string): string {
+    return key
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .replace(/[^a-z0-9\s]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim()
+  }
+
+  function getMappedValue(row: Record<string, string>, exactAliases: string[], containsAliases: string[] = []): string {
+    for (const alias of exactAliases) {
+      const value = row[alias]
+      if (value !== undefined && String(value).trim()) return String(value).trim()
+    }
+    if (containsAliases.length > 0) {
+      for (const [key, value] of Object.entries(row)) {
+        if (containsAliases.some((alias) => key.includes(alias)) && String(value).trim()) {
+          return String(value).trim()
+        }
+      }
+    }
+    return ""
   }
 
   async function handleImportFile(file: File) {
-    console.log("[v0] handleImportFile chamado com arquivo:", file.name, file.type, file.size)
     try {
       const ext = file.name.toLowerCase().split(".").pop() ?? ""
-      console.log("[v0] Extensao detectada:", ext)
       let rawRows: Record<string, string>[] = []
+
       if (ext === "csv") {
+        // Tenta UTF-8 primeiro, depois ISO-8859-1
         let content = await readFileText(file, "UTF-8")
         const fl = content.split("\n")[0] || ""
-        console.log("[v0] Primeira linha CSV:", fl)
-        if (!fl.includes(";") && !fl.includes(",")) content = await readFileText(file, "ISO-8859-1")
+        
+        // Se tiver caracteres estranhos, tenta ISO-8859-1
+        if (fl.includes("�") || fl.includes("Ã") || fl.includes("Â")) {
+          content = await readFileText(file, "ISO-8859-1")
+        }
+        
         rawRows = parseCSVRaw(content)
-        console.log("[v0] parseCSVRaw retornou", rawRows.length, "linhas")
-        if (rawRows.length > 0) console.log("[v0] Primeira linha parseada:", JSON.stringify(rawRows[0]))
       } else if (ext === "xls" || ext === "xlsx") {
         const buffer = await file.arrayBuffer()
         const XLSX = await import("xlsx")
-        const wb = XLSX.read(buffer, { type: "array" })
-        console.log("[v0] Sheets encontradas:", wb.SheetNames)
+        const wb = XLSX.read(buffer, { type: "array", codepage: 65001 }) // UTF-8
         const ws = wb.Sheets[wb.SheetNames[0]]
-        let jsonRows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "" })
-        console.log("[v0] XLSX retornou", jsonRows.length, "linhas")
-        
-        // Verifica se os headers contem __EMPTY (indica que linha 1 e titulo, nao header)
+        const jsonRows = XLSX.utils.sheet_to_json<Record<string, string>>(ws, { defval: "", raw: false })
+
         if (jsonRows.length > 0) {
           const firstRowKeys = Object.keys(jsonRows[0])
           const hasEmptyHeaders = firstRowKeys.some(k => k.includes("__EMPTY") || k.includes("EMPTY"))
-          console.log("[v0] Headers tem __EMPTY?", hasEmptyHeaders, "Keys:", firstRowKeys)
-          
           if (hasEmptyHeaders) {
-            // A linha 1 e titulo - os valores da primeira "linha" sao os headers reais
             const realHeaders = Object.values(jsonRows[0]) as string[]
-            console.log("[v0] Headers reais detectados:", realHeaders)
-            
-            // Remapeia as linhas restantes usando os headers reais
             rawRows = jsonRows.slice(1).map(row => {
               const n: Record<string, string> = {}
               const values = Object.values(row) as string[]
               realHeaders.forEach((header, idx) => {
                 const normalizedKey = String(header).toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim()
-                n[normalizedKey] = String(values[idx] ?? "")
+                n[normalizedKey] = String(values[idx] ?? "").trim()
               })
               return n
             })
           } else {
-            // Headers normais, apenas normaliza
             rawRows = jsonRows.map(r => {
               const n: Record<string, string> = {}
-              for (const [k, v] of Object.entries(r)) n[k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim()] = String(v)
+              for (const [k, v] of Object.entries(r)) {
+                const normalizedKey = k.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9\s]/g, " ").replace(/\s+/g, " ").trim()
+                n[normalizedKey] = String(v ?? "").trim()
+              }
               return n
             })
           }
         }
-        console.log("[v0] Apos normalizacao:", rawRows.length, "linhas", rawRows.length > 0 ? JSON.stringify(rawRows[0]) : "vazio")
-      } else { alert("Formato nao suportado. Use CSV, XLS ou XLSX."); return }
+      } else {
+        alert("Formato nao suportado. Use CSV, XLS ou XLSX.")
+        return
+      }
 
-      console.log("[v0] Colunas disponiveis:", rawRows.length > 0 ? Object.keys(rawRows[0]) : [])
-      
-      const mapped = rawRows.map((row, idx) => {
-        let codigo = "", cliente = "", valor_total = "", acrescimo = "", taxas_marketplace = ""
-        let desconto = "", valor_recebido = "", forma_pagamento = "", canal = "", data_venda = ""
-        for (const [key, val] of Object.entries(row)) {
-          const k = key.trim().toLowerCase()
-          // Codigo
-          if (k.includes("codigo") || k.includes("cod")) { codigo = val.trim(); continue }
-          // Cliente
-          if (k.includes("cliente")) { cliente = val.trim(); continue }
-          // Valor Total (antes de "recebido" pois "valor recebido" inclui "valor")
-          if (k.includes("valor total") || (k.includes("valor") && !k.includes("recebido"))) { valor_total = parseNumber(val); continue }
-          // Valor Recebido
-          if (k.includes("recebido") || k.includes("valor recebido")) { valor_recebido = parseNumber(val); continue }
-          // Acrescimo
-          if (k.includes("acrescimo") || k.includes("acresc")) { acrescimo = parseNumber(val); continue }
-          // Taxas Marketplace
-          if (k.includes("taxa") || k.includes("marketplace")) { taxas_marketplace = parseNumber(val); continue }
-          // Desconto (cuidado para nao pegar "desc" de "descricao")
-          if (k === "desconto" || k.includes("desconto")) { desconto = parseNumber(val); continue }
-          // Forma de Pagamento
-          if (k.includes("forma") || (k.includes("pagamento") && !k.includes("forma"))) { forma_pagamento = val.trim(); continue }
-          // Canal
-          if (k.includes("canal")) { canal = val.trim(); continue }
-          // Data
-          if (k.includes("data")) { data_venda = parseDate(val.trim()); continue }
+      const mapped = rawRows.map((row) => {
+        const normalizedRow: Record<string, string> = {}
+        for (const [key, value] of Object.entries(row)) {
+          normalizedRow[normalizeImportKey(key)] = String(value ?? "").trim()
         }
-        if (idx === 0) console.log("[v0] Primeiro registro mapeado:", { codigo, cliente, valor_total, acrescimo, taxas_marketplace, desconto, valor_recebido, forma_pagamento, canal, data_venda })
-        return { codigo, cliente, valor_total, acrescimo, taxas_marketplace, desconto, valor_recebido, forma_pagamento, canal, data_venda }
-      }).filter(r => r.valor_total && parseFloat(r.valor_total) > 0)
+        
+        const codigo          = getMappedValue(normalizedRow, ["codigo", "cod", "codigo venda", "codigo pedido", "numero pedido", "pedido", "id pedido", "numero", "num pedido"], ["codigo", " cod", "cod ", "pedido", "numero"])
+        const cliente         = getMappedValue(normalizedRow, ["cliente", "nome cliente", "cliente nome", "nome"], ["cliente", "nome"])
+        const valorTotalRaw   = getMappedValue(normalizedRow, ["valor total", "total", "valor venda", "valor"], ["valor total", "total"])
+        const valorRecebidoRaw = getMappedValue(normalizedRow, ["valor recebido", "recebido", "liquido", "valor liquido"], ["recebido", "liquido"])
+        const acrescimoRaw    = getMappedValue(normalizedRow, ["acrescimo", "acrescimos", "taxa entrega", "entrega"], ["acresc", "entrega"])
+        const taxasRaw        = getMappedValue(normalizedRow, ["taxas marketplace", "taxa marketplace", "taxas", "taxa", "taxa ifood"], ["marketplace", "taxa"])
+        const descontoRaw     = getMappedValue(normalizedRow, ["desconto", "descontos"], ["desconto"])
+        const formaPagamento  = getMappedValue(normalizedRow, ["forma pagamento", "forma de pagamento", "pagamento", "forma"], ["pagamento", "forma"])
+        const canal           = getMappedValue(normalizedRow, ["canal", "origem", "marketplace", "plataforma"], ["canal", "origem"])
+        const dataRaw         = getMappedValue(normalizedRow, ["data venda", "data", "data pedido", "data hora"], ["data"])
 
-      console.log("[v0] Mapped com valores > 0:", mapped.length, "linhas")
-      if (mapped.length > 0) console.log("[v0] Primeiro mapeado:", JSON.stringify(mapped[0]))
+        return {
+          codigo: codigo || "",
+          cliente: cliente || "",
+          valor_total:       parseNumber(valorTotalRaw),
+          acrescimo:         parseNumber(acrescimoRaw),
+          taxas_marketplace: parseNumber(taxasRaw),
+          desconto:          parseNumber(descontoRaw),
+          valor_recebido:    parseNumber(valorRecebidoRaw),
+          forma_pagamento:   formaPagamento || "",
+          canal:             canal || "",
+          data_venda:        parseDate(dataRaw),
+        }
+      })
 
+      console.log('[Import] Mapped rows:', mapped.slice(0, 5)) // Debug: primeiras 5 linhas
       setImportRows(mapped)
       setImportResult(null)
-    } catch (err) { 
-      console.log("[v0] Erro ao importar:", err)
-      alert("Erro ao ler arquivo: " + (err instanceof Error ? err.message : String(err))) 
+    } catch (err) {
+      alert("Erro ao ler arquivo: " + (err instanceof Error ? err.message : String(err)))
     }
   }
 
   async function handleImportSave() {
     if (importRows.length === 0) return
-    console.log("[v0] handleImportSave iniciado com", importRows.length, "linhas")
     setImporting(true)
     try {
       const supabase = createClient()
       const tenantId = getActiveTenantId()
       let created = 0, skipped = 0
+      const errors: string[] = []
 
-      for (const row of importRows) {
-        console.log("[v0] Processando linha:", row.codigo, row.cliente)
-        
-        // Check if already exists by codigo
-        if (row.codigo) {
-          let q = supabase.from("vendas").select("id").eq("codigo", row.codigo).limit(1)
-          if (tenantId) q = q.eq("tenant_id", tenantId)
-          const { data: existing } = await q
-          if (existing && existing.length > 0) { 
-            console.log("[v0] Codigo ja existe, pulando:", row.codigo)
-            skipped++
-            continue 
-          }
-        }
+      const normalizedRows = importRows.map(row => ({ ...row, codigo: row.codigo?.trim() || "" }))
+
+      console.log('[Import] Total rows to import:', normalizedRows.length)
+
+      const payloads: Record<string, unknown>[] = []
+
+      for (const row of normalizedRows) {
+        const valorTotal = parseFloat(row.valor_total) || 0
+
+        // REMOVIDO: Validação de código duplicado
+        // Agora permite importar códigos duplicados para bater o caixa
+        // REMOVIDO: Filtro valor_total > 0 — importa todas as linhas do CSV
 
         const payload: Record<string, unknown> = {
-          codigo: row.codigo,
-          cliente_nome: row.cliente,
-          valor_total: parseFloat(row.valor_total) || 0,
-          acrescimo: parseFloat(row.acrescimo) || 0,
+          codigo:            row.codigo || "",
+          cliente_nome:      row.cliente || "",
+          valor_total:       valorTotal,
+          acrescimo:         parseFloat(row.acrescimo) || 0,
           taxas_marketplace: parseFloat(row.taxas_marketplace) || 0,
-          desconto: parseFloat(row.desconto) || 0,
-          valor_recebido: parseFloat(row.valor_recebido) || 0,
-          forma_pagamento: row.forma_pagamento,
-          canal: row.canal,
-          data_venda: row.data_venda || new Date().toISOString(),
+          desconto:          parseFloat(row.desconto) || 0,
+          valor_recebido:    parseFloat(row.valor_recebido) || 0,
+          forma_pagamento:   row.forma_pagamento || "",
+          canal:             row.canal || "",
+          data_venda:        row.data_venda || new Date().toISOString(),
         }
         if (tenantId) payload.tenant_id = tenantId
+        payloads.push(payload)
+      }
+
+      console.log('[Import] Payloads to insert:', payloads.length)
+      console.log('[Import] Skipped before insert:', skipped)
+
+      const INSERT_CHUNK = 500
+      for (let i = 0; i < payloads.length; i += INSERT_CHUNK) {
+        const batch = payloads.slice(i, i + INSERT_CHUNK)
+        const { error } = await supabase.from("vendas").insert(batch)
+        if (!error) {
+          created += batch.length
+          console.log(`[Import] Batch ${Math.floor(i / INSERT_CHUNK) + 1} inserted: ${batch.length} rows`)
+          continue
+        }
         
-        console.log("[v0] Inserindo payload:", JSON.stringify(payload))
-        const { error } = await supabase.from("vendas").insert(payload)
-        if (error) {
-          console.log("[v0] Erro ao inserir:", error)
-        } else {
-          console.log("[v0] Inserido com sucesso:", row.codigo)
-          created++
+        console.error('[Import] Batch error:', error)
+        
+        // fallback individual
+        for (const payload of batch) {
+          const { error: rowError } = await supabase.from("vendas").insert(payload)
+          if (rowError) {
+            skipped++
+            errors.push(`Erro ao inserir ${payload.codigo}: ${rowError.message}`)
+          } else {
+            created++
+          }
         }
       }
 
-      console.log("[v0] Importacao finalizada - criados:", created, "pulados:", skipped)
+      console.log('[Import] Final result:', { created, skipped, errors: errors.length })
+      
+      // Mostra erros no console se houver
+      if (errors.length > 0) {
+        console.warn('[Import] Errors:', errors.slice(0, 10)) // Primeiros 10 erros
+      }
+
       setImportResult({ created, skipped })
       await mutate()
-    } catch (err) { 
-      console.log("[v0] Erro geral:", err)
-      alert("Erro ao importar: " + (err instanceof Error ? err.message : String(err))) 
+    } catch (err) {
+      console.error('[Import] Exception:', err)
+      alert("Erro ao importar: " + (err instanceof Error ? err.message : String(err)))
+    } finally {
+      setImporting(false)
     }
-    finally { setImporting(false) }
   }
 
   const selectClass = "flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
@@ -535,7 +698,7 @@ function VendasPage() {
     <div className="flex min-h-screen bg-background">
       <AppSidebar />
       <main className="flex-1 pl-[72px]">
-        <PageHeader title="Vendas" subtitle="Gerencie suas vendas e historico de transacoes" />
+        <PageHeader title="Vendas" />
 
         <div className="space-y-6 p-6">
           {/* Action toolbar */}
@@ -559,23 +722,22 @@ function VendasPage() {
             <div className="flex items-center gap-2">
               <div className="flex items-center rounded-lg border border-border bg-card">
                 {([
-                  { key: "mes_atual", label: "Mes atual" },
-                  { key: "7dias", label: "7 dias" },
+                  { key: "mes_atual",    label: "Mes atual" },
+                  { key: "7dias",        label: "7 dias" },
                   { key: "personalizado", label: "Personalizado" },
-                  { key: "todos", label: "Todos" },
+                  { key: "todos",        label: "Todos" },
                 ] as const).map(({ key, label }) => (
                   <button key={key} type="button" onClick={() => setFilterPeriodo(key)}
-                    className={`px-3 py-1.5 text-sm font-medium transition-colors first:rounded-l-lg last:rounded-r-lg ${filterPeriodo === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}
-                  >
+                    className={`px-3 py-1.5 text-sm font-medium transition-colors first:rounded-l-lg last:rounded-r-lg ${filterPeriodo === key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground"}`}>
                     {label}
                   </button>
                 ))}
               </div>
               {filterPeriodo === "personalizado" && (
                 <div className="flex items-center gap-1.5">
-                  <Input type="date" value={customDateFrom} onChange={(e) => setCustomDateFrom(e.target.value)} className="h-10 w-36 text-sm" />
+                  <Input type="date" value={customDateFrom} onChange={e => setCustomDateFrom(e.target.value)} className="h-10 w-36 text-sm" />
                   <span className="text-xs text-muted-foreground">ate</span>
-                  <Input type="date" value={customDateTo} onChange={(e) => setCustomDateTo(e.target.value)} className="h-10 w-36 text-sm" />
+                  <Input type="date" value={customDateTo} onChange={e => setCustomDateTo(e.target.value)} className="h-10 w-36 text-sm" />
                 </div>
               )}
             </div>
@@ -587,7 +749,10 @@ function VendasPage() {
               <div className="absolute inset-x-0 top-0 h-1 bg-[#16a34a]" />
               <p className="text-xs font-medium text-muted-foreground">Total Vendas</p>
               <p className="mt-1 text-lg font-bold tabular-nums text-[#16a34a]">{formatCurrency(totalVendas)}</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">{filtered.length} vendas</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                {filtered.length} vendas
+                {vendas.length !== filtered.length && ` (${vendas.length} total)`}
+              </p>
             </div>
             <div className="relative overflow-hidden rounded-lg border border-border bg-card p-4 shadow-sm">
               <div className="absolute inset-x-0 top-0 h-1 bg-[#2563eb]" />
@@ -613,23 +778,21 @@ function VendasPage() {
               <Input
                 placeholder="Buscar por codigo, cliente, canal..."
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={e => setSearch(e.target.value)}
                 className="pl-10"
               />
             </div>
-
             <div className="relative">
               <select
                 value={filterCanal}
-                onChange={(e) => setFilterCanal(e.target.value)}
-                className="h-10 appearance-none rounded-lg border border-border bg-card pl-3 pr-8 text-sm text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                onChange={e => setFilterCanal(e.target.value)}
+                className="h-10 appearance-none rounded-lg border border-border bg-card pl-3 pr-8 text-sm text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
               >
                 <option value="">Todos canais</option>
-                {CANAIS.map((c) => <option key={c} value={c}>{c}</option>)}
+                {CANAIS.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
               <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
             </div>
-
             {hasFilter && (
               <button type="button" onClick={clearFilters}
                 className="flex items-center gap-1 rounded-lg border border-border px-3 py-1.5 text-sm text-muted-foreground transition-colors hover:bg-muted">
@@ -640,7 +803,9 @@ function VendasPage() {
 
           {/* Table */}
           {isLoading ? (
-            <div className="flex items-center justify-center py-20"><Loader2 className="h-8 w-8 animate-spin text-muted-foreground" /></div>
+            <div className="flex items-center justify-center py-20">
+              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+            </div>
           ) : error ? (
             <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-6 text-center text-sm text-destructive">Erro ao carregar vendas</div>
           ) : (
@@ -650,7 +815,10 @@ function VendasPage() {
                   <thead>
                     <tr className="border-b border-border bg-muted/50">
                       <th className="w-10 px-3 py-3">
-                        <input type="checkbox" checked={selectedIds.size === paginatedFiltered.length && paginatedFiltered.length > 0} onChange={toggleSelectAll} className="h-4 w-4 rounded border-border" />
+                        <input type="checkbox"
+                          checked={selectedIds.size === paginatedFiltered.length && paginatedFiltered.length > 0}
+                          onChange={toggleSelectAll}
+                          className="h-4 w-4 rounded border-border" />
                       </th>
                       <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Codigo</th>
                       <th className="px-4 py-3 text-left font-semibold text-muted-foreground">Cliente</th>
@@ -673,7 +841,8 @@ function VendasPage() {
                         </td>
                       </tr>
                     ) : paginatedFiltered.map((venda) => (
-                      <tr key={venda.id} className={`border-b border-border last:border-0 hover:bg-muted/30 transition-colors ${selectedIds.has(venda.id) ? "bg-primary/5" : ""}`}>
+                      <tr key={venda.id}
+                        className={`border-b border-border last:border-0 hover:bg-muted/30 transition-colors ${selectedIds.has(venda.id) ? "bg-primary/5" : ""}`}>
                         <td className="px-3 py-3">
                           <input type="checkbox" checked={selectedIds.has(venda.id)} onChange={() => toggleSelect(venda.id)} className="h-4 w-4 rounded border-border" />
                         </td>
@@ -690,16 +859,19 @@ function VendasPage() {
                         <td className="px-4 py-3">
                           <span className="rounded-full bg-primary/10 px-2 py-0.5 text-xs font-medium text-primary">{venda.canal || "-"}</span>
                         </td>
-                        <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateTimeDisplay(venda.data_venda)}</td>
+                        <td className="px-4 py-3 text-xs text-muted-foreground">{formatDateDisplay(venda.data_venda)}</td>
                         <td className="px-4 py-3">
                           <div className="flex items-center justify-end gap-1">
-                            <button type="button" onClick={() => cloneVenda(venda)} title="Clonar venda" className="rounded-md p-1.5 text-muted-foreground hover:bg-primary/10 hover:text-primary">
+                            <button type="button" onClick={() => cloneVenda(venda)} title="Clonar venda"
+                              className="rounded-md p-1.5 text-muted-foreground hover:bg-primary/10 hover:text-primary">
                               <Copy className="h-4 w-4" />
                             </button>
-                            <button type="button" onClick={() => openEdit(venda)} title="Editar" className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
+                            <button type="button" onClick={() => openEdit(venda)} title="Editar"
+                              className="rounded-md p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground">
                               <Pencil className="h-4 w-4" />
                             </button>
-                            <button type="button" onClick={() => setDeleteConfirm(venda)} title="Excluir" className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
+                            <button type="button" onClick={() => setDeleteConfirm(venda)} title="Excluir"
+                              className="rounded-md p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive">
                               <Trash2 className="h-4 w-4" />
                             </button>
                           </div>
@@ -709,11 +881,12 @@ function VendasPage() {
                   </tbody>
                 </table>
               </div>
+
               {/* Pagination */}
               {filtered.length > 0 && (
                 <div className="flex items-center justify-between border-t border-border px-4 py-3">
                   <p className="text-xs text-muted-foreground">
-                    Mostrando {Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)}-{Math.min(page * PAGE_SIZE, filtered.length)} de {filtered.length} registros
+                    Mostrando {Math.min((page - 1) * PAGE_SIZE + 1, filtered.length)}–{Math.min(page * PAGE_SIZE, filtered.length)} de {filtered.length} registros
                   </p>
                   <div className="flex items-center gap-1">
                     <button type="button" disabled={page <= 1} onClick={() => setPage(p => p - 1)}
@@ -722,10 +895,10 @@ function VendasPage() {
                     </button>
                     {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
                       let pageNum: number
-                      if (totalPages <= 5) { pageNum = i + 1 }
-                      else if (page <= 3) { pageNum = i + 1 }
-                      else if (page >= totalPages - 2) { pageNum = totalPages - 4 + i }
-                      else { pageNum = page - 2 + i }
+                      if (totalPages <= 5)          pageNum = i + 1
+                      else if (page <= 3)           pageNum = i + 1
+                      else if (page >= totalPages - 2) pageNum = totalPages - 4 + i
+                      else                          pageNum = page - 2 + i
                       return (
                         <button key={pageNum} type="button" onClick={() => setPage(pageNum)}
                           className={`flex h-8 w-8 items-center justify-center rounded-md text-sm font-medium transition-colors ${page === pageNum ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted"}`}>
@@ -760,82 +933,83 @@ function VendasPage() {
             <div className="grid gap-4 py-4">
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Codigo</Label>
-                  <Input placeholder="Codigo da venda" value={form.codigo} onChange={(e) => { console.log("[v0] Codigo onChange:", e.target.value); setForm({ ...form, codigo: e.target.value }) }} />
+                  <Label>Codigo <span className="text-destructive">*</span></Label>
+                  <Input placeholder="Codigo da venda" value={form.codigo} onChange={e => setForm({ ...form, codigo: e.target.value })} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Data/Hora</Label>
-                  <Input type="datetime-local" value={form.data_venda} onChange={(e) => { console.log("[v0] Data onChange:", e.target.value); setForm({ ...form, data_venda: e.target.value }) }} />
+                  <Label>Data <span className="text-destructive">*</span></Label>
+                  <Input type="date" value={form.data_venda} onChange={e => setForm({ ...form, data_venda: e.target.value })} />
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Cliente</Label>
-                  <select className={selectClass} value={form.cliente_id} onChange={(e) => setForm({ ...form, cliente_id: e.target.value })}>
+                  <Label>Cliente <span className="text-destructive">*</span></Label>
+                  <select className={selectClass} value={form.cliente_id} onChange={e => setForm({ ...form, cliente_id: e.target.value })}>
                     <option value="">Selecione ou digite</option>
-                    {clientesLista.map((c) => <option key={c.id} value={c.id}>{c.nome}</option>)}
+                    {clientesLista.map(c => <option key={c.id} value={c.id}>{c.nome}</option>)}
                   </select>
                 </div>
                 <div className="space-y-2">
                   <Label>Nome Cliente (manual)</Label>
-                  <Input placeholder="Digite se nao encontrar na lista" value={form.cliente_nome} onChange={(e) => setForm({ ...form, cliente_nome: e.target.value })} />
+                  <Input placeholder="Digite se nao encontrar na lista" value={form.cliente_nome} onChange={e => setForm({ ...form, cliente_nome: e.target.value })} />
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
-                  <Label>Valor Total *</Label>
-                  <Input placeholder="0,00" value={form.valor_total} onChange={(e) => setForm({ ...form, valor_total: handleCurrencyInput(e.target.value) })} />
+                  <Label>Valor Total <span className="text-destructive">*</span></Label>
+                  <Input placeholder="0,00" value={form.valor_total} onChange={e => setForm({ ...form, valor_total: handleCurrencyInput(e.target.value) })} />
                 </div>
                 <div className="space-y-2">
                   <Label>Acrescimo</Label>
-                  <Input placeholder="0,00" value={form.acrescimo} onChange={(e) => setForm({ ...form, acrescimo: handleCurrencyInput(e.target.value) })} />
+                  <Input placeholder="0,00" value={form.acrescimo} onChange={e => setForm({ ...form, acrescimo: handleCurrencyInput(e.target.value) })} />
                 </div>
                 <div className="space-y-2">
                   <Label>Taxas Marketplace</Label>
-                  <Input placeholder="0,00" value={form.taxas_marketplace} onChange={(e) => setForm({ ...form, taxas_marketplace: handleCurrencyInput(e.target.value) })} />
+                  <Input placeholder="0,00" value={form.taxas_marketplace} onChange={e => setForm({ ...form, taxas_marketplace: handleCurrencyInput(e.target.value) })} />
                 </div>
               </div>
 
               <div className="grid grid-cols-3 gap-4">
                 <div className="space-y-2">
                   <Label>Desconto</Label>
-                  <Input placeholder="0,00" value={form.desconto} onChange={(e) => setForm({ ...form, desconto: handleCurrencyInput(e.target.value) })} />
+                  <Input placeholder="0,00" value={form.desconto} onChange={e => setForm({ ...form, desconto: handleCurrencyInput(e.target.value) })} />
                 </div>
                 <div className="space-y-2">
                   <Label>Valor Recebido</Label>
-                  <Input placeholder="Calculado automaticamente" value={form.valor_recebido} onChange={(e) => setForm({ ...form, valor_recebido: handleCurrencyInput(e.target.value) })} />
+                  <Input placeholder="Calculado automaticamente" value={form.valor_recebido} onChange={e => setForm({ ...form, valor_recebido: handleCurrencyInput(e.target.value) })} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Forma Pagamento</Label>
-                  <select className={selectClass} value={form.forma_pagamento} onChange={(e) => setForm({ ...form, forma_pagamento: e.target.value })}>
+                  <Label>Forma Pagamento <span className="text-destructive">*</span></Label>
+                  <select className={selectClass} value={form.forma_pagamento} onChange={e => setForm({ ...form, forma_pagamento: e.target.value })}>
                     <option value="">Selecione</option>
-                    {FORMAS_PAGAMENTO.map((f) => <option key={f} value={f}>{f}</option>)}
+                    {FORMAS_PAGAMENTO.map(f => <option key={f} value={f}>{f}</option>)}
                   </select>
                 </div>
               </div>
 
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label>Canal</Label>
-                  <select className={selectClass} value={form.canal} onChange={(e) => setForm({ ...form, canal: e.target.value })}>
+                  <Label>Canal <span className="text-destructive">*</span></Label>
+                  <select className={selectClass} value={form.canal} onChange={e => setForm({ ...form, canal: e.target.value })}>
                     <option value="">Selecione</option>
-                    {CANAIS.map((c) => <option key={c} value={c}>{c}</option>)}
+                    {CANAIS.map(c => <option key={c} value={c}>{c}</option>)}
                   </select>
                 </div>
                 <div className="space-y-2">
                   <Label>Observacoes</Label>
-                  <Input placeholder="Observacoes" value={form.observacoes} onChange={(e) => setForm({ ...form, observacoes: e.target.value })} />
+                  <Input placeholder="Observacoes" value={form.observacoes} onChange={e => setForm({ ...form, observacoes: e.target.value })} />
                 </div>
               </div>
             </div>
 
             <DialogFooter>
-              <button type="button" onClick={() => setDialogOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">
+              <button type="button" onClick={() => setDialogOpen(false)}
+                className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">
                 Cancelar
               </button>
-              <button type="button" onClick={handleSave} disabled={saving || !form.valor_total}
+              <button type="button" onClick={handleSave} disabled={saving}
                 className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                 {saving ? "Salvando..." : "Salvar"}
@@ -844,8 +1018,8 @@ function VendasPage() {
           </DialogContent>
         </Dialog>
 
-        {/* Delete confirmation */}
-        <AlertDialog open={!!deleteConfirm} onOpenChange={(open) => !open && setDeleteConfirm(null)}>
+        {/* Delete single */}
+        <AlertDialog open={!!deleteConfirm} onOpenChange={open => !open && setDeleteConfirm(null)}>
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>Excluir venda</AlertDialogTitle>
@@ -855,14 +1029,15 @@ function VendasPage() {
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancelar</AlertDialogCancel>
-              <AlertDialogAction onClick={() => deleteConfirm && handleDelete(deleteConfirm)} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              <AlertDialogAction onClick={() => deleteConfirm && handleDelete(deleteConfirm)}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                 Excluir
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
 
-        {/* Delete multiple confirmation */}
+        {/* Delete multiple */}
         <AlertDialog open={deleteMultiConfirm} onOpenChange={setDeleteMultiConfirm}>
           <AlertDialogContent>
             <AlertDialogHeader>
@@ -873,7 +1048,8 @@ function VendasPage() {
             </AlertDialogHeader>
             <AlertDialogFooter>
               <AlertDialogCancel>Cancelar</AlertDialogCancel>
-              <AlertDialogAction onClick={handleDeleteMultiple} className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
+              <AlertDialogAction onClick={handleDeleteMultiple}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90">
                 {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : `Excluir ${selectedIds.size}`}
               </AlertDialogAction>
             </AlertDialogFooter>
@@ -895,10 +1071,8 @@ function VendasPage() {
 
             {importRows.length === 0 && !importResult && (
               <div className="space-y-4 py-4">
-                <div
-                  onClick={() => importFileRef.current?.click()}
-                  className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border p-10 text-center transition-colors hover:border-primary/50 hover:bg-primary/5"
-                >
+                <div onClick={() => importFileRef.current?.click()}
+                  className="flex cursor-pointer flex-col items-center justify-center rounded-xl border-2 border-dashed border-border p-10 text-center transition-colors hover:border-primary/50 hover:bg-primary/5">
                   <div className="flex h-14 w-14 items-center justify-center rounded-full bg-primary/10">
                     <Upload className="h-7 w-7 text-primary" />
                   </div>
@@ -910,7 +1084,7 @@ function VendasPage() {
                   type="file"
                   accept=".csv,.xls,.xlsx,text/csv,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                   className="hidden"
-                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleImportFile(f); if (e.target) e.target.value = "" }}
+                  onChange={e => { const f = e.target.files?.[0]; if (f) handleImportFile(f); if (e.target) e.target.value = "" }}
                 />
               </div>
             )}
@@ -921,7 +1095,10 @@ function VendasPage() {
                   <p className="text-sm font-medium text-foreground">
                     {importRows.length} {importRows.length === 1 ? "venda encontrada" : "vendas encontradas"}
                   </p>
-                  <button type="button" onClick={() => setImportRows([])} className="text-xs text-muted-foreground hover:text-foreground">Trocar arquivo</button>
+                  <button type="button" onClick={() => setImportRows([])}
+                    className="text-xs text-muted-foreground hover:text-foreground">
+                    Trocar arquivo
+                  </button>
                 </div>
                 <div className="max-h-64 overflow-auto rounded-lg border border-border">
                   <table className="w-full text-xs">
@@ -940,7 +1117,7 @@ function VendasPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {importRows.slice(0, 50).map((row, i) => (
+                      {importRows.map((row, i) => (
                         <tr key={i} className="border-t border-border">
                           <td className="px-2 py-1.5 font-mono">{row.codigo || "-"}</td>
                           <td className="px-2 py-1.5">{row.cliente || "-"}</td>
@@ -957,10 +1134,13 @@ function VendasPage() {
                     </tbody>
                   </table>
                 </div>
-                {importRows.length > 50 && <p className="text-xs text-muted-foreground text-center">Mostrando 50 de {importRows.length} vendas</p>}
                 <DialogFooter>
-                  <button type="button" onClick={() => setImportOpen(false)} className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">Cancelar</button>
-                  <button type="button" onClick={handleImportSave} disabled={importing} className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
+                  <button type="button" onClick={() => setImportOpen(false)}
+                    className="rounded-lg border border-border px-4 py-2 text-sm font-medium text-muted-foreground hover:bg-muted">
+                    Cancelar
+                  </button>
+                  <button type="button" onClick={handleImportSave} disabled={importing}
+                    className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50">
                     {importing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
                     {importing ? "Importando..." : `Importar ${importRows.length} vendas`}
                   </button>
@@ -975,13 +1155,25 @@ function VendasPage() {
                     <Check className="h-6 w-6 text-[hsl(142,71%,40%)]" />
                   </div>
                   <p className="text-sm font-semibold text-foreground">Importacao concluida</p>
-                  <div className="flex gap-4 text-sm text-muted-foreground">
-                    <span><strong className="text-foreground">{importResult.created}</strong> vendas criadas</span>
-                    {importResult.skipped > 0 && <span><strong className="text-foreground">{importResult.skipped}</strong> ja existentes</span>}
+                  <div className="flex flex-col gap-2 text-sm text-muted-foreground text-center">
+                    <div className="flex gap-4">
+                      <span><strong className="text-foreground">{importResult.created}</strong> vendas criadas</span>
+                      {importResult.skipped > 0 && <span><strong className="text-foreground">{importResult.skipped}</strong> ignoradas</span>}
+                    </div>
+                    {importResult.skipped > 0 && (
+                      <p className="text-xs text-muted-foreground mt-2">
+                        Vendas ignoradas: sem valor total válido.<br/>
+                        Códigos duplicados são permitidos para bater o caixa.<br/>
+                        Verifique o console (F12) para mais detalhes.
+                      </p>
+                    )}
                   </div>
                 </div>
                 <DialogFooter>
-                  <button type="button" onClick={() => setImportOpen(false)} className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">Fechar</button>
+                  <button type="button" onClick={() => setImportOpen(false)}
+                    className="rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90">
+                    Fechar
+                  </button>
                 </DialogFooter>
               </div>
             )}

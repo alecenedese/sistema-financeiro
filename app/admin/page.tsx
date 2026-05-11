@@ -336,77 +336,89 @@ export default function AdminPage() {
             </div>
 
             {/* Table */}
-            <div className="rounded-xl border border-border bg-card shadow-sm">
-              <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto] gap-4 border-b border-border px-5 py-3 text-xs font-semibold uppercase text-muted-foreground">
-                <span>Status</span>
-                <span>Nome / Empresa</span>
-                <span>CNPJ</span>
-                <span>Responsavel</span>
-                <span>Email</span>
-                <span>Cadastro</span>
-                <span className="text-right">Acoes</span>
+            <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/50">
+                      <th className="w-10 px-4 py-3 text-center text-xs font-semibold uppercase text-muted-foreground">Status</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">Nome / Empresa</th>
+                      <th className="w-40 px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">CNPJ</th>
+                      <th className="w-40 px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">Responsavel</th>
+                      <th className="w-28 px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">Cadastro</th>
+                      <th className="w-36 px-4 py-3 text-right text-xs font-semibold uppercase text-muted-foreground">Acoes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-5 py-10 text-center text-sm text-muted-foreground">
+                          {search ? "Nenhum cliente encontrado." : "Nenhum cliente cadastrado."}
+                        </td>
+                      </tr>
+                    ) : (
+                      filtered.map((item) => (
+                        <tr key={item.id} className="group border-b border-border last:border-b-0 transition-colors hover:bg-muted/50">
+                          <td className="px-4 py-3 text-center">
+                            <button type="button" onClick={() => toggleAtivo(item)} title={item.ativo ? "Clique para desativar" : "Clique para ativar"}>
+                              {item.ativo ? (
+                                <CheckCircle2 className="h-5 w-5 text-[hsl(142,71%,40%)]" />
+                              ) : (
+                                <XCircle className="h-5 w-5 text-muted-foreground" />
+                              )}
+                            </button>
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-3">
+                              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(216,60%,22%)]/10">
+                                <Building2 className="h-4 w-4 text-[hsl(216,60%,22%)]" />
+                              </div>
+                              <div className="min-w-0">
+                                <p className="font-medium text-card-foreground truncate">{item.nome}</p>
+                                {item.observacoes && <p className="text-xs text-muted-foreground truncate max-w-[240px]">{item.observacoes}</p>}
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-4 py-3 font-mono text-sm text-muted-foreground whitespace-nowrap">{item.cnpj || "-"}</td>
+                          <td className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap">{item.responsavel || "-"}</td>
+                          <td className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap">
+                            {item.created_at ? new Date(item.created_at).toLocaleDateString("pt-BR") : "-"}
+                          </td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center justify-end gap-1">
+                              <button
+                                type="button"
+                                onClick={() => acessarCliente(item)}
+                                title="Acessar como este cliente"
+                                className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors ${
+                                  tenant?.id === item.id
+                                    ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)] border border-[hsl(142,71%,40%)]/30"
+                                    : "border border-border text-muted-foreground hover:bg-primary hover:text-primary-foreground opacity-0 group-hover:opacity-100"
+                                }`}
+                              >
+                                <LogIn className="h-3.5 w-3.5" />
+                                {tenant?.id === item.id ? "Ativo" : "Acessar"}
+                              </button>
+                              <button type="button" onClick={() => copyDashboardLink(item)} title="Copiar link da dashboard"
+                                className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground opacity-0 group-hover:opacity-100">
+                                {copiedId === item.id ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Link2 className="h-3.5 w-3.5" />}
+                              </button>
+                              <button type="button" onClick={() => openEdit(item)}
+                                className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground opacity-0 group-hover:opacity-100">
+                                <Pencil className="h-3.5 w-3.5" />
+                              </button>
+                              <button type="button" onClick={() => setDeleteConfirm(item)}
+                                className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive opacity-0 group-hover:opacity-100">
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
-              {filtered.length === 0 ? (
-                <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-                  {search ? "Nenhum cliente encontrado." : "Nenhum cliente cadastrado."}
-                </div>
-              ) : (
-                filtered.map((item) => (
-                  <div key={item.id} className="group grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto] items-center gap-4 border-b border-border px-5 py-3.5 last:border-b-0 transition-colors hover:bg-muted/50">
-                    <button type="button" onClick={() => toggleAtivo(item)} title={item.ativo ? "Clique para desativar" : "Clique para ativar"}>
-                      {item.ativo ? (
-                        <CheckCircle2 className="h-5 w-5 text-[hsl(142,71%,40%)]" />
-                      ) : (
-                        <XCircle className="h-5 w-5 text-muted-foreground" />
-                      )}
-                    </button>
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[hsl(216,60%,22%)]/10">
-                        <Building2 className="h-4 w-4 text-[hsl(216,60%,22%)]" />
-                      </div>
-                      <div>
-                        <p className="font-medium text-card-foreground">{item.nome}</p>
-                        {item.observacoes && <p className="text-xs text-muted-foreground truncate max-w-[200px]">{item.observacoes}</p>}
-                      </div>
-                    </div>
-                    <span className="font-mono text-sm text-muted-foreground">{item.cnpj || "-"}</span>
-                    <span className="text-sm text-muted-foreground">{item.responsavel || "-"}</span>
-                    <span className="text-sm text-muted-foreground">{item.email || "-"}</span>
-                    <span className="text-sm text-muted-foreground">
-                      {item.created_at ? new Date(item.created_at).toLocaleDateString("pt-BR") : "-"}
-                    </span>
-                    <div className="flex items-center justify-end gap-1">
-                      <button
-                        type="button"
-                        onClick={() => acessarCliente(item)}
-                        title="Acessar como este cliente"
-                        className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-semibold transition-colors ${
-                          tenant?.id === item.id
-                            ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)] border border-[hsl(142,71%,40%)]/30"
-                            : "border border-border text-muted-foreground hover:bg-primary hover:text-primary-foreground opacity-0 group-hover:opacity-100"
-                        }`}
-                      >
-                        <LogIn className="h-3.5 w-3.5" />
-                        {tenant?.id === item.id ? "Ativo" : "Acessar"}
-  </button>
-  <button 
-    type="button" 
-    onClick={() => copyDashboardLink(item)} 
-    title="Copiar link da dashboard"
-    className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground opacity-0 group-hover:opacity-100"
-  >
-    {copiedId === item.id ? <Check className="h-3.5 w-3.5 text-green-500" /> : <Link2 className="h-3.5 w-3.5" />}
-  </button>
-  <button type="button" onClick={() => openEdit(item)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground opacity-0 group-hover:opacity-100">
-  <Pencil className="h-3.5 w-3.5" />
-  </button>
-  <button type="button" onClick={() => setDeleteConfirm(item)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive opacity-0 group-hover:opacity-100">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
             </div>
           </div>
         </main>

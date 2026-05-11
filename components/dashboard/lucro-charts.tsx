@@ -52,7 +52,7 @@ function DonutChart({
     { name: label2, value: value2, color: "#F07575" },
   ]
 
-  const size = 280
+  const size = 360
 
   return (
     <div className="flex flex-col rounded-xl border border-border bg-card p-6 shadow-sm">
@@ -77,8 +77,8 @@ function DonutChart({
             data={data}
             cx={size / 2}
             cy={size / 2}
-            innerRadius={80}
-            outerRadius={120}
+            innerRadius={105}
+            outerRadius={155}
             paddingAngle={2}
             dataKey="value"
             stroke="none"
@@ -138,8 +138,8 @@ export function LucroCharts({ month, year }: LucroChartsProps) {
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
       <DonutChart
         title="Lucro Bruto"
-        label1="Vendas"
-        label2="Saidas"
+        label1="Receita Liquida"
+        label2="Custo Direto"
         value1={lucroBruto.vendas}
         value2={lucroBruto.saidas}
         resultado={lucroBruto.resultado}
@@ -148,8 +148,8 @@ export function LucroCharts({ month, year }: LucroChartsProps) {
       />
       <DonutChart
         title="Lucro Liquido"
-        label1="Recebimento"
-        label2="Pagamentos"
+        label1="Recebimentos"
+        label2="Despesas"
         value1={lucroLiquido.vendas}
         value2={lucroLiquido.saidas}
         resultado={lucroLiquido.resultado}

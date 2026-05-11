@@ -12,8 +12,10 @@ import { AccountsCard } from "@/components/dashboard/accounts-card"
 import { DespesasPorCategoria } from "@/components/dashboard/despesas-categoria"
 import { LucroCharts } from "@/components/dashboard/lucro-charts"
 import { DRECard } from "@/components/dashboard/dre-card"
+import { ConciliacaoContas } from "@/components/dashboard/conciliacao-contas"
 import { useTenant } from "@/hooks/use-tenant"
 import { createClient } from "@/lib/supabase/client"
+import { useDRE, useCategoryChartsMonth } from "@/hooks/use-dashboard-data"
 import useSWR from "swr"
 
 interface ClienteAdmin {
@@ -165,23 +167,26 @@ export default function Page() {
             {/* 2. Despesas por Categoria */}
             <DespesasPorCategoria month={selectedMonth} year={selectedYear} />
 
-            {/* 3. Fluxo de Caixa Diario */}
-            <FluxoCaixaDiario month={selectedMonth} year={selectedYear} />
-
-            {/* 4. Transacoes Recentes + Contas Bancarias */}
-            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
-              <RecentTransactions month={selectedMonth} year={selectedYear} />
-              <AccountsCard />
-            </div>
-
-            {/* 5. DRE */}
-            <DRECard month={selectedMonth} year={selectedYear} />
-
-            {/* 6. Lucro Bruto + Lucro Liquido */}
+            {/* 3. Lucro Bruto + Lucro Liquido */}
             <LucroCharts month={selectedMonth} year={selectedYear} />
 
-            {/* 7. Fluxo de Vendas Diario */}
+            {/* 4. Fluxo de Caixa Diario */}
+            <FluxoCaixaDiario month={selectedMonth} year={selectedYear} />
+
+            {/* 5. Fluxo de Vendas Diario */}
             <FluxoVendasDiario month={selectedMonth} year={selectedYear} />
+
+            {/* 6. DRE */}
+            <DRECard month={selectedMonth} year={selectedYear} />
+
+            {/* 7. Movimentação e Conciliação */}
+            <ConciliacaoContas month={selectedMonth} year={selectedYear} />
+
+            {/* 8. Transacoes Recentes + Contas Bancarias */}
+            <div className="grid grid-cols-1 gap-6 xl:grid-cols-2">
+              <RecentTransactions month={selectedMonth} year={selectedYear} />
+              <AccountsCard month={selectedMonth} year={selectedYear} />
+            </div>
           </div>
         </main>
       </div>
@@ -213,6 +218,7 @@ function DashboardMensalWithCallback({
         month: String(month),
         year: String(year),
         ...(tid ? { tenantId: String(tid) } : {}),
+        tzOffset: String(new Date().getTimezoneOffset()),
       })
       const res = await fetch(`/api/dashboard-data?${params}`)
       const json = await res.json()
@@ -235,15 +241,39 @@ function DashboardMensalWithCallback({
 
   const fmt = (v: number) => new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(v)
 
-  const cards = [
-    { label: "Vendas", value: data?.totalVendas ?? 0 },
-    { label: "Pagamentos", value: data?.pagamentos ?? 0 },
-    { label: "Lucro Bruto", value: data?.lucroBruto ?? 0 },
-    { label: "% Lucro Bruto", value: data?.percLucroBruto ?? 0, isPercent: true },
+  // Valores derivados do DRE (fonte única)
+  const { data: dreData } = useDRE(selectedMonth + 1, selectedYear)
+  const dreV = dreData?.valores || {}
+  // Vendas vem da API (mesma lógica de timezone da página /vendas)
+  const vendas = data?.totalVendas ?? dreV["1.1"] ?? 0
+  const receitaBruta = dreV["1.0"] ?? 0
+  const receitaLiquida = dreV["3.0"] ?? 0
+  const recebimentos = dreV["6.0"] ?? 0
+  const lucroBruto = dreV["5.0"] ?? 0
+  const lucroLiquido = dreV["9.0"] ?? 0
+  const resultadoFinanceiro = dreV["11.0"] ?? 0
+  const pctLucroBruto = receitaBruta ? (lucroBruto / receitaBruta) * 100 : 0
+  const pctLucroLiquido = receitaBruta ? (lucroLiquido / receitaBruta) * 100 : 0
+  const pctResultado = receitaBruta ? (resultadoFinanceiro / receitaBruta) * 100 : 0
+
+  // Total de despesas = mesmo total do gráfico Despesas por Categoria (todas as contas_pagar do período, sem filtro de status)
+  const { data: categoryData } = useCategoryChartsMonth(selectedMonth + 1, selectedYear)
+  const totalDespesas = (categoryData?.expenses ?? []).reduce((acc, e) => acc + e.value, 0)
+
+  const cards: Array<{ label: string; value: number; isPercent?: boolean; valueColor?: string; pct?: number }> = [
+    { label: "Vendas", value: vendas },
+    { label: "Pagamentos", value: totalDespesas },
+    { label: "Lucro Bruto", value: lucroBruto, valueColor: lucroBruto < 0 ? "text-[#E53E3E]" : undefined },
+    { label: "% Lucro Bruto", value: pctLucroBruto, isPercent: true, valueColor: pctLucroBruto < 0 ? "text-[#E53E3E]" : undefined },
     { label: "Recebimentos", value: data?.recebimentos ?? 0 },
-    { label: "Lucro Liquido", value: data?.lucroLiquido ?? 0, valueColor: (data?.lucroLiquido ?? 0) < 0 ? "text-[#E53E3E]" : undefined },
-    { label: "% Lucro Liquido", value: data?.percLucroLiquido ?? 0, isPercent: true, valueColor: (data?.percLucroLiquido ?? 0) < 0 ? "text-[#E53E3E]" : undefined },
-    { label: "Saldo em conta", value: data?.saldoConta ?? 0 },
+    { label: "Lucro Liquido", value: lucroLiquido, valueColor: lucroLiquido < 0 ? "text-[#E53E3E]" : undefined },
+    { label: "% Lucro Liquido", value: pctLucroLiquido, isPercent: true, valueColor: pctLucroLiquido < 0 ? "text-[#E53E3E]" : undefined },
+    {
+      label: "Resultado Financeiro",
+      value: resultadoFinanceiro,
+      pct: pctResultado,
+      valueColor: resultadoFinanceiro < 0 ? "text-[#E53E3E]" : undefined,
+    },
   ]
 
   return (
@@ -328,6 +358,11 @@ function DashboardMensalWithCallback({
                   fmt(card.value)
                 )}
               </div>
+              {card.pct !== undefined && !isLoading && (
+                <div className={`mt-0.5 text-xs font-semibold ${card.pct < 0 ? "text-[#E53E3E]" : "text-[hsl(142,71%,35%)]"}`}>
+                  {card.pct.toFixed(2).replace(".", ",")} %
+                </div>
+              )}
             </div>
             <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-[#1B4B8A]">
               <svg className="h-6 w-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">

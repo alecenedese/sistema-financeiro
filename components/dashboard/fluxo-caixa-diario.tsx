@@ -2,13 +2,15 @@
 
 import { useRef, useEffect, useState } from "react"
 import {
-  BarChart,
+  ComposedChart,
   Bar,
+  Line,
   XAxis,
   YAxis,
   Tooltip,
   ReferenceLine,
-  Cell,
+  Legend,
+  CartesianGrid,
 } from "recharts"
 import { useFluxoCaixaDiario, fmt } from "@/hooks/use-dashboard-data"
 
@@ -23,17 +25,27 @@ function CustomTooltip({
   label,
 }: {
   active?: boolean
-  payload?: Array<{ value: number }>
+  payload?: Array<{ value: number; name: string; color: string; dataKey: string }>
   label?: string
 }) {
   if (active && payload && payload.length) {
-    const value = payload[0].value
+    const labelMap: Record<string, string> = {
+      entradas: "Entradas",
+      saidas: "Saidas",
+      saldo: "Saldo",
+    }
     return (
       <div className="rounded-lg border border-border bg-card px-4 py-3 shadow-lg">
-        <p className="mb-1 text-sm font-semibold text-card-foreground">Dia {label}</p>
-        <p className={`text-sm font-bold ${value >= 0 ? "text-[#1B4B8A]" : "text-[#E07755]"}`}>
-          {fmt(value)}
-        </p>
+        <p className="mb-2 text-sm font-semibold text-card-foreground">Dia {label}</p>
+        {payload.map((p) => {
+          const display = p.dataKey === "saidas" ? Math.abs(p.value) : p.value
+          return (
+            <p key={p.dataKey} className="text-xs" style={{ color: p.color }}>
+              <span className="font-medium">{labelMap[p.dataKey] || p.name}: </span>
+              <span className="font-bold">{fmt(display)}</span>
+            </p>
+          )
+        })}
       </div>
     )
   }
@@ -62,11 +74,12 @@ export function FluxoCaixaDiario({ month, year }: FluxoCaixaDiarioProps) {
     <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
       <h3 className="mb-6 text-lg font-bold text-card-foreground">Fluxo de caixa diario</h3>
       
-      <div ref={containerRef} className="h-80">
+      <div ref={containerRef} className="h-[500px]">
         {isLoading ? (
           <div className="h-full animate-pulse rounded-lg bg-muted" />
         ) : width > 0 && data.length > 0 ? (
-          <BarChart width={width} height={320} data={data}>
+          <ComposedChart width={width} height={500} data={data} margin={{ top: 10, right: 20, left: 0, bottom: 0 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#e5e7eb" vertical={false} />
             <XAxis
               dataKey="dia"
               tick={{ fontSize: 11, fill: "hsl(220,10%,46%)" }}
@@ -80,26 +93,29 @@ export function FluxoCaixaDiario({ month, year }: FluxoCaixaDiarioProps) {
               tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
             />
             <Tooltip content={<CustomTooltip />} />
-            <ReferenceLine
-              y={0}
-              stroke="#333"
-              strokeDasharray="3 3"
-              label={{
-                value: "Ponto de Equilibrio",
-                position: "insideLeft",
-                fontSize: 10,
-                fill: "#666",
+            <Legend
+              wrapperStyle={{ fontSize: 12 }}
+              formatter={(value: string) => {
+                const map: Record<string, string> = {
+                  entradas: "Entradas",
+                  saidas: "Saidas",
+                  saldo: "Saldo",
+                }
+                return map[value] || value
               }}
             />
-            <Bar dataKey="valor" radius={[2, 2, 0, 0]} maxBarSize={18}>
-              {data.map((entry, index) => (
-                <Cell
-                  key={`cell-${index}`}
-                  fill={entry.valor >= 0 ? "#1B4B8A" : "#E07755"}
-                />
-              ))}
-            </Bar>
-          </BarChart>
+            <ReferenceLine y={0} stroke="#333" strokeWidth={1} />
+            <Bar dataKey="entradas" fill="#1B4B8A" radius={[2, 2, 0, 0]} maxBarSize={28} />
+            <Bar dataKey="saidas" fill="#E53E3E" radius={[0, 0, 2, 2]} maxBarSize={28} />
+            <Line
+              type="monotone"
+              dataKey="saldo"
+              stroke="#111827"
+              strokeWidth={2}
+              dot={{ r: 2.5, fill: "#111827" }}
+              activeDot={{ r: 4 }}
+            />
+          </ComposedChart>
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             Nenhum dado encontrado para este periodo

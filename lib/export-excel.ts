@@ -50,8 +50,16 @@ export const formatters = {
   },
   date: (value: unknown): string => {
     if (!value) return ""
-    const date = new Date(value as string)
-    return date.toLocaleDateString("pt-BR")
+    // Evita deslocamento de fuso: se vier "YYYY-MM-DD" formata direto
+    const s = String(value)
+    const m = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (m) return `${m[3]}/${m[2]}/${m[1]}`
+    const date = new Date(s)
+    if (isNaN(date.getTime())) return s
+    const dd = String(date.getDate()).padStart(2, "0")
+    const mm = String(date.getMonth() + 1).padStart(2, "0")
+    const yyyy = date.getFullYear()
+    return `${dd}/${mm}/${yyyy}`
   },
   status: (value: unknown): string => {
     const status = String(value || "").toLowerCase()

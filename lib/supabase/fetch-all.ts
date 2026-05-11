@@ -1,9 +1,9 @@
 /**
  * Paginates a Supabase query to fetch ALL rows, bypassing the 1000-row hard limit.
  *
- * Aceita tanto:
- *   fetchAll(supabase.from("x").select("*"))            // query direta
- *   fetchAll(() => supabase.from("x").select("*"))      // builder em função
+ * Aceita:
+ *   fetchAll(supabase.from("x").select("*").eq(...))   // query direta (paginada via .range)
+ *   fetchAll(() => supabase.from("x").select("*"))     // builder em função (paginado por nova query)
  */
 export async function fetchAll<T = Record<string, unknown>>(
   queryOrBuilder: any
@@ -12,7 +12,6 @@ export async function fetchAll<T = Record<string, unknown>>(
   const all: T[] = []
   let offset = 0
 
-  // Se for função, podemos paginar corretamente criando nova query a cada página.
   const isFunction = typeof queryOrBuilder === "function"
 
   while (true) {
@@ -20,18 +19,10 @@ export async function fetchAll<T = Record<string, unknown>>(
       let result: { data: any; error: any }
 
       if (isFunction) {
-        // Cria nova query a cada página para evitar reutilização do builder
         result = await queryOrBuilder().range(offset, offset + PAGE - 1)
       } else {
-        // Query direta: executa diretamente (sem paginação adicional)
-        // Supabase retorna até 1000 rows por padrão
-        if (offset === 0) {
-          // Tenta executar a query - pode já ter .range() ou não
-          result = await queryOrBuilder
-        } else {
-          // Não podemos paginar query direta, retorna o que já temos
-          break
-        }
+        // Query direta: aplica .range() para forçar paginação real
+        result = await queryOrBuilder.range(offset, offset + PAGE - 1)
       }
 
       const { data, error } = result
@@ -44,9 +35,6 @@ export async function fetchAll<T = Record<string, unknown>>(
       if (!data || data.length === 0) break
 
       all.push(...(data as T[]))
-
-      // Para query direta, não tenta paginar
-      if (!isFunction) break
 
       if (data.length < PAGE) break
 

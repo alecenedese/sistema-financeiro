@@ -62,7 +62,7 @@ interface DespesasPorCategoriaProps {
 }
 
 export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps) {
-  const { data, isLoading } = useCategoryChartsMonth(month, year)
+  const { data, isLoading, mutate } = useCategoryChartsMonth(month, year)
   const { tenant } = useTenant()
   const [drillCategory, setDrillCategory] = useState<CategoryPoint | null>(null)
   const [activeIndex, setActiveIndex] = useState<number | undefined>(undefined)
@@ -70,6 +70,11 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
   const [modalCategory, setModalCategory] = useState<string | null>(null)
   const [lancamentos, setLancamentos] = useState<Lancamento[]>([])
   const [loadingLancamentos, setLoadingLancamentos] = useState(false)
+
+  // Força atualização dos dados quando o componente monta
+  useEffect(() => {
+    mutate()
+  }, [mutate, month, year, tenant?.id])
 
   // Busca lançamentos quando abre o modal
   useEffect(() => {
@@ -188,7 +193,7 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
     ? drillCategory.subcategorias.reduce((acc, s) => acc + s.value, 0)
     : expTotal
 
-  const size = 320
+  const size = 400
 
   function handlePieClick(_: unknown, index: number) {
     // Abre o modal ao clicar no gráfico
@@ -223,7 +228,7 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
       </div>
       {!drillCategory && (
         <p className="mb-4 text-xs text-muted-foreground">
-          Clique em uma categoria para ver os lan��amentos
+          Clique em uma categoria para ver os lançamentos
         </p>
       )}
 
@@ -235,8 +240,8 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
               data={displayData}
               cx={size / 2}
               cy={size / 2}
-              innerRadius={92}
-              outerRadius={140}
+              innerRadius={115}
+              outerRadius={175}
               paddingAngle={displayData.length > 1 ? 2 : 0}
               dataKey="value"
               stroke="none"
@@ -262,7 +267,7 @@ export function DespesasPorCategoria({ month, year }: DespesasPorCategoriaProps)
 
         {/* Lista de categorias - com scroll */}
         <div className="flex flex-1 flex-col min-w-0 w-full">
-          <div className="max-h-80 overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent">
+          <div className="max-h-[400px] overflow-y-auto pr-2 scrollbar-thin scrollbar-thumb-muted scrollbar-track-transparent">
             <div className="flex flex-col gap-2">
               {displayData.map((item, idx) => {
                 const pct = displayTotal > 0 ? (item.value / displayTotal) * 100 : 0

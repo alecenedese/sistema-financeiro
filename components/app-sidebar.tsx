@@ -7,7 +7,6 @@ import { usePathname, useRouter } from "next/navigation"
 import {
   LayoutDashboard,
   Landmark,
-  ArrowLeftRight,
   FileDown,
   FileUp,
   Target,
@@ -24,6 +23,7 @@ import {
   Shield,
   X,
   ShoppingCart,
+  Zap,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useTenant } from "@/hooks/use-tenant"
@@ -31,14 +31,15 @@ import { useTenant } from "@/hooks/use-tenant"
 const menuItems = [
   { icon: LayoutDashboard, label: "Dashboard", href: "/" },
   { icon: Landmark, label: "Contas Bancarias", href: "/contas-bancarias" },
-  { icon: ArrowLeftRight, label: "Transacoes", href: "/transacoes" },
   { icon: ShoppingCart, label: "Vendas", href: "/vendas" },
   { icon: FileDown, label: "Contas a Pagar", href: "/contas-a-pagar" },
   { icon: FileUp, label: "Contas a Receber", href: "/contas-a-receber" },
   { icon: Target, label: "Planejamento", href: "/planejamento" },
   { icon: BarChart3, label: "Relatorios", href: "/relatorios" },
-  { icon: FileSpreadsheet, label: "DRE", href: "/dre" },
+  { icon: FileSpreadsheet, label: "DRE Financeiro", href: "/dre" },
+  { icon: FileSpreadsheet, label: "DRE Diagnóstico", href: "/dre/diagnostico" },
   { icon: Upload, label: "Importar Transacoes", href: "/importar-transacoes" },
+  { icon: Zap, label: "Regras de Importação", href: "/regras-importacao" },
   { icon: Tags, label: "Categorias", href: "/categorias" },
   { icon: RepeatIcon, label: "Despesas Fixas", href: "/despesas-fixas" },
   { icon: Building2, label: "Fornecedores", href: "/fornecedores" },
@@ -48,7 +49,6 @@ const menuItems = [
 
 const novoOptions = [
   { icon: Landmark, label: "Nova Conta Bancaria", href: "/contas-bancarias?novo=1" },
-  { icon: ArrowLeftRight, label: "Nova Transacao", href: "/transacoes?novo=1" },
   { icon: ShoppingCart, label: "Nova Venda", href: "/vendas?novo=1" },
   { icon: FileDown, label: "Nova Conta a Pagar", href: "/contas-a-pagar?novo=1" },
   { icon: FileUp, label: "Nova Conta a Receber", href: "/contas-a-receber?novo=1" },

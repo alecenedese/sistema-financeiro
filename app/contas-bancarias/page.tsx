@@ -50,6 +50,38 @@ function formatDate(s: string) {
   return `${d}/${m}/${y}`
 }
 
+async function fetchEntradasSaidasPorConta(
+  [, tid, month, year]: [string, number | null, number, number]
+): Promise<Record<number, { entradas: number; saidas: number }>> {
+  const supabase = createClient()
+  const from = new Date(year, month - 1, 1).toISOString().split("T")[0]
+  const to   = new Date(year, month, 1).toISOString().split("T")[0]
+
+  let recQ = supabase.from("contas_receber").select("conta_bancaria_id, valor")
+    .eq("status", "recebido").gte("vencimento", from).lt("vencimento", to)
+  let pagQ = supabase.from("contas_pagar").select("conta_bancaria_id, valor")
+    .eq("status", "pago").gte("vencimento", from).lt("vencimento", to)
+
+  if (tid) { recQ = recQ.eq("tenant_id", tid); pagQ = pagQ.eq("tenant_id", tid) }
+
+  const [{ data: recData }, { data: pagData }] = await Promise.all([recQ, pagQ])
+
+  const result: Record<number, { entradas: number; saidas: number }> = {}
+  for (const r of (recData || [])) {
+    const id = r.conta_bancaria_id as number
+    if (!id) continue
+    if (!result[id]) result[id] = { entradas: 0, saidas: 0 }
+    result[id].entradas += Number(r.valor)
+  }
+  for (const r of (pagData || [])) {
+    const id = r.conta_bancaria_id as number
+    if (!id) continue
+    if (!result[id]) result[id] = { entradas: 0, saidas: 0 }
+    result[id].saidas += Number(r.valor)
+  }
+  return result
+}
+
 async function fetchContas(tid: number | null): Promise<ContaBancaria[]> {
   const supabase = createClient()
   let q = supabase.from("contas_bancarias").select("*").order("id")
@@ -128,7 +160,7 @@ export default function ContasBancariasPageWrapper() {
 }
 
 function ContasBancariasPage() {
-  const { tenant } = useTenant()
+  const { tenant, setTenant, clearTenant } = useTenant()
   const tid = tenant?.id ?? null
   const { data: contas = [], mutate, isLoading } = useSWR(["contas_bancarias", tid], ([, t]) => fetchContas(t))
   const [showBalances, setShowBalances] = useState(true)
@@ -142,6 +174,12 @@ function ContasBancariasPage() {
   const currentDate = new Date()
   const [refMonth, setRefMonth] = useState(currentDate.getMonth() + 1) // 1..12
   const [refYear, setRefYear] = useState(currentDate.getFullYear())
+
+  const { data: movPorConta = {} } = useSWR(
+    ["contas_mov", tid, refMonth, refYear],
+    fetchEntradasSaidasPorConta,
+    { revalidateOnFocus: false }
+  )
   const [showMonthDropdown, setShowMonthDropdown] = useState(false)
   const [showYearDropdown, setShowYearDropdown] = useState(false)
   const MONTHS = ["Janeiro","Fevereiro","Março","Abril","Maio","Junho","Julho","Agosto","Setembro","Outubro","Novembro","Dezembro"]
@@ -182,9 +220,9 @@ function ContasBancariasPage() {
     fetchExtrato(selectedConta.id, filtroExtrato).then(setExtrato).finally(() => setExtratoLoading(false))
   }, [selectedConta, filtroExtrato])
 
-  const totalBalance = contas.reduce((a, c) => a + c.saldo, 0)
-  const totalEntradas = contas.reduce((a, c) => a + c.entradas, 0)
-  const totalSaidas = contas.reduce((a, c) => a + c.saidas, 0)
+  const totalBalance  = contas.reduce((a, c) => a + c.saldo, 0)
+  const totalEntradas = Object.values(movPorConta).reduce((a, v) => a + v.entradas, 0)
+  const totalSaidas   = Object.values(movPorConta).reduce((a, v) => a + v.saidas, 0)
 
   function openNew() { setEditingConta(null); setForm(emptyForm); setDialogOpen(true) }
   function openEdit(c: ContaBancaria) {
@@ -201,7 +239,6 @@ function ContasBancariasPage() {
     
     // Verificar se já existe uma conta com o mesmo nome PARA O MESMO TENANT
     if (!editingConta) {
-      const tid = getActiveTenantId()
       const contaExistente = contas.find(c => 
         c.nome.toLowerCase().trim() === form.nome.toLowerCase().trim()
       )
@@ -216,12 +253,48 @@ function ContasBancariasPage() {
     setSaving(true)
     try {
       const supabase = createClient()
-      const tid = getActiveTenantId()
+      
+      // IMPORTANTE: Usar o tenant do estado React, não do localStorage
+      // porque pode estar desatualizado
+      const currentTenantId = tenant?.id
+      
+      console.log('[Contas Bancárias] Salvando conta:', { 
+        currentTenantId, 
+        tenant,
+        localStorageId: getActiveTenantId() 
+      })
       
       // Validar que sempre tem um tenant_id
-      if (!tid) {
-        alert("Erro: Cliente não identificado. Por favor, faça login novamente.")
+      if (!currentTenantId) {
+        alert("Erro: Cliente não identificado. Por favor, selecione um cliente no topo do sistema.")
+        setSaving(false)
         return
+      }
+      
+      // Verificar se o cliente realmente existe
+      // (o tenant ativo vem do seletor baseado em clientes_admin)
+      const { data: tenantData, error: tenantError } = await supabase
+        .from("clientes_admin")
+        .select("id, nome, cnpj")
+        .eq("id", currentTenantId)
+        .maybeSingle()
+      
+      console.log('[Contas Bancárias] Tenant encontrado:', tenantData, 'Erro:', tenantError)
+      
+      if (!tenantData) {
+        alert(`Erro: Cliente ID ${currentTenantId} não encontrado no sistema.\n\nPor favor:\n1. Clique no nome do cliente no topo\n2. Selecione o cliente correto\n3. Tente cadastrar a conta novamente`)
+        setSaving(false)
+        return
+      }
+      
+      // Sincronizar o localStorage com o tenant correto
+      if (getActiveTenantId() !== currentTenantId) {
+        console.log('[Contas Bancárias] Sincronizando localStorage:', currentTenantId)
+        setTenant({
+          id: currentTenantId,
+          nome: tenantData.nome,
+          cnpj: tenantData.cnpj || ''
+        })
       }
       
       if (editingConta) {
@@ -237,6 +310,7 @@ function ContasBancariasPage() {
         if (updateError) {
           console.error("Erro ao atualizar conta:", updateError)
           alert("Erro ao atualizar conta: " + updateError.message)
+          setSaving(false)
           return
         }
 
@@ -268,7 +342,7 @@ function ContasBancariasPage() {
           cor: COLORS[contas.length % COLORS.length],
           entradas: 0,
           saidas: 0,
-          tenant_id: tid, // SEMPRE adiciona o tenant_id
+          tenant_id: currentTenantId,
         }
         
         const { error: insertError, data: insertData } = await supabase
@@ -286,6 +360,7 @@ function ContasBancariasPage() {
             payload: payload
           })
           alert("Erro ao criar conta: " + insertError.message + (insertError.hint ? "\n" + insertError.hint : ""))
+          setSaving(false)
           return
         }
         
@@ -296,7 +371,7 @@ function ContasBancariasPage() {
       console.error("Erro inesperado:", error)
       alert("Erro inesperado: " + (error instanceof Error ? error.message : String(error)))
     } finally { setSaving(false) }
-  }, [form, editingConta, contas, mutate])
+  }, [form, editingConta, contas, mutate, tenant, setTenant, clearTenant])
 
   const handleDelete = useCallback(async (c: ContaBancaria) => {
     const supabase = createClient()
@@ -554,64 +629,82 @@ function ContasBancariasPage() {
               </div>
 
               {/* Accounts Table */}
-              <div className="rounded-xl border border-border bg-card shadow-sm">
-                <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto] gap-4 border-b border-border px-5 py-3 text-xs font-semibold uppercase text-muted-foreground">
-                  <span>Banco</span>
-                  <span>Nome / Tipo</span>
-                  <span>Agencia / Conta</span>
-                  <span className="text-right">Entradas</span>
-                  <span className="text-right">Saidas</span>
-                  <span className="text-right">Saldo</span>
-                  <span className="text-right">Acoes</span>
+              <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b border-border bg-muted/50">
+                        <th className="w-12 px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">Banco</th>
+                        <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">Nome / Tipo</th>
+                        <th className="w-36 px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">Agencia / Conta</th>
+                        <th className="w-36 px-4 py-3 text-right text-xs font-semibold uppercase text-muted-foreground">Entradas</th>
+                        <th className="w-36 px-4 py-3 text-right text-xs font-semibold uppercase text-muted-foreground">Saidas</th>
+                        <th className="w-36 px-4 py-3 text-right text-xs font-semibold uppercase text-muted-foreground">Saldo</th>
+                        <th className="w-24 px-4 py-3 text-right text-xs font-semibold uppercase text-muted-foreground">Acoes</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {contas.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="px-5 py-12 text-center">
+                            <div className="flex flex-col items-center gap-3">
+                              <Landmark className="h-8 w-8 text-muted-foreground/40" />
+                              <p className="text-sm text-muted-foreground">Nenhuma conta cadastrada.</p>
+                              <button type="button" onClick={openNew} className="flex items-center gap-1 text-sm font-medium text-primary hover:underline"><Plus className="h-3.5 w-3.5" />Adicionar conta</button>
+                            </div>
+                          </td>
+                        </tr>
+                      ) : contas.map((conta) => {
+                        const Icon = ICON_MAP[conta.tipo] || Landmark
+                        const isSelected = selectedConta?.id === conta.id
+                        const mov = movPorConta[conta.id] ?? { entradas: 0, saidas: 0 }
+                        return (
+                          <tr key={conta.id}
+                            className={`group border-b border-border last:border-b-0 transition-colors ${isSelected ? "bg-primary/5" : "hover:bg-muted/50"}`}>
+                            <td className="px-4 py-3">
+                              <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ backgroundColor: `${conta.cor}18` }}>
+                                <Icon className="h-4 w-4" style={{ color: conta.cor }} />
+                              </div>
+                            </td>
+                            <td className="px-4 py-3">
+                              <button type="button" onClick={() => setSelectedConta(isSelected ? null : conta)} className="text-left">
+                                <p className={`font-semibold hover:text-primary transition-colors ${isSelected ? "text-primary" : "text-card-foreground"}`}>{conta.nome}</p>
+                                <p className="text-xs text-muted-foreground">{conta.tipo}</p>
+                              </button>
+                            </td>
+                            <td className="px-4 py-3">
+                              <p className="text-xs text-muted-foreground">Ag: {conta.agencia || "-"}</p>
+                              <p className="text-xs text-muted-foreground">Cc: {conta.conta || "-"}</p>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <ArrowDownLeft className="h-3.5 w-3.5 text-[hsl(142,71%,40%)]" />
+                                <span className="text-sm font-medium text-[hsl(142,71%,40%)]">{showBalances ? formatCurrency(mov.entradas) : "••••"}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <div className="flex items-center justify-end gap-1">
+                                <ArrowUpRight className="h-3.5 w-3.5 text-[hsl(0,72%,51%)]" />
+                                <span className="text-sm font-medium text-[hsl(0,72%,51%)]">{showBalances ? formatCurrency(mov.saidas) : "••••"}</span>
+                              </div>
+                            </td>
+                            <td className="px-4 py-3 text-right">
+                              <span className={`text-base font-bold ${conta.saldo >= 0 ? "text-card-foreground" : "text-[hsl(0,72%,51%)]"}`}>
+                                {showBalances ? formatCurrency(conta.saldo) : "R$ ••••••"}
+                              </span>
+                            </td>
+                            <td className="px-4 py-3">
+                              <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                                <button type="button" onClick={() => openEdit(conta)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"><Pencil className="h-3.5 w-3.5" /></button>
+                                <button type="button" onClick={() => setDeleteConfirm(conta)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
+                              </div>
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </tbody>
+                  </table>
                 </div>
-                {contas.length === 0 && (
-                  <div className="flex flex-col items-center justify-center py-12 text-center">
-                    <Landmark className="h-8 w-8 text-muted-foreground/40" />
-                    <p className="mt-3 text-sm text-muted-foreground">Nenhuma conta cadastrada.</p>
-                    <button type="button" onClick={openNew} className="mt-3 flex items-center gap-1 text-sm font-medium text-primary hover:underline"><Plus className="h-3.5 w-3.5" />Adicionar conta</button>
-                  </div>
-                )}
-                {contas.map((conta) => {
-                  const Icon = ICON_MAP[conta.tipo] || Landmark
-                  const isSelected = selectedConta?.id === conta.id
-                  return (
-                    <div key={conta.id}
-                      className={`group grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto] items-center gap-4 border-b border-border px-5 py-4 last:border-b-0 transition-colors ${isSelected ? "bg-primary/5" : "hover:bg-muted/50"}`}>
-                      <div className="flex h-9 w-9 items-center justify-center rounded-lg" style={{ backgroundColor: `${conta.cor}18` }}>
-                        <Icon className="h-4 w-4" style={{ color: conta.cor }} />
-                      </div>
-                      <div>
-                        <button type="button" onClick={() => setSelectedConta(isSelected ? null : conta)} className="text-left">
-                          <p className={`font-semibold hover:text-primary transition-colors ${isSelected ? "text-primary" : "text-card-foreground"}`}>{conta.nome}</p>
-                          <p className="text-xs text-muted-foreground">{conta.tipo}</p>
-                        </button>
-                      </div>
-                      <div className="text-sm text-muted-foreground">
-                        <p className="text-xs">Ag: {conta.agencia || "-"}</p>
-                        <p className="text-xs">Cc: {conta.conta || "-"}</p>
-                      </div>
-                      <div className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <ArrowDownLeft className="h-3.5 w-3.5 text-[hsl(142,71%,40%)]" />
-                          <span className="text-sm font-medium text-[hsl(142,71%,40%)]">{showBalances ? formatCurrency(conta.entradas) : "••••"}</span>
-                        </div>
-                      </div>
-                      <div className="text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          <ArrowUpRight className="h-3.5 w-3.5 text-[hsl(0,72%,51%)]" />
-                          <span className="text-sm font-medium text-[hsl(0,72%,51%)]">{showBalances ? formatCurrency(conta.saidas) : "••••"}</span>
-                        </div>
-                      </div>
-                      <p className={`text-right text-base font-bold ${conta.saldo >= 0 ? "text-card-foreground" : "text-[hsl(0,72%,51%)]"}`}>
-                        {showBalances ? formatCurrency(conta.saldo) : "R$ ••••••"}
-                      </p>
-                      <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
-                        <button type="button" onClick={() => openEdit(conta)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground hover:bg-muted hover:text-foreground"><Pencil className="h-3.5 w-3.5" /></button>
-                        <button type="button" onClick={() => setDeleteConfirm(conta)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"><Trash2 className="h-3.5 w-3.5" /></button>
-                      </div>
-                    </div>
-                  )
-                })}
               </div>
             </div>
           </div>

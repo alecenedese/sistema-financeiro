@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Limpar Cache - Sistema Financeiro</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 600px;
+            margin: 50px auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+        .card {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        h1 { color: #333; margin-top: 0; }
+        button {
+            background: #2563eb;
+            color: white;
+            border: none;
+            padding: 12px 24px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 16px;
+            margin: 10px 5px;
+        }
+        button:hover { background: #1d4ed8; }
+        .success { color: #16a34a; font-weight: bold; }
+        .info { background: #eff6ff; padding: 15px; border-radius: 6px; margin: 15px 0; }
+        pre { background: #f1f5f9; padding: 10px; border-radius: 4px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <div class="card">
+        <h1>�� Limpar Cache do Sistema</h1>
+        
+        <div class="info">
+            <strong>Problema:</strong> O sistema está usando dados antigos do cache.<br>
+            <strong>Solução:</strong> Limpar o localStorage e recarregar.
+        </div>
+        
+        <h3>Dados Atuais:</h3>
+        <pre id="current-data">Carregando...</pre>
+        
+        <button onclick="limparCache()">🗑️ Limpar Cache</button>
+        <button onclick="voltarSistema()">↩️ Voltar ao Sistema</button>
+        
+        <div id="result"></div>
+    </div>
+
+    <script>
+        function mostrarDados() {
+            const tenant = localStorage.getItem('majo-active-tenant');
+            const data = tenant ? JSON.parse(tenant) : null;
+            document.getElementById('current-data').textContent = JSON.stringify(data, null, 2);
+        }
+        
+        function limparCache() {
+            // Limpar localStorage
+            localStorage.clear();
+            
+            // Limpar sessionStorage
+            sessionStorage.clear();
+            
+            // Mostrar sucesso
+            document.getElementById('result').innerHTML = '<p class="success">✅ Cache limpo com sucesso!</p><p>Agora volte ao sistema e selecione o cliente novamente.</p>';
+            
+            mostrarDados();
+        }
+        
+        function voltarSistema() {
+            window.location.href = '/';
+        }
+        
+        // Mostrar dados ao carregar
+        mostrarDados();
+    </script>
+</body>
+</html>

@@ -9,6 +9,7 @@ instrumentation-client.ts
 node_modules
 node_modules/
 .next/
+.env
 .env*.local
 .DS_Store
 .vercel

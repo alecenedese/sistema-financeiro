@@ -1,8 +1,10 @@
 "use client"
 
-import { useState, useRef, useCallback, useMemo, type DragEvent, type ChangeEvent } from "react"
+import { useState, useRef, useCallback, useMemo, useEffect, type DragEvent, type ChangeEvent } from "react"
+import Link from "next/link"
 import useSWR from "swr"
 import { createClient } from "@/lib/supabase/client"
+import { fetchAll } from "@/lib/supabase/fetch-all"
 import { AppSidebar } from "@/components/app-sidebar"
 import { PageHeader } from "@/components/page-header"
 import { parseOFX, type OFXTransaction, type OFXData } from "@/lib/ofx-parser"
@@ -46,25 +48,23 @@ import {
 async function recalcularSaldoConta(contaId: number) {
   if (!contaId) return
   const supabase = createClient()
-  // Busca saldo inicial da conta
   const { data: conta } = await supabase.from("contas_bancarias").select("saldo_inicial").eq("id", contaId).single()
   if (!conta) return
   const saldoInicial = Number(conta.saldo_inicial) || 0
   
-  // Busca transacoes de contas_pagar (saidas pagas)
-  const { data: despesas } = await supabase.from("contas_pagar").select("valor").eq("conta_bancaria_id", contaId).eq("status", "pago")
-  // Busca transacoes de contas_receber (entradas recebidas)
-  const { data: receitas } = await supabase.from("contas_receber").select("valor").eq("conta_bancaria_id", contaId).eq("status", "recebido")
-  // Busca lancamentos manuais
-  const { data: lancamentos } = await supabase.from("lancamentos").select("valor, tipo").eq("conta_bancaria_id", contaId)
+  const [despesas, receitas, lancamentos] = await Promise.all([
+    fetchAll(supabase.from("contas_pagar").select("valor").eq("conta_bancaria_id", contaId).eq("status", "pago")),
+    fetchAll(supabase.from("contas_receber").select("valor").eq("conta_bancaria_id", contaId).eq("status", "recebido")),
+    fetchAll(supabase.from("lancamentos").select("valor, tipo").eq("conta_bancaria_id", contaId)),
+  ])
   
   let entradas = 0, saidas = 0
-  for (const l of lancamentos || []) {
+  for (const l of lancamentos as any[]) {
     if (l.tipo === "receita") entradas += Number(l.valor)
     else saidas += Number(l.valor)
   }
-  for (const r of receitas || []) entradas += Number(r.valor)
-  for (const d of despesas || []) saidas += Number(d.valor)
+  for (const r of receitas as any[]) entradas += Number(r.valor)
+  for (const d of despesas as any[]) saidas += Number(d.valor)
   
   const novoSaldo = saldoInicial + entradas - saidas
   await supabase.from("contas_bancarias").update({ saldo: novoSaldo }).eq("id", contaId)
@@ -99,11 +99,11 @@ interface MappingRule {
   fornecedor_id: number | null
   cliente_id: number | null
   cliente_fornecedor: string
-  conta_bancaria_id?: number | null
   forma_pagamento?: string
   descricao?: string
   substituir_descricao?: boolean
-  // Joined names for display
+  origem?: string // "ofx" ou "planilha" — filtra regras por tipo de importação
+  conta_bancaria_id?: number | null
   categoria_nome?: string
   subcategoria_nome?: string
   filho_nome?: string
@@ -214,9 +214,8 @@ async function fetchDespesasFixas(): Promise<DespesaFixaRow[]> {
 async function fetchRules(tid: number | null): Promise<MappingRule[]> {
   const supabase = createClient()
 
-  // Busca via VIEW que inclui descricao (bypassa cache do PostgREST)
   let query = supabase
-    .from("mapping_rules_view")
+    .from("mapping_rules")
     .select("*")
     .order("keyword")
 
@@ -264,6 +263,8 @@ async function fetchRules(tid: number | null): Promise<MappingRule[]> {
     descricao: (row.descricao as string) || "",
     substituir_descricao: (row.substituir_descricao as boolean) || false,
     forma_pagamento: (row.forma_pagamento as string) || "",
+    origem: (row.origem as string) || undefined,
+    conta_bancaria_id: (row.conta_bancaria_id as number | null) || null,
     categoria_nome: catMap.get(row.categoria_id as number) || "",
     subcategoria_nome: subMap.get(row.subcategoria_id as number) || "",
     filho_nome: filhoMap.get(row.subcategoria_filho_id as number) || "",
@@ -311,12 +312,14 @@ function InlineDropdown({
   onChange,
   placeholder,
   width = "w-40",
+  hasError = false,
 }: {
   value: string
   options: { label: string; value: string }[]
   onChange: (val: string) => void
   placeholder: string
   width?: string
+  hasError?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
@@ -331,7 +334,7 @@ function InlineDropdown({
         type="button"
         onClick={() => { setOpen(!open); setSearch("") }}
         className={`flex w-full items-center justify-between rounded-md border px-2 py-1.5 text-xs transition-colors ${
-          value ? "border-border text-card-foreground" : "border-dashed border-muted-foreground/40 text-muted-foreground"
+          value ? "border-border text-card-foreground" : hasError ? "border-destructive/60 bg-destructive/5 text-muted-foreground" : "border-dashed border-muted-foreground/40 text-muted-foreground"
         } hover:border-primary/50 bg-card`}
       >
         <span className="truncate">{displayLabel || placeholder}</span>
@@ -404,9 +407,19 @@ export default function ImportarTransacoesPage() {
   const [step, setStep] = useState<"upload" | "review" | "done">("upload")
   const [ofxData, setOfxData] = useState<OFXData | null>(null)
   const [transactions, setTransactions] = useState<TransactionRow[]>([])
-  const [history, setHistory] = useState<ImportHistoryItem[]>([])
+  const [history, setHistory] = useState<ImportHistoryItem[]>(() => {
+    if (typeof window === "undefined") return []
+    try { return JSON.parse(localStorage.getItem("import_history") || "[]") } catch { return [] }
+  })
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("import_history", JSON.stringify(history.slice(0, 100)))
+    }
+  }, [history])
   const [isDragging, setIsDragging] = useState(false)
   const [fileName, setFileName] = useState("")
+  const [importOrigem, setImportOrigem] = useState<"ofx" | "planilha">("ofx")
   const [rulesDialogOpen, setRulesDialogOpen] = useState(false)
   const [selectAll, setSelectAll] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -460,27 +473,47 @@ export default function ImportarTransacoesPage() {
     return m
   }, [hierarchy])
 
+  function isTxComplete(tx: TransactionRow) {
+    return !!(
+      (tx.descricao_editada || tx.memo)?.trim() &&
+      tx.categoria_id &&
+      (tx.cliente_id || tx.fornecedor_id) &&
+      tx.forma_pagamento
+    )
+  }
+
   // Computed
   const totalImportados = history.filter((h) => h.status === "concluido").reduce((a, h) => a + h.registros, 0)
   const selectedTxs = transactions.filter((t) => t.selected)
   const selectedEntradas = selectedTxs.filter((t) => t.amount > 0).reduce((a, t) => a + t.amount, 0)
   const selectedSaidas = selectedTxs.filter((t) => t.amount < 0).reduce((a, t) => a + Math.abs(t.amount), 0)
+  const incompleteCount = selectedTxs.filter((t) => !isTxComplete(t)).length
 
   // Auto-match a transaction against saved rules and despesas fixas
   const applyRules = useCallback(
-    (tx: OFXTransaction): { categoria_id: number | null; subcategoria_id: number | null; subcategoria_filho_id: number | null; fornecedor_id: number | null; cliente_id: number | null; clienteFornecedor: string } => {
+    (tx: OFXTransaction, origem?: "ofx" | "planilha"): { categoria_id: number | null; subcategoria_id: number | null; subcategoria_filho_id: number | null; fornecedor_id: number | null; cliente_id: number | null; clienteFornecedor: string; forma_pagamento: string; descricao: string } => {
       const memoUpper = tx.memo.toUpperCase()
 
-      // First try mapping rules
+      const payeeUpper = (tx.payee || "").toUpperCase()
+      const searchText = `${memoUpper} ${payeeUpper}`
+
+      // First try mapping rules — filtra por origem se a coluna existir
       for (const rule of allRules) {
-        if (memoUpper.includes(rule.keyword.toUpperCase())) {
+        // Se a regra tem origem definida e é diferente da origem atual, pula
+        if (rule.origem && origem && rule.origem !== origem) continue
+        // Separar múltiplas palavras-chave por vírgula e verificar se alguma está no memo ou payee
+        const keywords = rule.keyword.split(",").map(k => k.trim().toUpperCase()).filter(k => k.length > 0)
+        const matched = keywords.some(kw => searchText.includes(kw))
+        if (matched) {
           return {
             categoria_id: rule.categoria_id,
             subcategoria_id: rule.subcategoria_id,
             subcategoria_filho_id: rule.subcategoria_filho_id,
             fornecedor_id: rule.fornecedor_id,
             cliente_id: rule.cliente_id,
-            clienteFornecedor: rule.cliente_fornecedor || extractClienteFornecedor(tx.memo),
+            clienteFornecedor: rule.cliente_fornecedor || tx.payee || extractClienteFornecedor(tx.memo),
+            forma_pagamento: rule.forma_pagamento || "",
+            descricao: rule.descricao || "",
           }
         }
       }
@@ -500,12 +533,14 @@ export default function ImportarTransacoesPage() {
               fornecedor_id: df.fornecedor_id,
               cliente_id: null,
               clienteFornecedor: fornNome || extractClienteFornecedor(tx.memo),
+              forma_pagamento: "",
+              descricao: "",
             }
           }
         }
       }
 
-      return { categoria_id: null, subcategoria_id: null, subcategoria_filho_id: null, fornecedor_id: null, cliente_id: null, clienteFornecedor: extractClienteFornecedor(tx.memo) }
+      return { categoria_id: null, subcategoria_id: null, subcategoria_filho_id: null, fornecedor_id: null, cliente_id: null, clienteFornecedor: extractClienteFornecedor(tx.memo), forma_pagamento: "", descricao: "" }
     },
     [allRules, despesasFixas, fornecedoresLista]
   )
@@ -532,6 +567,7 @@ export default function ImportarTransacoesPage() {
         const content = await readFileAsText(file, "ISO-8859-1")
         parsedOFX = parseOFX(content)
         txs = parsedOFX.transactions
+        setImportOrigem("ofx")
       } else if (ext === "csv") {
         // Tenta UTF-8 primeiro, se tiver caracteres ? ou � tenta ISO-8859-1
         let content = await readFileAsText(file, "UTF-8")
@@ -548,10 +584,12 @@ export default function ImportarTransacoesPage() {
         content = content.replace(/[\uFFFD]/g, "")
         const parsed = parseCSV(content)
         txs = spreadsheetToOFXTransactions(parsed)
+        setImportOrigem("planilha")
       } else {
         const buffer = await file.arrayBuffer()
         const rows = await parseXLSX(buffer)
         txs = spreadsheetToOFXTransactions(rows)
+        setImportOrigem("planilha")
       }
 
       setOfxData(parsedOFX)
@@ -592,7 +630,7 @@ export default function ImportarTransacoesPage() {
 
       const rows: TransactionRow[] = txs
         .map((tx) => {
-          const extra = tx as OFXTransaction & { _fornecedor?: string; _planoConta?: string; _subcategoria?: string; _formaPagamento?: string; _banco?: string }
+          const extra = tx as OFXTransaction & { _fornecedor?: string; _cliente?: string; _planoConta?: string; _subcategoria?: string; _formaPagamento?: string; _banco?: string }
           const isDebit = tx.amount < 0 // Saída/despesa
           
           let fornecedor_id: number | null = null
@@ -614,6 +652,19 @@ export default function ImportarTransacoesPage() {
             const searchTerm = extra._cliente.trim()
             if (!clienteFornecedor) clienteFornecedor = searchTerm
             cliente_id = matchByName(clienteList, searchTerm)
+          }
+
+          // 2.5. Se é OFX (sem _fornecedor/_cliente) e tem payee (NAME), usa-o para matching
+          if (!extra._fornecedor && !extra._cliente && tx.payee) {
+            const searchTerm = tx.payee.trim()
+            if (!clienteFornecedor) clienteFornecedor = searchTerm
+            if (isDebit) {
+              // Saída: favorecido é fornecedor
+              if (!fornecedor_id) fornecedor_id = matchByName(fornecedorList, searchTerm)
+            } else {
+              // Entrada: pagador é cliente
+              if (!cliente_id) cliente_id = matchByName(clienteList, searchTerm)
+            }
           }
 
           // 3. Match categoria pelo plano de conta do CSV
@@ -640,7 +691,7 @@ export default function ImportarTransacoesPage() {
           }
 
           // 5. Aplica regras automaticas como fallback (se planilha nao mapeou)
-          const matched = applyRules(tx)
+          const matched = applyRules(tx, importOrigem)
           if (!fornecedor_id && matched.fornecedor_id) fornecedor_id = matched.fornecedor_id
           if (!cliente_id && matched.cliente_id) cliente_id = matched.cliente_id
           if (!clienteFornecedor) clienteFornecedor = matched.clienteFornecedor || extractClienteFornecedor(tx.memo)
@@ -648,8 +699,9 @@ export default function ImportarTransacoesPage() {
           if (!subcategoria_id && matched.subcategoria_id) subcategoria_id = matched.subcategoria_id
           if (!subcategoria_filho_id && matched.subcategoria_filho_id) subcategoria_filho_id = matched.subcategoria_filho_id
 
-          // 4. Detecta forma de pagamento automaticamente (para ambos)
+          // 4. Detecta forma de pagamento (planilha > regra > heurística)
           let forma_pagamento = extra._formaPagamento || ""
+          if (!forma_pagamento && matched.forma_pagamento) forma_pagamento = matched.forma_pagamento
           if (!forma_pagamento) {
             const memoLower = tx.memo.toLowerCase()
             if (memoLower.includes("pix")) forma_pagamento = "PIX"
@@ -668,7 +720,7 @@ export default function ImportarTransacoesPage() {
             clienteFornecedor,
             selected: tx.amount !== 0,
             forma_pagamento,
-            descricao_editada: tx.memo,
+            descricao_editada: matched.descricao || tx.descricao,
           }
         })
         .filter((tx) => tx.amount !== 0)
@@ -860,6 +912,7 @@ export default function ImportarTransacoesPage() {
               descricao: tx.descricao_editada || "",
               substituir_descricao: false,
               forma_pagamento: "",
+              origem: importOrigem,
               tenant_id: tid,
             })
           }
@@ -870,8 +923,7 @@ export default function ImportarTransacoesPage() {
     if (newRuleInserts.length > 0) {
       const supabase = createClient()
       for (const rule of newRuleInserts) {
-        // INSERT campos básicos
-        const { data: inserted, error } = await supabase
+        await supabase
           .from("mapping_rules")
           .insert({
             keyword: rule.keyword,
@@ -881,26 +933,50 @@ export default function ImportarTransacoesPage() {
             fornecedor_id: rule.fornecedor_id || null,
             cliente_id: rule.cliente_id || null,
             cliente_fornecedor: rule.cliente_fornecedor || "",
+            descricao: (rule.descricao as string) || "",
+            substituir_descricao: false,
+            forma_pagamento: "",
+            origem: rule.origem || importOrigem,
             tenant_id: rule.tenant_id,
           })
-          .select("id")
-          .single()
-
-        // Tenta atualizar descricao diretamente via Supabase client
-        // Atualiza descricao via VIEW (bypassa cache do PostgREST)
-        if (!error && inserted?.id && rule.descricao) {
-          await supabase
-            .from("mapping_rules_view")
-            .update({
-              descricao: rule.descricao as string || "",
-              substituir_descricao: false,
-              forma_pagamento: "",
-            })
-            .eq("id", inserted.id)
-        }
       }
       await mutateRules()
     }
+  }
+
+  // Converte data em qualquer formato comum para ISO "YYYY-MM-DD"
+  // Aceita: "DD/MM/YYYY", "DD/MM/YY", "YYYY-MM-DD", "MM/DD/YYYY", "DD-MM-YYYY"
+  function toISODate(raw: string): string | null {
+    if (!raw) return null
+    const s = raw.trim()
+    // Já ISO "YYYY-MM-DD"
+    const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})/)
+    if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`
+    // Três partes separadas por / ou -
+    const parts = s.split(/[/\-]/).map(p => p.trim())
+    if (parts.length < 3) return null
+    let [a, b, c] = parts
+    // Normaliza ano de 2 dígitos
+    if (c.length === 2) c = (parseInt(c, 10) >= 70 ? "19" : "20") + c.padStart(2, "0")
+    if (a.length === 2 && c.length === 4) {
+      // formato DD/MM/YYYY ou MM/DD/YYYY — desambigua por >12
+      const n1 = parseInt(a, 10), n2 = parseInt(b, 10)
+      if (n1 > 12 && n2 <= 12) {
+        // DD/MM/YYYY
+        return `${c}-${b.padStart(2, "0")}-${a.padStart(2, "0")}`
+      }
+      if (n2 > 12 && n1 <= 12) {
+        // MM/DD/YYYY
+        return `${c}-${a.padStart(2, "0")}-${b.padStart(2, "0")}`
+      }
+      // Ambíguo — assume DD/MM/YYYY (padrão BR)
+      return `${c}-${b.padStart(2, "0")}-${a.padStart(2, "0")}`
+    }
+    if (a.length === 4) {
+      // YYYY-MM-DD ou YYYY/MM/DD
+      return `${a}-${b.padStart(2, "0")}-${c.padStart(2, "0")}`
+    }
+    return null
   }
 
   // Confirm import - save transactions to contas_pagar/contas_receber
@@ -911,6 +987,13 @@ export default function ImportarTransacoesPage() {
       await saveNewRules()
 
       const selected = transactions.filter((t) => t.selected)
+
+      const incompletos = selected.filter((tx) => !isTxComplete(tx))
+      if (incompletos.length > 0) {
+        alert(`${incompletos.length} transação(ões) selecionada(s) estão com campos obrigatórios faltando.\n\nPreencha: Categoria, Cliente/Fornecedor e F. Pagamento para todas as linhas selecionadas.`)
+        setSaving(false)
+        return
+      }
       const despesas = selected.filter((t) => t.amount < 0)
       const receitas = selected.filter((t) => t.amount >= 0)
 
@@ -925,7 +1008,7 @@ export default function ImportarTransacoesPage() {
               despesasToInsert.push({
                 descricao: descricaoFinal,
                 valor: Math.abs(split.valor),
-                vencimento: tx.date.split("/").reverse().join("-"),
+                vencimento: toISODate(tx.date) || tx.date,
                 status: "pago",
                 fornecedor: split.fornecedor_id ? fornecedoresLista.find((f) => f.id === split.fornecedor_id)?.nome || tx.clienteFornecedor : tx.clienteFornecedor,
                 fornecedor_id: split.fornecedor_id,
@@ -942,7 +1025,7 @@ export default function ImportarTransacoesPage() {
             despesasToInsert.push({
               descricao: descricaoFinal,
               valor: Math.abs(tx.amount),
-              vencimento: tx.date.split("/").reverse().join("-"),
+              vencimento: toISODate(tx.date) || tx.date,
               status: "pago",
               fornecedor: fornNome,
               fornecedor_id: tx.fornecedor_id,
@@ -955,7 +1038,13 @@ export default function ImportarTransacoesPage() {
             })
           }
         }
-        await supabase.from("contas_pagar").insert(despesasToInsert)
+        const { error: errDesp } = await supabase.from("contas_pagar").insert(despesasToInsert)
+        if (errDesp) {
+          console.error("[importar] erro ao inserir contas_pagar:", errDesp, despesasToInsert)
+          alert(`Erro ao importar despesas: ${errDesp.message}`)
+          setSaving(false)
+          return
+        }
       }
 
       if (receitas.length > 0) {
@@ -967,7 +1056,7 @@ export default function ImportarTransacoesPage() {
               receitasToInsert.push({
                 descricao: descricaoFinal,
                 valor: split.valor,
-                vencimento: tx.date.split("/").reverse().join("-"),
+                vencimento: toISODate(tx.date) || tx.date,
                 status: "recebido",
                 cliente: split.cliente_id ? clientesLista.find((c) => c.id === split.cliente_id)?.nome || tx.clienteFornecedor : tx.clienteFornecedor,
                 cliente_id: split.cliente_id,
@@ -984,7 +1073,7 @@ export default function ImportarTransacoesPage() {
             receitasToInsert.push({
               descricao: descricaoFinal,
               valor: tx.amount,
-              vencimento: tx.date.split("/").reverse().join("-"),
+              vencimento: toISODate(tx.date) || tx.date,
               status: "recebido",
               cliente: cliNome,
               cliente_id: tx.cliente_id,
@@ -997,7 +1086,13 @@ export default function ImportarTransacoesPage() {
             })
           }
         }
-        await supabase.from("contas_receber").insert(receitasToInsert)
+        const { error: errRec } = await supabase.from("contas_receber").insert(receitasToInsert)
+        if (errRec) {
+          console.error("[importar] erro ao inserir contas_receber:", errRec, receitasToInsert)
+          alert(`Erro ao importar receitas: ${errRec.message}`)
+          setSaving(false)
+          return
+        }
       }
 
       // Recalcula saldo da conta bancaria apos importacao
@@ -1128,8 +1223,7 @@ export default function ImportarTransacoesPage() {
     
     const supabase = createClient()
 
-    // Campos básicos (sem descricao para evitar erro de cache)
-    const basicData = {
+    const data = {
       keyword: editingRule.keyword.trim(),
       categoria_id: editingRule.categoria_id || null,
       subcategoria_id: editingRule.subcategoria_id || null,
@@ -1137,41 +1231,19 @@ export default function ImportarTransacoesPage() {
       fornecedor_id: editingRule.fornecedor_id || null,
       cliente_id: editingRule.cliente_id || null,
       cliente_fornecedor: editingRule.cliente_fornecedor || "",
+      descricao: editingRule.descricao || "",
+      substituir_descricao: editingRule.substituir_descricao || false,
+      forma_pagamento: editingRule.forma_pagamento || "",
       tenant_id: tid,
     }
 
     try {
-      let savedId = editingRule.id
-
       if (editingRule.id === 0 || !editingRule.id) {
-        // INSERT campos básicos
-        const { data, error } = await supabase.from("mapping_rules").insert(basicData).select("id").single()
+        const { error } = await supabase.from("mapping_rules").insert(data)
         if (error) throw error
-        savedId = data.id
       } else {
-        // UPDATE campos básicos
-        const { error } = await supabase.from("mapping_rules").update(basicData).eq("id", editingRule.id)
+        const { error } = await supabase.from("mapping_rules").update(data).eq("id", editingRule.id)
         if (error) throw error
-      }
-
-      // Tenta atualizar descricao diretamente via Supabase client
-      // Se der erro de cache, ignora (a descrição será salva na próxima vez)
-      console.log("[v0] saveEditedRule - tentando salvar descricao, savedId:", savedId)
-      if (savedId && Number(savedId) > 0 && editingRule.descricao) {
-        try {
-          const { error: descError } = await supabase
-            .from("mapping_rules_view")
-            .update({
-              descricao: editingRule.descricao || "",
-              substituir_descricao: editingRule.substituir_descricao || false,
-              forma_pagamento: editingRule.forma_pagamento || "",
-            })
-            .eq("id", Number(savedId))
-          console.log("[v0] saveEditedRule - descricao update error:", descError)
-        } catch (e) {
-          console.log("[v0] saveEditedRule - descricao update exception:", e)
-          // Ignora erro de cache - a descrição pode ser salva editando novamente
-        }
       }
 
       await mutateRules()
@@ -1186,7 +1258,7 @@ export default function ImportarTransacoesPage() {
   function reapplyRules() {
     setTransactions((prev) =>
       prev.map((tx) => {
-        const matched = applyRules(tx)
+        const matched = applyRules(tx, importOrigem)
         return {
           ...tx,
           categoria_id: matched.categoria_id || tx.categoria_id,
@@ -1195,6 +1267,8 @@ export default function ImportarTransacoesPage() {
           fornecedor_id: matched.fornecedor_id || tx.fornecedor_id,
           cliente_id: matched.cliente_id || tx.cliente_id,
           clienteFornecedor: matched.clienteFornecedor || tx.clienteFornecedor,
+          forma_pagamento: matched.forma_pagamento || tx.forma_pagamento,
+          descricao_editada: matched.descricao || tx.descricao_editada,
         }
       })
     )
@@ -1327,57 +1401,6 @@ export default function ImportarTransacoesPage() {
                   </div>
                 </div>
 
-                {/* Rules Management */}
-                <div className="rounded-xl border border-border bg-card shadow-sm">
-                  <div className="flex items-center justify-between border-b border-border px-5 py-4">
-                    <div>
-                      <h3 className="text-base font-semibold text-card-foreground">Regras de Classificacao Automatica</h3>
-                      <p className="mt-0.5 text-xs text-muted-foreground">
-                        Palavras-chave no extrato que serao automaticamente vinculadas a categorias e fornecedores
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setRulesDialogOpen(true)}
-                      className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-                    >
-                      <Zap className="h-4 w-4 text-[hsl(38,92%,50%)]" />
-                      Gerenciar Regras
-                    </button>
-                  </div>
-                  <div className="divide-y divide-border">
-                    {allRules.slice(0, 5).map((rule) => (
-                      <div key={rule.id} className="flex items-center gap-4 px-5 py-3">
-                        <span className="rounded-md bg-muted px-2.5 py-1 text-xs font-mono font-medium text-foreground">{rule.keyword}</span>
-                        <ArrowLeftRight className="h-3 w-3 text-muted-foreground shrink-0" />
-                        <span className="text-sm text-card-foreground">
-                          {[rule.categoria_nome, rule.subcategoria_nome, rule.filho_nome].filter(Boolean).join(" > ")}
-                        </span>
-                        {rule.cliente_fornecedor && (
-                          <span className="ml-auto rounded-full bg-muted px-2.5 py-0.5 text-xs text-muted-foreground">
-                            {rule.cliente_fornecedor}
-                          </span>
-                        )}
-                      </div>
-                    ))}
-                    {allRules.length > 5 && (
-                      <div className="px-5 py-3">
-                        <button
-                          type="button"
-                          onClick={() => setRulesDialogOpen(true)}
-                          className="text-sm font-medium text-primary hover:underline"
-                        >
-                          Ver todas as {allRules.length} regras
-                        </button>
-                      </div>
-                    )}
-                    {allRules.length === 0 && (
-                      <div className="px-5 py-6 text-center text-sm text-muted-foreground">
-                        Nenhuma regra cadastrada. Importe um arquivo e classifique as transacoes para criar regras automaticamente.
-                      </div>
-                    )}
-                  </div>
-                </div>
               </>
             )}
 
@@ -1420,11 +1443,11 @@ export default function ImportarTransacoesPage() {
                       <RotateCcw className="h-4 w-4" />
                       Reaplicar Regras
                     </button>
-                    <button type="button" onClick={() => setRulesDialogOpen(true)}
+                    <Link href="/regras-importacao"
                       className="flex items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-muted">
                       <Zap className="h-4 w-4 text-[hsl(38,92%,50%)]" />
                       Regras ({allRules.length})
-                    </button>
+                    </Link>
                   </div>
                   <div className="flex items-center gap-2">
                     <button type="button" onClick={resetImport}
@@ -1432,7 +1455,13 @@ export default function ImportarTransacoesPage() {
                       <X className="h-4 w-4" />
                       Cancelar
                     </button>
-                    <button type="button" onClick={confirmImport} disabled={selectedTxs.length === 0 || saving}
+                    {incompleteCount > 0 && (
+                      <div className="flex items-center gap-1.5 rounded-lg bg-destructive/10 px-3 py-2 text-xs font-medium text-destructive">
+                        <AlertCircle className="h-3.5 w-3.5" />
+                        {incompleteCount} {incompleteCount === 1 ? "transação" : "transações"} com campos obrigatórios faltando
+                      </div>
+                    )}
+                    <button type="button" onClick={confirmImport} disabled={selectedTxs.length === 0 || saving || incompleteCount > 0}
                       className="flex items-center gap-2 rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50 disabled:cursor-not-allowed">
                       {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
                       Importar {selectedTxs.length} Transacoes
@@ -1448,12 +1477,12 @@ export default function ImportarTransacoesPage() {
                         <th className="px-2 py-3 text-left w-8">
                           <input type="checkbox" checked={selectAll} onChange={toggleSelectAll} className="rounded border-border" />
                         </th>
-                        <th className="px-2 py-3 text-left w-20">Data</th>
                         <th className="px-3 py-3 text-left min-w-[280px]">Descricao</th>
                         <th className="px-2 py-3 text-right w-24">Valor</th>
                         <th className="px-2 py-3 text-left">Categoria</th>
                         <th className="px-2 py-3 text-left">Subcategoria</th>
-                        <th className="px-2 py-3 text-left">Cliente / Fornecedor</th>
+                        <th className="px-2 py-3 text-left w-28">Cliente</th>
+                        <th className="px-2 py-3 text-left w-28">Fornecedor</th>
                         <th className="px-2 py-3 text-left">F. Pagamento</th>
                         <th className="px-2 py-3 text-right w-16">Acoes</th>
                       </tr>
@@ -1481,7 +1510,6 @@ export default function ImportarTransacoesPage() {
                             <td className="px-2 py-2.5">
                               <input type="checkbox" checked={tx.selected} onChange={(e) => updateTx(idx, "selected", e.target.checked)} className="rounded border-border" />
                             </td>
-                            <td className="px-2 py-2.5 text-xs text-muted-foreground whitespace-nowrap">{tx.date}</td>
                             <td className="px-3 py-2.5">
                               <div className="flex items-center gap-2">
                                 <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-md ${isCredit ? "bg-[hsl(142,71%,40%)]/10" : "bg-[hsl(0,72%,51%)]/10"}`}>
@@ -1509,6 +1537,7 @@ export default function ImportarTransacoesPage() {
                                 onChange={(val) => updateTx(idx, "categoria_id", val ? Number(val) : null)}
                                 placeholder="Categoria..."
                                 width="w-28"
+                                hasError={tx.selected && !tx.categoria_id}
                               />
                             </td>
                             <td className="px-2 py-2.5">
@@ -1521,42 +1550,47 @@ export default function ImportarTransacoesPage() {
                               />
                             </td>
                             <td className="px-2 py-2.5">
-                              {isCredit ? (
-                                <InlineDropdown
-                                  value={tx.cliente_id?.toString() || ""}
-                                  options={clienteOptions}
-                                  onChange={(val) => {
-                                    const cId = val ? Number(val) : null
-                                    const cNome = clientesLista.find((c) => c.id === cId)?.nome || ""
-                                    updateTx(idx, "cliente_id", cId)
-                                    updateTx(idx, "clienteFornecedor", cNome)
-                                  }}
-                                  placeholder="Cliente..."
-                                  width="w-32"
-                                />
-                              ) : (
-                                <InlineDropdown
-                                  value={tx.fornecedor_id?.toString() || ""}
-                                  options={fornecedorOptions}
-                                  onChange={(val) => {
-                                    const fId = val ? Number(val) : null
-                                    const fNome = fornecedoresLista.find((f) => f.id === fId)?.nome || ""
-                                    updateTx(idx, "fornecedor_id", fId)
-                                    updateTx(idx, "clienteFornecedor", fNome)
-                                  }}
-                                  placeholder="Fornecedor..."
-                                  width="w-32"
-                                />
-                              )}
+                              <InlineDropdown
+                                value={tx.cliente_id?.toString() || ""}
+                                options={clienteOptions}
+                                onChange={(val) => {
+                                  const cId = val ? Number(val) : null
+                                  const cNome = clientesLista.find((c) => c.id === cId)?.nome || ""
+                                  updateTx(idx, "cliente_id", cId)
+                                  if (cNome) updateTx(idx, "clienteFornecedor", cNome)
+                                }}
+                                placeholder="Cliente..."
+                                width="w-28"
+                                hasError={tx.selected && !tx.cliente_id && !tx.fornecedor_id}
+                              />
                             </td>
                             <td className="px-2 py-2.5">
                               <InlineDropdown
-                                value={tx.forma_pagamento || ""}
-                                options={formaPgtoOptions}
-                                onChange={(val) => updateTx(idx, "forma_pagamento", val)}
-                                placeholder={tx.forma_pagamento || "F. Pgto..."}
+                                value={tx.fornecedor_id?.toString() || ""}
+                                options={fornecedorOptions}
+                                onChange={(val) => {
+                                  const fId = val ? Number(val) : null
+                                  const fNome = fornecedoresLista.find((f) => f.id === fId)?.nome || ""
+                                  updateTx(idx, "fornecedor_id", fId)
+                                  if (fNome) updateTx(idx, "clienteFornecedor", fNome)
+                                }}
+                                placeholder="Fornecedor..."
                                 width="w-28"
+                                hasError={tx.selected && !tx.cliente_id && !tx.fornecedor_id}
                               />
+                            </td>
+                            <td className="px-2 py-2.5">
+                              <div className="flex flex-col gap-0.5">
+                                <span className="text-[10px] text-muted-foreground whitespace-nowrap leading-none">{tx.date}</span>
+                                <InlineDropdown
+                                  value={tx.forma_pagamento || ""}
+                                  options={formaPgtoOptions}
+                                  onChange={(val) => updateTx(idx, "forma_pagamento", val)}
+                                  placeholder={tx.forma_pagamento || "F. Pgto..."}
+                                  width="w-28"
+                                  hasError={tx.selected && !tx.forma_pagamento}
+                                />
+                              </div>
                             </td>
                             <td className="px-2 py-2.5 text-right">
                               <button type="button" onClick={() => openSplitDialog(idx)}
@@ -1923,7 +1957,27 @@ export default function ImportarTransacoesPage() {
                 />
                 <p className="mt-1 text-xs text-muted-foreground">Esta descricao sera usada ao importar transacoes que correspondam a palavra-chave</p>
               </div>
-              
+
+              {/* Forma de Pagamento */}
+              <div>
+                <label className="text-xs font-medium text-muted-foreground">Forma de pagamento</label>
+                <select
+                  value={editingRule.forma_pagamento || ""}
+                  onChange={(e) => setEditingRule({ ...editingRule, forma_pagamento: e.target.value })}
+                  className="mt-1 w-full rounded-md border border-border bg-background px-2 py-2 text-sm text-card-foreground outline-none focus:border-primary/50"
+                >
+                  <option value="">Selecionar...</option>
+                  <option value="PIX">PIX</option>
+                  <option value="Boleto">Boleto</option>
+                  <option value="Cartão de Crédito">Cartão de Crédito</option>
+                  <option value="Cartão de Débito">Cartão de Débito</option>
+                  <option value="Transferência">Transferência</option>
+                  <option value="Débito em Conta">Débito em Conta</option>
+                  <option value="Dinheiro">Dinheiro</option>
+                  <option value="Cheque">Cheque</option>
+                </select>
+              </div>
+
             </div>
           )}
           <DialogFooter>

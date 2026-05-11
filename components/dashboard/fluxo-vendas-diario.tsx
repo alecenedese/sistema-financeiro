@@ -2,14 +2,11 @@
 
 import { useRef, useEffect, useState } from "react"
 import {
-  ComposedChart,
+  BarChart,
   Bar,
-  Line,
   XAxis,
   YAxis,
   Tooltip,
-  Legend,
-  Scatter,
 } from "recharts"
 import { useFluxoVendasDiario, fmt } from "@/hooks/use-dashboard-data"
 
@@ -33,7 +30,7 @@ function CustomTooltip({
         <p className="mb-2 text-sm font-semibold text-card-foreground">Dia {label}</p>
         {payload.map((item) => (
           <p key={item.dataKey} className="text-sm text-[#1B4B8A]">
-            {item.dataKey === "valor" ? "Vendas" : item.dataKey === "media" ? "Media" : "Meta"}: {fmt(item.value)}
+            Vendas: {fmt(item.value)}
           </p>
         ))}
       </div>
@@ -43,7 +40,9 @@ function CustomTooltip({
 }
 
 export function FluxoVendasDiario({ month, year }: FluxoVendasDiarioProps) {
-  const { data = [], isLoading } = useFluxoVendasDiario(month, year)
+  const { data: result, isLoading } = useFluxoVendasDiario(month, year)
+  const data = result?.points ?? []
+  const qtdVendas = result?.qtdVendas ?? 0
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(0)
 
@@ -60,32 +59,34 @@ export function FluxoVendasDiario({ month, year }: FluxoVendasDiarioProps) {
     return () => obs.disconnect()
   }, [])
 
-  // Calcula media de vendas
+  // Calcula media de vendas e ticket medio
   const totalVendas = data.reduce((acc, d) => acc + d.valor, 0)
   const diasComVenda = data.filter((d) => d.valor > 0).length
   const media = diasComVenda > 0 ? totalVendas / diasComVenda : 0
+  const ticketMedio = qtdVendas > 0 ? totalVendas / qtdVendas : 0
 
-  // Adiciona media e meta aos dados
-  const chartData = data.map((d) => ({
-    ...d,
-    media,
-    meta: media, // Meta = media (pode ser customizado)
-  }))
+  const nomeMes = new Date(year, month - 1, 1).toLocaleDateString("pt-BR", { month: "long" })
+  const labelMes = nomeMes.charAt(0).toUpperCase() + nomeMes.slice(1)
 
   return (
     <div className="rounded-xl border border-border bg-card p-6 shadow-sm">
       <div className="mb-6 flex items-center justify-between">
         <h3 className="text-lg font-bold text-card-foreground">Fluxo de vendas diario</h3>
-        <span className="text-sm text-muted-foreground">
-          Media: <span className="font-semibold text-card-foreground">{fmt(media)}</span>
-        </span>
+        <div className="flex flex-col items-end gap-0.5">
+          <span className="text-sm text-muted-foreground">
+            Vendas {labelMes}: <span className="font-semibold text-card-foreground">{fmt(totalVendas)}</span>
+          </span>
+          <span className="text-sm text-muted-foreground">
+            Ticket Médio: <span className="font-semibold text-card-foreground">{fmt(ticketMedio)}</span>
+          </span>
+        </div>
       </div>
 
       <div ref={containerRef} className="h-80">
         {isLoading ? (
           <div className="h-full animate-pulse rounded-lg bg-muted" />
         ) : width > 0 && data.length > 0 ? (
-          <ComposedChart width={width} height={320} data={chartData}>
+          <BarChart width={width} height={320} data={data}>
             <XAxis
               dataKey="dia"
               tick={{ fontSize: 11, fill: "hsl(220,10%,46%)" }}
@@ -99,25 +100,8 @@ export function FluxoVendasDiario({ month, year }: FluxoVendasDiarioProps) {
               tickFormatter={(v) => `${(v / 1000).toFixed(0)}k`}
             />
             <Tooltip content={<CustomTooltip />} />
-            <Legend
-              formatter={(v) =>
-                v === "valor" ? "Vendas Diarias" : v === "media" ? "Media de Vendas" : "Meta Diaria"
-              }
-              iconType="circle"
-              iconSize={8}
-              wrapperStyle={{ fontSize: "12px" }}
-            />
-            <Bar dataKey="valor" fill="#1B4B8A" radius={[2, 2, 0, 0]} maxBarSize={18} />
-            <Line
-              type="monotone"
-              dataKey="media"
-              stroke="#333"
-              strokeDasharray="5 5"
-              dot={false}
-              strokeWidth={1}
-            />
-            <Scatter dataKey="meta" fill="#000" shape="circle" />
-          </ComposedChart>
+            <Bar dataKey="valor" fill="#1B4B8A" radius={[2, 2, 0, 0]} maxBarSize={20} />
+          </BarChart>
         ) : (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             Nenhum dado encontrado para este periodo

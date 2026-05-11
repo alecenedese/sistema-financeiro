@@ -353,47 +353,59 @@ function ClientesPage() {
             </div>
 
             {/* List */}
-            <div className="rounded-xl border border-border bg-card shadow-sm">
-              <div className="grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto] gap-4 border-b border-border px-5 py-3 text-xs font-semibold uppercase text-muted-foreground">
-                <span>Tipo</span>
-                <span>Nome</span>
-                <span>CNPJ / CPF</span>
-                <span>Email</span>
-                <span>Telefone</span>
-                <span>Doc.</span>
-                <span className="text-right">Acoes</span>
+            <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/50">
+                      <th className="w-16 px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">Tipo</th>
+                      <th className="px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">Nome</th>
+                      <th className="w-44 px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">CNPJ / CPF</th>
+                      <th className="w-52 px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">Email</th>
+                      <th className="w-36 px-4 py-3 text-left text-xs font-semibold uppercase text-muted-foreground">Telefone</th>
+                      <th className="w-20 px-4 py-3 text-right text-xs font-semibold uppercase text-muted-foreground">Acoes</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.length === 0 ? (
+                      <tr>
+                        <td colSpan={6} className="px-5 py-10 text-center text-sm text-muted-foreground">
+                          {search ? "Nenhum cliente encontrado." : "Nenhum cliente cadastrado."}
+                        </td>
+                      </tr>
+                    ) : filtered.map((item) => (
+                      <tr key={item.id} className="group border-b border-border last:border-b-0 transition-colors hover:bg-muted/50">
+                        <td className="px-4 py-3">
+                          <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold whitespace-nowrap ${item.tipo_pessoa === "PJ" ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)]" : "bg-[hsl(216,60%,22%)]/10 text-[hsl(216,60%,22%)]"}`}>
+                            {item.tipo_pessoa || "PF"}
+                          </span>
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[hsl(142,71%,40%)]/10">
+                              <Users className="h-4 w-4 text-[hsl(142,71%,40%)]" />
+                            </div>
+                            <span className="font-medium text-card-foreground">{item.nome}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 font-mono text-sm text-muted-foreground whitespace-nowrap">{item.cnpj || item.documento || "-"}</td>
+                        <td className="px-4 py-3 text-sm text-muted-foreground">{item.email || "-"}</td>
+                        <td className="px-4 py-3 text-sm text-muted-foreground whitespace-nowrap">{item.telefone || "-"}</td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100">
+                            <button type="button" onClick={() => openEdit(item)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground">
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                            <button type="button" onClick={() => setDeleteConfirm(item)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive">
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-              {filtered.length === 0 ? (
-                <div className="px-5 py-10 text-center text-sm text-muted-foreground">
-                  {search ? "Nenhum cliente encontrado." : "Nenhum cliente cadastrado."}
-                </div>
-              ) : (
-                filtered.map((item) => (
-                  <div key={item.id} className="group grid grid-cols-[auto_1fr_auto_auto_auto_auto_auto] items-center gap-4 border-b border-border px-5 py-3.5 last:border-b-0 transition-colors hover:bg-muted/50">
-                    <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${item.tipo_pessoa === "PJ" ? "bg-[hsl(142,71%,40%)]/10 text-[hsl(142,71%,40%)]" : "bg-[hsl(216,60%,22%)]/10 text-[hsl(216,60%,22%)]"}`}>
-                      {item.tipo_pessoa || "PF"}
-                    </span>
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[hsl(142,71%,40%)]/10">
-                        <Users className="h-4 w-4 text-[hsl(142,71%,40%)]" />
-                      </div>
-                      <span className="font-medium text-card-foreground">{item.nome}</span>
-                    </div>
-                    <span className="font-mono text-sm text-muted-foreground">{item.cnpj || item.documento || "-"}</span>
-                    <span className="text-sm text-muted-foreground">{item.email || "-"}</span>
-                    <span className="text-sm text-muted-foreground">{item.telefone || "-"}</span>
-                    <span className="text-sm text-muted-foreground">{item.documento || "-"}</span>
-                    <div className="flex items-center justify-end gap-1">
-                      <button type="button" onClick={() => openEdit(item)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground opacity-0 group-hover:opacity-100">
-                        <Pencil className="h-3.5 w-3.5" />
-                      </button>
-                      <button type="button" onClick={() => setDeleteConfirm(item)} className="flex items-center justify-center rounded-lg border border-border p-1.5 text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive opacity-0 group-hover:opacity-100">
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
-                  </div>
-                ))
-              )}
             </div>
           </div>
         </main>

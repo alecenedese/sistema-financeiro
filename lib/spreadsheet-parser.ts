@@ -150,15 +150,15 @@ function mapHeaders(headers: string[]): Record<string, number> {
   }
 
   const aliases: Record<string, string[]> = {
-    data:           ["data", "date", "dt"],
+    data:           ["vencimento", "data", "date", "dt"],
     descricao:      ["descricao", "descr", "histor", "memo", "description"],
     valor:          ["valor", "value", "amount", "vlr"],
     fornecedor:     ["fornecedor", "supplier", "vendor", "favorecido"],
     cliente:        ["cliente", "clientes", "customer", "client"],
-    formaPagamento: ["f pgto", "forma", "pgto", "pagamento", "payment"],
+    formaPagamento: ["forma pagamento", "f pgto", "forma", "pgto", "pagamento", "payment"],
     planoConta:     ["plano de conta", "plano conta", "plano", "categoria", "category", "conta"],
     subcategoria:   ["subcategoria", "subcateg", "sub categoria", "sub"],
-    banco:          ["banco", "bank"],
+    banco:          ["conta bancaria", "banco", "bank"],
   }
 
   headers.forEach((h, i) => {
@@ -317,6 +317,7 @@ export function spreadsheetToOFXTransactions(rows: ParsedSpreadsheetTransaction[
         amount,
         fitId: `SHEET-${dateRaw}-${i}`,
         memo: r.descricao || r.planoConta || "",
+        payee: "", // Em planilhas cliente/fornecedor vem por colunas separadas (_cliente/_fornecedor)
         // Campos extras preservados para pré-preenchimento
         _fornecedor: r.fornecedor,
         _cliente: r.cliente,

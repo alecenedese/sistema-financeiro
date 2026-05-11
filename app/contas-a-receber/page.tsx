@@ -94,14 +94,26 @@ async function recalcularSaldoConta(contaId: number) {
 
 async function fetchContas([, tid]: [string, number | null]): Promise<ContaReceber[]> {
   const supabase = createClient()
-  let q = supabase
-    .from("contas_receber")
-    .select(`*, categorias(nome), subcategorias(nome), subcategorias_filhos(nome), contas_bancarias(nome, tipo), clientes(nome)`)
-    .order("vencimento", { ascending: false })
-  if (tid) q = q.eq("tenant_id", tid)
-  const { data, error } = await q
-  if (error) throw error
-  return (data || []).map((row: Record<string, unknown>) => ({
+  const pageSize = 1000
+  let lastId = 0
+  const allRows: Record<string, unknown>[] = []
+  while (true) {
+    let q = supabase
+      .from("contas_receber")
+      .select(`*, categorias(nome), subcategorias(nome), subcategorias_filhos(nome), contas_bancarias(nome, tipo), clientes(nome)`)
+      .order("id", { ascending: true })
+      .gt("id", lastId)
+      .limit(pageSize)
+    if (tid) q = q.eq("tenant_id", tid)
+    const { data, error } = await q
+    if (error) throw error
+    if (!data || data.length === 0) break
+    allRows.push(...(data as Record<string, unknown>[]))
+    lastId = Number((data[data.length - 1] as { id: number }).id || lastId)
+    if (data.length < pageSize) break
+  }
+  if (typeof window !== "undefined") console.log(`[contas-a-receber] total carregado: ${allRows.length}`)
+  return allRows.map((row: Record<string, unknown>) => ({
     id: row.id as number,
     descricao: row.descricao as string,
     valor: Number(row.valor),
@@ -119,7 +131,7 @@ async function fetchContas([, tid]: [string, number | null]): Promise<ContaReceb
     filho_nome: (row.subcategorias_filhos as Record<string, string> | null)?.nome || "",
     conta_bancaria_nome: (row.contas_bancarias as Record<string, string> | null)?.nome || "",
     cliente_nome: (row.clientes as Record<string, string> | null)?.nome || "",
-  }))
+  })).sort((a, b) => String(b.vencimento).localeCompare(String(a.vencimento)))
 }
 
 async function fetchHierarchy(tid: number | null) {
